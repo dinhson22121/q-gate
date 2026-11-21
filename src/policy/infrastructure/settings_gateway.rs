@@ -119,11 +119,11 @@ mod tests {
         assert!(!snapshot.webhook_configured);
         assert!(snapshot.restart_required.contains(&"output.dir".to_string()));
 
-        let mut over_budget = snapshot.config.clone();
-        set(&mut over_budget, "agents.budget_usd_per_review", json!(99.0));
-        assert!(gateway.validate(&over_budget).unwrap_err().contains("agents.budget_usd_per_review"));
-        set(&mut over_budget, "agents.budget_usd_per_review", json!("lots"));
-        assert!(gateway.validate(&over_budget).unwrap_err().contains("invalid value"));
+        let mut over_parallel = snapshot.config.clone();
+        set(&mut over_parallel, "agents.max_parallel", json!(99));
+        assert!(gateway.validate(&over_parallel).unwrap_err().contains("agents.max_parallel"));
+        set(&mut over_parallel, "agents.max_parallel", json!("lots"));
+        assert!(gateway.validate(&over_parallel).unwrap_err().contains("invalid value"));
         assert!(gateway.validate(&snapshot.config).is_ok());
 
         let set_webhook = [(WEBHOOK_FIELD.to_string(), json!("https://hooks.example/abc"))];

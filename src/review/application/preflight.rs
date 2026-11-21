@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 
 use super::ports::ChangeSource;
 use crate::review::domain::change_set::ChangeSet;
+use crate::review::domain::report::ReviewReport;
 use crate::review::domain::requirements::Requirements;
 
 const CALL_OVERHEAD_CHARS: usize = 14_000;
@@ -111,6 +112,17 @@ impl ReviewPreflight {
         let marker = self.model.usage_limit_marker();
         notes.iter().map(String::as_str).find(|note| note.contains(marker))
     }
+
+    pub fn settle_agent_spend(&self, report: &mut ReviewReport, spent_usd: f64, run_notes: &[String]) -> Result<()> {
+        let Some(agent_report) = report.agents.as_mut() else { return Ok(()) };
+        if let Some(note) = self.usage_limit_note(&agent_report.notes) {
+            return Err(anyhow!("qgate: review aborted, an agent hit the Claude usage limit mid-review ({note})"));
+        }
+        agent_report.cost_usd = Some(spent_usd);
+        agent_report.notes.extend(run_notes.iter().cloned());
+        report.estimated_cost_usd = Some(report.estimated_cost_usd.unwrap_or(0.0) + spent_usd);
+        Ok(())
+    }
 }
 
 fn changed_bytes(changes: &ChangeSet) -> usize {
@@ -125,6 +137,7 @@ fn looks_like_auth_problem(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::review::domain::agent_results::AgentReport;
 
     const MARKER: &str = "Claude usage limit reached";
 
@@ -194,6 +207,50 @@ mod tests {
         assert!(with_arch > plain);
         let with_ticket = subject.estimate_review_tokens(&ReviewScope { has_criteria: true, ..base });
         assert!(with_ticket > plain + subject.model.tokens_for_chars(3 * TEST_SESSION_CHARS) - 1);
+    }
+
+    fn report_with_agent_notes(notes: Vec<String>, estimated_cost_usd: Option<f64>) -> ReviewReport {
+        ReviewReport {
+            agents: Some(AgentReport { notes, ..AgentReport::default() }),
+            estimated_cost_usd,
+            ..ReviewReport::default()
+        }
+    }
+
+    #[test]
+    fn agent_spend_is_added_to_the_agent_report_and_the_review_cost() {
+        let mut report = report_with_agent_notes(vec!["from agents".into()], Some(0.5));
+
+        preflight(Ok(())).settle_agent_spend(&mut report, 1.25, &["design review disabled".to_string()]).unwrap();
+
+        let agents = report.agents.unwrap();
+        assert_eq!(agents.cost_usd, Some(1.25));
+        assert_eq!(agents.notes, ["from agents", "design review disabled"]);
+        assert_eq!(report.estimated_cost_usd, Some(1.75));
+    }
+
+    #[test]
+    fn agent_spend_starts_the_review_cost_when_there_was_none() {
+        let mut report = report_with_agent_notes(Vec::new(), None);
+        preflight(Ok(())).settle_agent_spend(&mut report, 0.4, &[]).unwrap();
+        assert_eq!(report.estimated_cost_usd, Some(0.4));
+    }
+
+    #[test]
+    fn a_usage_limit_note_aborts_the_review_before_any_cost_is_recorded() {
+        let mut report = report_with_agent_notes(vec![format!("test agents failed: {MARKER} (resets 5pm)")], None);
+
+        let error = preflight(Ok(())).settle_agent_spend(&mut report, 1.0, &[]).unwrap_err().to_string();
+
+        assert!(error.contains("usage limit mid-review") && error.contains("resets 5pm"), "{error}");
+        assert_eq!(report.estimated_cost_usd, None);
+    }
+
+    #[test]
+    fn a_report_without_agents_is_left_untouched() {
+        let mut report = ReviewReport::default();
+        preflight(Ok(())).settle_agent_spend(&mut report, 1.0, &[]).unwrap();
+        assert_eq!(report, ReviewReport::default());
     }
 
     #[test]

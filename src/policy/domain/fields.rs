@@ -38,7 +38,6 @@ const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
     ("agents.model", None),
     ("agents.effort", None),
     ("agents.max_parallel", None),
-    ("agents.budget_usd_per_review", None),
     ("agents.ticket_analyst.enabled", None),
     ("agents.ticket_analyst.include_parent_story", None),
     ("agents.ticket_analyst.use_description", None),

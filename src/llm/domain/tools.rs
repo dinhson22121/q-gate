@@ -2,6 +2,8 @@ use std::future::Future;
 
 use serde_json::Value;
 
+use super::usage::Usage;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
     pub name: String,
@@ -42,9 +44,11 @@ pub enum LoopStop {
     MaxTurns,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoopOutcome {
     pub turns: u32,
     pub stop: LoopStop,
     pub final_text: String,
+    pub usage: Usage,
+    pub cost_usd: f64,
 }

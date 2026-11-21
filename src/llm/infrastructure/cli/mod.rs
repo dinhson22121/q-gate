@@ -4,4 +4,4 @@ mod envelope;
 
 pub use client::{CliClient, estimate_input_tokens, tokens_for_chars};
 pub use config::CliConfig;
-pub(crate) use envelope::classify_failure;
+pub(crate) use envelope::{classify_failure, envelope_consumption};

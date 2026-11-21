@@ -1,4 +1,4 @@
-use crate::review::application::ReviewReport;
+use super::ReviewReport;
 use crate::review::domain::agent_results::{AgentReport, TestScenario};
 
 pub const REDACTED: &str = "[REDACTED]";

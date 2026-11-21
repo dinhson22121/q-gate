@@ -7,9 +7,6 @@ use chrono::Utc;
 
 use super::agents::{apply_agent_policy, build_agents, effort_name};
 use super::caching::{ReviewCache, cache_tags, wrap_test_agent};
-use super::commit_snapshots::GitCommitSnapshots;
-use super::redact::redact_report;
-use super::snapshot::{GitScenarioSnapshots, commit_messages, export_commit};
 use super::tickets::{TicketLoad, load_ticket_context};
 use crate::cache::application::NoCacheTrailer;
 use crate::conventions::application::{RulebookStore, repo_key};
@@ -19,6 +16,8 @@ use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
 use crate::history::application::{RecordRun, ReviewRun, RunRepository, RunStatus, Trigger};
 use crate::history::infrastructure::SqliteRunRepository;
 use crate::llm::{CliClient, CliConfig, LlmError, StructuredModel};
+use crate::review::application::redaction::redact_report;
+use crate::review::application::work_in_progress::subject_marks_in_progress;
 use crate::review::application::{
     AgentPlan, AgentRun, CachingCodeReviewer, Requirements, ReviewChanges, ReviewPreflight, ReviewProgress,
     ReviewReport, ReviewSettings, RunSupplementaryChecks, SupplementarySettings, TicketContext,
@@ -26,8 +25,10 @@ use crate::review::application::{
 use crate::review::infrastructure::check_runner::ProcessCheckRunner;
 use crate::review::infrastructure::claude::{ClaudeReviewer, prompt_fingerprint};
 use crate::review::infrastructure::claude_preflight::ClaudePreflight;
+use crate::review::infrastructure::commit_snapshots::GitCommitSnapshots;
 use crate::review::infrastructure::guidelines::load_guidelines;
 use crate::review::infrastructure::local_git::{DiffTarget, LocalGit};
+use crate::review::infrastructure::snapshot::{GitScenarioSnapshots, commit_messages, export_commit};
 use crate::review::infrastructure::tool_checks::{
     GitCommitChanges, QualityTools, RegressionTools, languages_from_settings, rulebook_boundaries,
 };
@@ -128,14 +129,6 @@ pub struct ReviewRequest {
     pub trigger: Trigger,
     pub explicit_ticket: Option<String>,
     pub ticket_in_progress: bool,
-}
-
-fn subject_marks_in_progress(message: &str) -> bool {
-    message
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .is_some_and(|subject| subject.to_ascii_lowercase().starts_with("[wip]"))
 }
 
 pub struct ReviewOutcome {
@@ -304,14 +297,8 @@ impl ReviewPipeline {
             snapshot_root: snapshot.as_ref().map(|s| s.path()),
         });
         let mut report = use_case.execute_with_agents(requirements, ticket.clone(), agent_run, progress).await?;
-        if let (Some(agents), Some(agent_report)) = (&agents, report.agents.as_mut()) {
-            let spent = agents.meter.cost_usd();
-            if let Some(note) = preflight.usage_limit_note(&agent_report.notes) {
-                anyhow::bail!("qgate: review aborted, an agent hit the Claude usage limit mid-review ({note})");
-            }
-            agent_report.cost_usd = Some(spent);
-            agent_report.notes.extend(agents.notes.iter().cloned());
-            report.estimated_cost_usd = Some(report.estimated_cost_usd.unwrap_or(0.0) + spent);
+        if let Some(agents) = &agents {
+            preflight.settle_agent_spend(&mut report, agents.meter.cost_usd(), &agents.notes)?;
         }
         if let Some(snapshot) = snapshot.as_ref() {
             let supplementary = self.supplementary_checks(request, &server, &db, &work_dir, &exec, &cache)?;
@@ -536,18 +523,6 @@ mod tests {
     #[test]
     fn repo_name_is_the_last_path_component() {
         assert_eq!(repo_name(Path::new("/repos/shop-api")), "shop-api");
-    }
-
-    #[test]
-    fn wip_subject_is_detected_case_insensitively_with_leading_whitespace() {
-        assert!(subject_marks_in_progress("[WIP] add cart"));
-        assert!(subject_marks_in_progress("  [wip] add cart"));
-        assert!(subject_marks_in_progress("\n\n[Wip] after blank lines"));
-        assert!(subject_marks_in_progress("[WIP]"));
-        assert!(!subject_marks_in_progress("feat: [WIP] not at the start"));
-        assert!(!subject_marks_in_progress("add cart\n[WIP] in the body"));
-        assert!(!subject_marks_in_progress("WIP: no brackets"));
-        assert!(!subject_marks_in_progress(""));
     }
 
     #[test]

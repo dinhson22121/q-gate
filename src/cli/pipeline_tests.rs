@@ -96,11 +96,17 @@ async fn mock_services() -> MockServer {
     server
 }
 
+fn agents_disabled() -> crate::settings::application::AgentsConfig {
+    let mut agents = crate::settings::application::AgentsConfig::default();
+    agents.enabled = false;
+    agents
+}
+
 fn context(dir: &Path, mock_uri: &str) -> AppContext {
     let store = FileStore::new(dir.join("config/credentials.toml"));
     store_secret(CredentialName::JiraApiToken, "jira-token", &store).unwrap();
     let server = ServerConfig {
-        agents: crate::settings::application::AgentsConfig { enabled: false, ..Default::default() },
+        agents: agents_disabled(),
         jira: JiraConfig {
             enabled: true,
             base_url: mock_uri.to_string(),

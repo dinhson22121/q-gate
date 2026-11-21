@@ -4,8 +4,9 @@
 
 qgate is a local quality gate for your git repositories. It runs on your machine (macOS, Windows or Linux with
 Docker) as **two containers**: `qgate` (holds the secrets, talks to Claude/Jira/Figma, serves the dashboard) and
-`qgate-runner` (runs untrusted code: model-written tests, repository checks, build scripts; no secrets, see
-"Security notes"). It reviews on **`git push`**, not on every local commit: when a watched repository pushes a
+`qgate-runner` (runs untrusted code: model-written tests, repository checks, build scripts; no secrets and no
+`claude`, see "Security notes"). The LLM is the Claude Code CLI on your Claude Max subscription: no Anthropic
+API key. It reviews on **`git push`**, not on every local commit: when a watched repository pushes a
 branch, qgate reviews the whole branch (`merge-base(<base-branch>, head)..head`) and:
 
 - reviews the change with Claude (bugs, security, maintainability, your repo's own guidelines),
@@ -16,6 +17,13 @@ branch, qgate reviews the whole branch (`merge-base(<base-branch>, head)..head`)
 - shows the results on a local dashboard and, optionally, posts them to Slack.
 
 Your repositories are mounted **read-only**: qgate never changes your code.
+
+**LLM via Claude CLI on subscription.** Every agent runs `claude -p` inside the `qgate` container on your Claude Max
+subscription (no API key, no per-token bill, no base URL). A preflight at the start of each review aborts it when the
+usage limit is reached (see "Claude authentication and usage limits").
+
+**Which repositories are watched.** Only repositories you import on the `/repos` page of the dashboard (admin-only)
+are watched. Scanning `repos.roots` automatically (`repos.auto_scan`) is off by default.
 
 ## When a review runs
 
@@ -54,7 +62,7 @@ Requires Docker Desktop (macOS/Windows) or Docker Engine with the Compose plugin
 3. **Log in once:** open the link from `docker compose logs qgate | grep Dashboard`
    (`Dashboard: http://localhost:8080/login?token=...`, or run `docker compose exec qgate qgate login-url`).
    The browser then stays logged in for 30 days; afterwards the dashboard is at <http://localhost:8080>.
-4. **Push** a branch from any repository under `REPOS_PATH` (not main/master): the review appears on the dashboard
+4. **Import** a repository on the `/repos` page (admin), then **push** a branch from it (not main/master): the review appears on the dashboard
    shortly after the push. Local commits alone do not trigger a review.
 
 Useful commands:

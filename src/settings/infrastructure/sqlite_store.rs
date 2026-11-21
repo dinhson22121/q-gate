@@ -159,7 +159,7 @@ mod tests {
     fn round_trip_and_append_only_versions() {
         let (_dir, store) = open();
         let mut config = ServerConfig::default();
-        config.agents.budget_usd_per_review = 1.25;
+        config.agents.max_parallel = 5;
         config.figma.block_on = vec![crate::settings::domain::DesignCheck::Token];
         assert_eq!(store.save_raw(&ServerConfig::default(), "a").unwrap(), 1);
         assert_eq!(store.save_raw(&config, "b").unwrap(), 2);

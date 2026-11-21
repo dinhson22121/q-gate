@@ -3,10 +3,12 @@ pub mod batching;
 pub mod caching_reviewer;
 pub mod ports;
 pub mod preflight;
+pub mod redaction;
 pub mod review_changes;
 pub mod run_agents;
 pub mod supplementary_checks;
 pub mod supplementary_ports;
+pub mod work_in_progress;
 
 pub use crate::review::domain::agent_results::{
     AgentReport, DesignMismatch, DesignMismatchKind, RuleViolation, TestEvidence, TestResult, TestScenario,

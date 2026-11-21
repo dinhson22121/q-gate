@@ -93,12 +93,9 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page.";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "repos", "X-Qgate-Token": TOKEN, Accept: "application/json" };
-  // TODO(multi-repo): the server reports max_repos; to allow several repos raise MAX_IMPORTED_REPOS in
-  // watch::application::manage_repos and reword the banner/"replaces" label here. The list already renders N rows.
   const state = { path: "", imported: [] };
   const $ = (id) => document.getElementById(id);
 
-  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs || {})) {

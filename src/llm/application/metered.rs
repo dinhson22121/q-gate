@@ -27,7 +27,7 @@ impl UsageMeter {
         self.totals.lock().unwrap_or_else(PoisonError::into_inner).cost_usd
     }
 
-    fn record(&self, usage: Usage, cost_usd: f64) {
+    pub fn record(&self, usage: Usage, cost_usd: f64) {
         let mut totals = self.totals.lock().unwrap_or_else(PoisonError::into_inner);
         totals.usage += usage;
         totals.cost_usd += cost_usd;

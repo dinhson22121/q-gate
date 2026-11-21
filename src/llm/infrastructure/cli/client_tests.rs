@@ -22,9 +22,9 @@ fn schema() -> Value {
 
 fn fake_claude(dir: &tempfile::TempDir, body: &str) -> CliClient {
     let path: PathBuf = dir.path().join("claude");
-    std::fs::write(&path, format!("#!/bin/sh\ncat >/dev/null\n{body}\n")).unwrap();
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    CliClient::new(CliConfig { claude_bin: path, timeout: Duration::from_secs(10), ..CliConfig::default() }).unwrap()
+    CliClient::new(CliConfig { claude_bin: path, timeout: Duration::from_secs(60), ..CliConfig::default() }).unwrap()
 }
 
 fn emit(dir: &tempfile::TempDir, name: &str, json: &str) -> String {

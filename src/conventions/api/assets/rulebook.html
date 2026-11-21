@@ -83,7 +83,6 @@ p { margin: 4px 0; }
 <script>
 "use strict";
 (() => {
-  // Per-instance API token injected by the server into this page; required on every change.
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "rulebook", "X-Qgate-Token": TOKEN, Accept: "application/json" };
@@ -96,7 +95,6 @@ p { margin: 4px 0; }
   const state = { repo: "", timer: null };
   const $ = (id) => document.getElementById(id);
 
-  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs || {})) {

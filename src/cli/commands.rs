@@ -9,11 +9,11 @@ use super::args::{AuthAction, OutputFormat, ReposAction, ReviewArgs, SecretKind}
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest};
 use super::render::{DisplayFilter, TerminalView, render_json, render_terminal};
 use super::serve::{REPOS_FILE, repo_source};
-use super::snapshot::resolve_commit;
 use super::{EXIT_GATE_FAILED, EXIT_OK};
 use crate::history::application::Trigger;
 use crate::review::application::ReviewProgress;
 use crate::review::infrastructure::local_git::{DiffTarget, discover_root};
+use crate::review::infrastructure::snapshot::resolve_commit;
 use crate::settings::application::{CredentialName, delete_secret, store_secret};
 use crate::settings::infrastructure::write_template;
 use crate::watch::application::ports::{RepoRegistry, RepoSource};

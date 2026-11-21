@@ -5,7 +5,7 @@ use super::*;
 
 fn settings() -> Value {
     json!({
-        "agents": {"enabled": true, "budget_usd_per_review": 2.0, "tests": {"on_fail": "block"}},
+        "agents": {"enabled": true, "max_parallel": 3, "tests": {"on_fail": "block"}},
         "llm": {"claude_bin": "claude", "timeout_secs": 600},
         "notify": {"webhook_url": ""},
         "watch": {"run_repo_checks": true},
@@ -55,7 +55,7 @@ fn settings_are_allow_listed_typed_and_flagged() {
     let draft = ProposalDraft {
         settings_changes: vec![
             setting("agents.tests.on_fail", "\"warn\""),
-            setting("agents.budget_usd_per_review", "5"),
+            setting("agents.max_parallel", "5"),
             setting("llm.claude_bin", "\"/tmp/evil\""),
             setting("secrets.jira_api_token", "\"sk\""),
             setting("dashboard.bind", "\"0.0.0.0:1\""),
@@ -63,7 +63,7 @@ fn settings_are_allow_listed_typed_and_flagged() {
             setting("agents.enabled", "true"),
             setting("output.enabled", "not json"),
             setting("output.missing", "1"),
-            setting("agents.budget_usd_per_review", "3"),
+            setting("agents.max_parallel", "3"),
             setting("notify.webhook_url", "\"https://hooks.example/t\""),
             setting("notify.webhook_url", "\"\""),
             setting("jira.mcp.command", "[\"sh\"]"),
@@ -72,7 +72,7 @@ fn settings_are_allow_listed_typed_and_flagged() {
     };
     let content = validate_draft(&draft, &context(&settings, &[], None));
     let paths: Vec<&str> = content.settings.iter().map(|c| c.path.as_str()).collect();
-    assert_eq!(paths, ["agents.tests.on_fail", "agents.budget_usd_per_review", "notify.webhook_url"]);
+    assert_eq!(paths, ["agents.tests.on_fail", "agents.max_parallel", "notify.webhook_url"]);
     assert_eq!(content.settings[0].sensitivity, vec![Sensitivity::GateLoosening]);
     assert!(!content.settings[1].is_sensitive());
     assert_eq!(content.settings[2].sensitivity, vec![Sensitivity::Webhook]);
@@ -213,10 +213,7 @@ fn oversized_lists_and_texts_are_capped() {
 fn proposal() -> Proposal {
     let settings = settings();
     let draft = ProposalDraft {
-        settings_changes: vec![
-            setting("agents.tests.on_fail", "\"warn\""),
-            setting("agents.budget_usd_per_review", "5"),
-        ],
+        settings_changes: vec![setting("agents.tests.on_fail", "\"warn\""), setting("agents.max_parallel", "5")],
         rule_changes: vec![rule(RuleAction::Add, "", "No SQL in handlers", &[])],
         ..ProposalDraft::default()
     };

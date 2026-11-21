@@ -83,6 +83,7 @@
     <span class="eyebrow">qgate · kiến trúc và luồng dữ liệu</span>
     <h1>Từ git push tới gate verdict</h1>
     <p>Hai container Docker trên máy dev: <code>qgate</code> (giữ secret, gọi Claude/Jira/Figma, phục vụ dashboard) và <code>qgate-runner</code> (chạy code không tin cậy, không có secret). qgate theo dõi các repo được mount và review khi có <code>git push</code> (không review từng commit local): cả nhánh <code>merge-base(base, head)..head</code> được kiểm bằng check deterministic, quality gate, regression, các agent Claude và AC của ticket Jira. Kết quả, cache và config nằm trong SQLite ở <code>/data</code>. Sau mỗi review, qgate ghi file Markdown + <code>qgate-rules.md</code> cho agent của dev, và (tùy chọn) báo cáo HTML để đính kèm Jira. LLM không tự quyết định pass hay fail.</p>
+    <p><strong>LLM qua Claude CLI trên gói thuê bao:</strong> qgate không dùng Anthropic API (không API key, không base_url, không tính tiền theo token). Mọi agent chạy <code>claude -p</code> trong container <code>qgate</code> bằng gói Claude Max; container <code>qgate-runner</code> không có <code>claude</code> và không có token. Đầu mỗi review qgate gửi một preflight nhỏ; nếu đã hết usage limit thì review dừng và báo "chờ reset" thay vì chạy dở. Repo chỉ được theo dõi sau khi import ở trang <code>/repos</code> (chỉ admin; <code>repos.auto_scan</code> mặc định tắt, nên không tự quét thư mục).</p>
     <div class="legend" aria-label="Chú giải">
       <span><i class="sw live"></i>đã chạy được</span>
             <span><i class="sw store"></i>SQLite /data/qgate.db</span>
@@ -147,7 +148,7 @@
 
         <!-- external -->
         <rect x="760" y="32" width="170" height="40" rx="6" class="box"/>
-        <text x="845" y="57" text-anchor="middle" class="t">Claude API</text>
+        <text x="845" y="57" text-anchor="middle" class="t">Claude CLI (gói Max)</text>
         <rect x="760" y="88" width="170" height="40" rx="6" class="box"/>
         <text x="845" y="113" text-anchor="middle" class="t">Jira REST</text>
         <rect x="760" y="144" width="170" height="40" rx="6" class="box"/>
@@ -217,7 +218,7 @@
         <line x1="670" y1="448" x2="758" y2="448" class="edge" marker-end="url(#m1)"/>
         <text x="714" y="440" text-anchor="middle" class="te">bridge | none</text>
       </svg>
-      <figcaption>Pipeline chỉ chạy khi watcher thấy reflog của <code>refs/remotes/&lt;remote&gt;/*</code> ghi <code>update by push</code> hoặc <code>forced-update</code> (fetch, pull bị bỏ qua), và review cả nhánh <code>merge-base(base, head)..head</code>. Repo chỉ được đọc qua mount <code>:ro</code>; dashboard chỉ publish trên loopback và cần login. Mọi kết nối ra ngoài đều đi từ pipeline trong container <code>qgate</code>, tới các endpoint lấy từ config server. Mã không tin cậy (test do model viết, <code>[[checks]]</code>, build script, quality gate, regression) chỉ chạy trong <code>qgate-runner</code>: không secret, không mount <code>/data</code>, <code>/config</code>, <code>/reviews</code>, <code>/repos</code>, toolchains chỉ đọc, cache riêng. Hai bên chỉ trao đổi snapshot và kết quả qua Unix socket trên volume <code>qgate-work</code>. Mạng của runner đặt bằng <code>QGATE_RUNNER_NETWORK</code> (mặc định <code>bridge</code>, <code>none</code> = offline hoàn toàn).</figcaption>
+      <figcaption>Pipeline chỉ chạy khi watcher thấy reflog của <code>refs/remotes/&lt;remote&gt;/*</code> ghi <code>update by push</code> hoặc <code>forced-update</code> (fetch, pull bị bỏ qua), và review cả nhánh <code>merge-base(base, head)..head</code>. Repo chỉ được đọc qua mount <code>:ro</code>; dashboard chỉ publish trên loopback và cần login. Mọi kết nối ra ngoài đều đi từ pipeline trong container <code>qgate</code>: Claude chạy qua CLI <code>claude</code> trên gói Max (không API key), Jira/Figma/Slack tới các endpoint lấy từ config server. Mã không tin cậy (test do model viết, <code>[[checks]]</code>, build script, quality gate, regression) chỉ chạy trong <code>qgate-runner</code>: không secret, không mount <code>/data</code>, <code>/config</code>, <code>/reviews</code>, <code>/repos</code>, toolchains chỉ đọc, cache riêng. Hai bên chỉ trao đổi snapshot và kết quả qua Unix socket trên volume <code>qgate-work</code>. Mạng của runner đặt bằng <code>QGATE_RUNNER_NETWORK</code> (mặc định <code>bridge</code>, <code>none</code> = offline hoàn toàn).</figcaption>
     </figure>
   </section>
 
@@ -233,7 +234,7 @@
 
         <text x="20" y="22" class="tz">NGUỒN</text>
         <text x="220" y="22" class="tz">CACHE (SQLITE)</text>
-        <text x="430" y="22" class="tz">AGENTS → CLAUDE API</text>
+        <text x="430" y="22" class="tz">AGENTS → CLAUDE CLI (GÓI MAX)</text>
         <text x="670" y="22" class="tz">KIỂM</text>
         <text x="820" y="22" class="tz">ĐẦU RA</text>
 
@@ -434,7 +435,7 @@
     <h2>Ranh giới tin cậy</h2>
     <ul>
       <li><strong>Repo được phép chọn:</strong> model, effort, gate, ignore, <code>[[checks]]</code>, <code>ac_field</code>, danh sách project Jira.</li>
-      <li><strong>Chỉ server (admin) được đặt:</strong> endpoint của Claude, Jira và Figma, lệnh MCP, webhook, <code>watch.base_branch</code> (env <code>QGATE_WATCH_BASE_BRANCH</code>; repo có thể ghi đè trong <code>.qgate.toml</code>). Đặt qua env/config, chỉ đọc trên UI. HTTP redirect bị tắt.</li>
+      <li><strong>Chỉ server (admin) được đặt:</strong> đường dẫn CLI Claude (<code>llm.claude_bin</code>), endpoint của Jira và Figma, lệnh MCP, webhook, <code>watch.base_branch</code> (env <code>QGATE_WATCH_BASE_BRANCH</code>; repo có thể ghi đè trong <code>.qgate.toml</code>). Đặt qua env/config, chỉ đọc trên UI. HTTP redirect bị tắt.</li>
       <li><strong>Dashboard cần login:</strong> token riêng của mỗi instance (<code>docker compose exec qgate qgate login-url</code>, cookie 30 ngày); API ghi còn cần token theo từng request.</li>
       <li><strong>Checks và test agent chạy code của repo</strong> trong container riêng <code>qgate-runner</code> (qua Unix socket trên volume <code>qgate-work</code>): không có secret, không mount <code>/data</code>, <code>/config</code>, <code>/reviews</code>, <code>/repos</code>, toolchains read-only, mạng bridge mặc định (<code>QGATE_RUNNER_NETWORK=none</code> = offline), cache riêng, và không có token login dashboard nên không đọc hay ghi được dashboard. Mỗi scenario test có snapshot riêng. Chỉ watch repo bạn tin tưởng.</li>
     </ul>

@@ -27,7 +27,7 @@ fn draft() -> ProposalDraft {
         settings_changes: vec![
             DraftSetting { path: "agents.tests.on_fail".into(), value_json: "\"block\"".into(), reason: "r".into() },
             DraftSetting { path: "watch.run_repo_checks".into(), value_json: "false".into(), reason: "r".into() },
-            DraftSetting { path: "agents.budget_usd_per_review".into(), value_json: "99".into(), reason: "r".into() },
+            DraftSetting { path: "agents.max_parallel".into(), value_json: "99".into(), reason: "r".into() },
         ],
         rule_changes: vec![DraftRule {
             action: RuleAction::Add,
@@ -103,7 +103,7 @@ async fn propose_validates_the_model_draft_and_stores_a_draft() {
     let paths: Vec<&str> = p.content.settings.iter().map(|c| c.path.as_str()).collect();
     assert_eq!(paths, ["agents.tests.on_fail", "watch.run_repo_checks"]);
     assert_eq!(p.content.settings[1].sensitivity, vec![Sensitivity::RepoChecks, Sensitivity::GateLoosening]);
-    assert!(p.content.rejected.iter().any(|r| r.subject == "agents.budget_usd_per_review" && r.reason.contains("50")));
+    assert!(p.content.rejected.iter().any(|r| r.subject == "agents.max_parallel" && r.reason.contains("8")));
     assert_eq!(p.content.rules.len(), 1);
     assert!(p.content.gate[0].loosening);
     assert!(view.repo_patch.as_deref().unwrap().contains("+fail_on_incomplete = false"));

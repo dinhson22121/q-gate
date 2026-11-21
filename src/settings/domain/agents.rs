@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::legacy::LegacyField;
 use super::validation::{ValidationError, ValidationResult, require_range, require_secure_url};
 
 pub const DEFAULT_AGENT_MODEL: &str = "claude-opus-5-5";
@@ -7,7 +8,6 @@ const MAX_PARALLEL_AGENTS: usize = 8;
 const MAX_SCENARIOS: u32 = 30;
 const MAX_REPAIR_ROUNDS: u32 = 6;
 const MAX_TEST_TIMEOUT_SECS: u64 = 3600;
-const MAX_BUDGET_USD: f64 = 50.0;
 const MAX_REFRESH_DAYS: u32 = 90;
 const MAX_TTL_MINUTES: u32 = 24 * 60;
 
@@ -48,7 +48,8 @@ pub struct AgentsConfig {
     pub model: String,
     pub effort: AgentEffort,
     pub max_parallel: usize,
-    pub budget_usd_per_review: f64,
+    #[serde(default, skip_serializing, rename = "budget_usd_per_review")]
+    legacy_budget: LegacyField,
     pub ticket_analyst: TicketAnalystConfig,
     pub tests: TestAgentConfig,
     pub architecture: ArchitectureConfig,
@@ -61,7 +62,7 @@ impl Default for AgentsConfig {
             model: DEFAULT_AGENT_MODEL.into(),
             effort: AgentEffort::High,
             max_parallel: 3,
-            budget_usd_per_review: 2.0,
+            legacy_budget: LegacyField,
             ticket_analyst: TicketAnalystConfig::default(),
             tests: TestAgentConfig::default(),
             architecture: ArchitectureConfig::default(),
@@ -174,12 +175,6 @@ impl AgentsConfig {
             return Err(ValidationError::new("agents.model", "must not be empty"));
         }
         require_range("agents.max_parallel", self.max_parallel, 1, MAX_PARALLEL_AGENTS)?;
-        if !(self.budget_usd_per_review > 0.0 && self.budget_usd_per_review <= MAX_BUDGET_USD) {
-            return Err(ValidationError::new(
-                "agents.budget_usd_per_review",
-                format!("must be greater than 0 and at most {MAX_BUDGET_USD}"),
-            ));
-        }
         require_range(
             "agents.ticket_analyst.cache_ttl_minutes",
             self.ticket_analyst.cache_ttl_minutes,
@@ -241,6 +236,16 @@ mod tests {
     }
 
     #[test]
+    fn the_retired_dollar_budget_is_tolerated_and_not_written_back() {
+        let config: AgentsConfig =
+            serde_json::from_str(r#"{"budget_usd_per_review": 2.5, "max_parallel": 2}"#).unwrap();
+        assert_eq!(config.max_parallel, 2);
+        assert!(config.validate().is_ok());
+        let written = serde_json::to_string(&config).unwrap();
+        assert!(!written.contains("budget"), "{written}");
+    }
+
+    #[test]
     fn rejects_out_of_range_values() {
         let bad = |f: fn(&mut AgentsConfig)| {
             let mut c = AgentsConfig::default();
@@ -248,7 +253,6 @@ mod tests {
             c.validate().unwrap_err().field
         };
         assert_eq!(bad(|c| c.max_parallel = 0), "agents.max_parallel");
-        assert_eq!(bad(|c| c.budget_usd_per_review = 0.0), "agents.budget_usd_per_review");
         assert_eq!(bad(|c| c.tests.max_scenarios = 99), "agents.tests.max_scenarios");
         assert_eq!(bad(|c| c.tests.languages.clear()), "agents.tests.languages");
         assert_eq!(bad(|c| c.model = " ".into()), "agents.model");

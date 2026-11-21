@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::llm::{
-    ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, SystemBlock, ToolHandler, ToolOutput, ToolSpec,
+    ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, SystemBlock, ToolHandler, ToolOutput, ToolSpec, Usage,
 };
 use crate::testing::domain::classify::RawRun;
 
@@ -50,16 +50,34 @@ impl ToolLoop for ScriptedLoop {
         let mut turns = 0;
         for (name, input) in &self.steps {
             if turns >= limits.max_turns {
-                return Ok(LoopOutcome { turns, stop: LoopStop::MaxTurns, final_text: String::new() });
+                return Ok(LoopOutcome {
+                    turns,
+                    stop: LoopStop::MaxTurns,
+                    final_text: String::new(),
+                    usage: Usage::default(),
+                    cost_usd: 0.0,
+                });
             }
             turns += 1;
             let output = handler.call(name, input.clone()).await;
             self.outputs.lock().unwrap().push(output);
             if handler.finished() {
-                return Ok(LoopOutcome { turns, stop: LoopStop::Finished, final_text: String::new() });
+                return Ok(LoopOutcome {
+                    turns,
+                    stop: LoopStop::Finished,
+                    final_text: String::new(),
+                    usage: Usage::default(),
+                    cost_usd: 0.0,
+                });
             }
         }
-        Ok(LoopOutcome { turns, stop: LoopStop::NoMoreToolCalls, final_text: String::new() })
+        Ok(LoopOutcome {
+            turns,
+            stop: LoopStop::NoMoreToolCalls,
+            final_text: String::new(),
+            usage: Usage::default(),
+            cost_usd: 0.0,
+        })
     }
 }
 

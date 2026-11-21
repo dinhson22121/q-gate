@@ -53,18 +53,27 @@ impl Envelope {
             Some(STOP_MAX_TOKENS) => return Err(LlmError::Truncated),
             _ => {}
         }
+        let (usage, cost_usd) = self.consumption();
         let payload = match self.structured_output {
             Some(value) => value,
             None => Value::String(text),
         };
+        Ok(Answer { payload, usage, cost_usd })
+    }
+
+    fn consumption(&self) -> (Usage, f64) {
         let usage = Usage {
             input_tokens: self.usage.input_tokens,
             output_tokens: self.usage.output_tokens,
             cache_read_tokens: self.usage.cache_read_input_tokens,
             cache_write_tokens: self.usage.cache_creation_input_tokens,
         };
-        Ok(Answer { payload, usage, cost_usd: self.total_cost_usd })
+        (usage, self.total_cost_usd)
     }
+}
+
+pub(crate) fn envelope_consumption(stdout: &str) -> (Usage, f64) {
+    Envelope::parse(stdout).map(|envelope| envelope.consumption()).unwrap_or_default()
 }
 
 pub(crate) fn classify_failure(status: Option<u16>, text: &str) -> LlmError {

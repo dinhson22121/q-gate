@@ -144,6 +144,35 @@ async fn a_model_that_stops_without_a_report_yields_no_more_tool_calls_and_its_t
     assert_eq!(outcome.final_text, "all done");
 }
 
+const BILLED_ENVELOPE: &str = r#"{"type":"result","is_error":false,"result":"done","total_cost_usd":0.42,"usage":{"input_tokens":7,"output_tokens":11,"cache_read_input_tokens":3,"cache_creation_input_tokens":5}}"#;
+
+#[tokio::test]
+async fn the_envelope_usage_and_cost_are_reported_on_the_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = script(dir.path(), &format!("cat >/dev/null; echo '{BILLED_ENVELOPE}'"));
+
+    let outcome =
+        drive(&loop_for(&bin, Duration::from_secs(60)), &Recorder::new("report_result"), LIMITS).await.unwrap();
+
+    let usage = outcome.usage;
+    assert_eq!((usage.input_tokens, usage.output_tokens), (7, 11));
+    assert_eq!((usage.cache_read_tokens, usage.cache_write_tokens), (3, 5));
+    assert!((outcome.cost_usd - 0.42).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn a_finished_session_with_an_envelope_keeps_its_cost() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = format!("cat >/dev/null\n{MCP_CLIENT}\ncall report_result >/dev/null\necho '{BILLED_ENVELOPE}'");
+    let cli = loop_for(&script(dir.path(), &body), Duration::from_secs(60));
+
+    let outcome = drive(&cli, &Recorder::new("report_result"), LIMITS).await.unwrap();
+
+    assert_eq!(outcome.stop, LoopStop::Finished);
+    assert_eq!(outcome.usage.output_tokens, 11);
+    assert!((outcome.cost_usd - 0.42).abs() < f64::EPSILON);
+}
+
 #[tokio::test]
 async fn an_error_result_is_classified_and_usage_limits_are_rate_limited() {
     let dir = tempfile::tempdir().unwrap();

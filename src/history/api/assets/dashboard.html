@@ -156,8 +156,6 @@ p { margin: 4px 0; }
   const state = { offset: 0, total: 0, selected: null };
   const $ = (id) => document.getElementById(id);
 
-  // Builds DOM nodes. Strings and numbers always become text nodes, so untrusted
-  // data (findings quote arbitrary code) is never parsed as HTML.
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs || {})) {
@@ -249,7 +247,6 @@ p { margin: 4px 0; }
       el("td", { class: "num" }, run.criteria_total ? run.criteria_met + "/" + run.criteria_total : "–"));
   }
 
-  // Internal link to the ticket view; plain text for anything that is not a valid key.
   function ticketLink(key) {
     if (!key) return "–";
     if (!TICKET_KEY.test(key)) return key;
@@ -302,7 +299,6 @@ p { margin: 4px 0; }
     return found ? found.text : "";
   }
 
-  // Scenario by id, from the analyst brief or (when the brief is missing) the test evidence.
   function scenarioIndex(agents) {
     const index = new Map();
     if (!agents) return index;
@@ -313,7 +309,6 @@ p { margin: 4px 0; }
 
   const designKey = (d) => (d.kind + ":" + d.node_id).toLowerCase();
 
-  // Each reason is "hard" (always blocks when listed) or "policy" (blocks only if the policy says so).
   function gateReasons(report) {
     const gate = report.gate;
     const agents = report.agents;
@@ -353,8 +348,6 @@ p { margin: 4px 0; }
   function verdictSection(report) {
     const gate = report.gate;
     const reasons = gateReasons(report);
-    // The gate JSON lists reasons, not which ones the policy blocks on: a policy reason is known to
-    // block only when it is the sole kind of reason for a failed gate.
     const policyGroups = new Set(reasons.filter((r) => r.kind === "policy").map((r) => r.group));
     const soleCause = !reasons.some((r) => r.kind === "hard") && policyGroups.size === 1;
     const label = (r) => {
@@ -375,7 +368,7 @@ p { margin: 4px 0; }
     try {
       const parsed = new URL(url);
       if (parsed.protocol === "https:") return el("a", { href: parsed.href, rel: "noopener noreferrer", target: "_blank" }, label);
-    } catch (_) { /* not a URL: show as text */ }
+    } catch (_) { }
     return label;
   }
 
@@ -386,7 +379,6 @@ p { margin: 4px 0; }
     } catch (_) { return null; }
   }
 
-  // Jira link for any key of the same site, derived from the requirements URL (".../browse/KEY").
   function jiraUrl(requirements, key) {
     const base = requirements && requirements.requirements.url && httpsUrl(requirements.requirements.url);
     if (!base || !TICKET_KEY.test(key)) return null;
@@ -460,7 +452,6 @@ p { margin: 4px 0; }
     return section;
   }
 
-  // Shell-style quoting so the displayed command can be pasted as is.
   function shellQuote(arg) {
     return /^[\w@%+=:,./-]+$/.test(arg) ? arg : "'" + arg.replace(/'/g, "'\\''") + "'";
   }
@@ -473,7 +464,6 @@ p { margin: 4px 0; }
     selection.addRange(range);
   }
 
-  // Code block with a Copy button; falls back to selecting the text when the clipboard is unavailable.
   function copyableCode(text, label) {
     const code = el("code", {}, text);
     const button = el("button", { type: "button", "aria-label": "Copy " + label, onclick: async () => {
@@ -635,7 +625,6 @@ p { margin: 4px 0; }
     }
     const byFile = new Map();
     findings.forEach((f, index) => byFile.set(f.file, [...(byFile.get(f.file) || []), { f, index }]));
-    // "Prevent this": opens the Policy assistant with the finding's context pre-filled.
     const withPrevent = ({ f, index }) => {
       const card = findingCard(f);
       card.append(el("p", {}, el("a", { href: "/policy?run=" + encodeURIComponent(runId) + "&finding=" + index }, "Prevent this from happening again →")));
@@ -715,7 +704,6 @@ p { margin: 4px 0; }
   }
 
   function progressDots(history) {
-    // history is newest first; show oldest -> newest.
     return el("span", { class: "progress", "aria-label": "Status per run, oldest first" },
       [...history].reverse().map((p) => el("span", {
         class: "dot " + (CRITERION_CLASS[p.status] || "neutral"),
@@ -759,7 +747,6 @@ p { margin: 4px 0; }
     }
   }
 
-  // Hash routes: #run=<id> and #ticket-<KEY>.
   function route() {
     const run = /^#run=(\d+)$/.exec(location.hash);
     if (run) return selectRun(Number(run[1]));

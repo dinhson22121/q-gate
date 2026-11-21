@@ -40,7 +40,7 @@ impl PolicyModel for FakeModel {
 pub fn default_settings() -> Value {
     json!({
         "agents": {
-            "enabled": true, "budget_usd_per_review": 2.0,
+            "enabled": true, "max_parallel": 3,
             "tests": {"enabled": true, "on_fail": "warn"},
             "architecture": {"on_violation": "warn"}
         },
@@ -85,8 +85,8 @@ impl SettingsGateway for FakeSettings {
     }
 
     fn validate(&self, config: &Value) -> Result<(), String> {
-        if get(config, "agents.budget_usd_per_review").and_then(Value::as_f64).is_some_and(|b| b > 50.0) {
-            return Err("agents.budget_usd_per_review: must be at most 50".into());
+        if get(config, "agents.max_parallel").and_then(Value::as_f64).is_some_and(|b| b > 8.0) {
+            return Err("agents.max_parallel: must be at most 8".into());
         }
         if get(config, "agents.tests.on_fail") == Some(&json!("block"))
             && get(config, "agents.tests.enabled") == Some(&json!(false))

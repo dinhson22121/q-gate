@@ -143,8 +143,6 @@ model = "claude-opus-5-5"
 effort = "high"
 # Sub-agents running at the same time for one review (1-8).
 max_parallel = 3
-# Hard stop for one review's agent spend in USD (up to 50); remaining agents are skipped and reported.
-budget_usd_per_review = 2.0
 
 [agents.ticket_analyst]
 enabled = true

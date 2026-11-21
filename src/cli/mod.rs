@@ -2,17 +2,14 @@ mod agents;
 mod args;
 mod caching;
 mod commands;
-mod commit_snapshots;
 mod doctor;
 mod login;
 mod pipeline;
 mod policy;
-mod redact;
 mod render;
 #[cfg(unix)]
 mod runner;
 mod serve;
-mod snapshot;
 mod tickets;
 
 use std::process::ExitCode;

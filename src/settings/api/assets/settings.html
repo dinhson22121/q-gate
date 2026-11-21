@@ -121,7 +121,6 @@ p { margin: 4px 0; }
 <script>
 "use strict";
 (() => {
-  // Per-instance API token injected by the server into this page; required on every change.
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "settings", "X-Qgate-Token": TOKEN, Accept: "application/json" };
@@ -131,7 +130,6 @@ p { margin: 4px 0; }
   const state = { view: null, chips: {} };
   const $ = (id) => document.getElementById(id);
 
-  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs || {})) {
@@ -159,7 +157,6 @@ p { margin: 4px 0; }
     keys.reduce((o, k) => o[k], obj)[last] = value;
   }
 
-  // ---- field definitions ------------------------------------------------------------------
   const f = (path, label, kind, extra) => Object.assign({ path, label, kind }, extra || {});
   const sub = (title, intro) => ({ sub: title, intro });
   const secret = (name, label) => ({ secret: name, label });
@@ -217,7 +214,6 @@ p { margin: 4px 0; }
       f("agents.model", "Model", "text"),
       f("agents.effort", "Effort", "select", { options: EFFORTS }),
       f("agents.max_parallel", "Agents running in parallel (1-8)", "int"),
-      f("agents.budget_usd_per_review", "Budget per review (USD, up to 50)", "float", { hint: "Remaining agents are skipped and reported once the budget is spent." }),
       sub("Ticket analyst"),
       f("agents.ticket_analyst.enabled", "Analyse the ticket before reviewing", "bool"),
       f("agents.ticket_analyst.include_parent_story", "Include the parent Story and Epic (criteria and design links)", "bool"),
@@ -276,13 +272,10 @@ p { margin: 4px 0; }
   ];
   const FIELDS = SECTIONS.flatMap((s) => s.blocks.filter((b) => b.path));
 
-  // ---- rendering --------------------------------------------------------------------------
   const lockOf = (path) => state.view.locked.find((l) => l.field === path);
   const needsRestart = (path) => state.view.restart_required_fields.includes(path);
-  // Endpoints, commands, the webhook and turning repository checks on are never editable over HTTP.
   const adminOf = (path) => state.view.admin_only.find((a) => a.field === path);
   const RUN_REPO_CHECKS = "watch.run_repo_checks";
-  // Turning repository checks off stays allowed (it only tightens); turning them on is admin-only.
   const isReadOnly = (path, value) => Boolean(lockOf(path)) || (Boolean(adminOf(path)) && !(path === RUN_REPO_CHECKS && value));
   const adminNote = (admin) => el("p", { class: "note muted" }, "Read-only here for security: set " + admin.env_var +
     " in qgate.env (or config/qgate.toml before the first start) and restart qgate.");
@@ -421,11 +414,9 @@ p { margin: 4px 0; }
       el("ul", {}, EVIDENCE.map((item) => el("li", {}, item))));
   }
 
-  // ---- review-file path preview -----------------------------------------------------------
   const OUTPUT_PLACEHOLDERS = ["repo", "branch", "sha7", "sha", "date", "ticket", "status"];
   const OUTPUT_EXAMPLE = { repo: "shop-api", branch: "feature-SHOP-7-pay", sha7: "3f9c2ab", sha: "3f9c2ab7d1e04c5b8a6f9e2d1c0b3a4f5e6d7c8b",
     date: "20261120-143005", ticket: "SHOP-7", status: "failed" };
-  // Mirrors the server rules for a quick hint; the server validates on save.
   function previewTemplate(template) {
     if (!template.endsWith(".md")) return { error: "must end with .md" };
     if (template.startsWith("/") || /[\\:]/.test(template)) return { error: "must be a relative path using /" };
@@ -517,7 +508,6 @@ p { margin: 4px 0; }
     wirePreview();
   }
 
-  // ---- messages ---------------------------------------------------------------------------
   function showError(message) { $("error").textContent = message || ""; $("error").hidden = !message; }
   function setStatus(message) { $("save-status").textContent = message || ""; }
   function showRestart(fields, justSaved) {
@@ -531,7 +521,6 @@ p { margin: 4px 0; }
     for (const node of document.querySelectorAll(".field-error")) { node.textContent = ""; node.hidden = true; }
     for (const node of document.querySelectorAll(".invalid")) node.classList.remove("invalid");
   }
-  // Shows `message` under the field `path` (or its closest parent path); falls back to the banner.
   function showFieldError(path, message) {
     let key = path || "";
     while (key) {
@@ -551,7 +540,6 @@ p { margin: 4px 0; }
     showError((path ? path + ": " : "") + message);
   }
 
-  // ---- requests ---------------------------------------------------------------------------
   async function request(method, path, body) {
     const response = await fetch(path, { method, credentials: "same-origin",
       headers: method === "GET" ? { Accept: "application/json" } : HEADERS, body: body === undefined ? undefined : JSON.stringify(body) });

@@ -24,6 +24,7 @@ use crate::settings::application::{
     TestLanguage as SettingsLanguage,
 };
 use crate::settings::infrastructure::resolve_credential;
+use crate::testing::application::metered_loop::MeteredToolLoop;
 use crate::testing::application::ports::ScenarioSnapshots;
 use crate::testing::infrastructure::CliToolLoop;
 use crate::testing::{ClaudeTestAgent, TestAgentSettings, TestLanguage};
@@ -76,7 +77,8 @@ pub fn build_agents(
         let session = test_session_timeout(&settings);
         match CliToolLoop::new(CliConfig { timeout: session, ..cli.clone() }) {
             Ok(driver) => {
-                suite.tests = Some(Arc::new(ClaudeTestAgent::new(Arc::new(driver), settings, exec, snapshots)));
+                let driver = Arc::new(MeteredToolLoop::new(driver, meter.clone()));
+                suite.tests = Some(Arc::new(ClaudeTestAgent::new(driver, settings, exec, snapshots)));
             }
             Err(e) => notes.push(format!("test agent disabled: {e}")),
         }
@@ -232,8 +234,8 @@ fn mismatch_kind(check: DesignCheck) -> Option<DesignMismatchKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::snapshot::GitScenarioSnapshots;
     use crate::llm::FakeModel;
+    use crate::review::infrastructure::snapshot::GitScenarioSnapshots;
     use crate::sandbox::infrastructure::LocalBackend;
     use crate::settings::infrastructure::FileStore;
 

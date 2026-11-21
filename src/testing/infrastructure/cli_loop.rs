@@ -14,7 +14,8 @@ use tokio::time::Instant;
 
 use super::mcp_bridge::{RunningServer, SERVER_NAME, ToolBridge, ToolCall};
 use crate::llm::{
-    CliConfig, ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, SystemBlock, ToolHandler, ToolSpec,
+    CliConfig, ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, SystemBlock, ToolHandler, ToolSpec, Usage,
+    envelope_consumption,
 };
 use crate::testing::application::ports::ToolLoop;
 
@@ -130,8 +131,8 @@ impl ToolLoop for CliToolLoop {
         let result = parse_result(&stdout);
         let ended = if handler.finished() { Ended::Finished } else { ended };
         match ended {
-            Ended::Finished => Ok(LoopOutcome { turns, stop: LoopStop::Finished, final_text: result.text }),
-            Ended::MaxTurns => Ok(LoopOutcome { turns, stop: LoopStop::MaxTurns, final_text: result.text }),
+            Ended::Finished => Ok(result.outcome(turns, LoopStop::Finished)),
+            Ended::MaxTurns => Ok(result.outcome(turns, LoopStop::MaxTurns)),
             Ended::Timeout => {
                 Err(LlmError::Unavailable(format!("claude did not finish within {:?}", self.config.timeout)))
             }
@@ -215,11 +216,18 @@ struct CliResult {
     api_error_status: Option<u16>,
     #[serde(skip)]
     parsed: bool,
+    #[serde(skip)]
+    usage: Usage,
+    #[serde(skip)]
+    cost_usd: f64,
 }
 
 fn parse_result(stdout: &str) -> CliResult {
     match serde_json::from_str::<Value>(stdout.trim()).and_then(serde_json::from_value::<CliResult>) {
-        Ok(result) => CliResult { parsed: true, ..result },
+        Ok(result) => {
+            let (usage, cost_usd) = envelope_consumption(stdout);
+            CliResult { parsed: true, usage, cost_usd, ..result }
+        }
         Err(_) => CliResult::default(),
     }
 }
@@ -232,7 +240,11 @@ impl CliResult {
         if self.is_error {
             return Err(crate::llm::classify_cli_failure(self.api_error_status, &self.text));
         }
-        Ok(LoopOutcome { turns, stop: LoopStop::NoMoreToolCalls, final_text: self.text })
+        Ok(self.outcome(turns, LoopStop::NoMoreToolCalls))
+    }
+
+    fn outcome(self, turns: u32, stop: LoopStop) -> LoopOutcome {
+        LoopOutcome { turns, stop, final_text: self.text, usage: self.usage, cost_usd: self.cost_usd }
     }
 }
 
