@@ -18,6 +18,31 @@ impl GitRepoInspector {
     }
 }
 
+/// Name of the repository's configuration file, read at a commit.
+const CONFIG_FILE: &str = ".qgate.toml";
+
+/// Only the part of `.qgate.toml` the watcher needs; unknown keys are the review pipeline's business.
+#[derive(Debug, Default, serde::Deserialize)]
+struct RepoWatchSection {
+    #[serde(default)]
+    watch: BaseBranchSection,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct BaseBranchSection {
+    #[serde(default)]
+    base_branch: String,
+}
+
+/// The repository's `watch.base_branch`, `None` when absent, empty, malformed or not a safe branch name
+/// (no leading '-', whitespace or control characters: it ends up as a git argument).
+fn parse_base_branch(config_toml: &str) -> Option<String> {
+    let parsed: RepoWatchSection = toml::from_str(config_toml).ok()?;
+    let name = parsed.watch.base_branch.trim();
+    let unsafe_name = name.starts_with('-') || name.chars().any(|c| c.is_whitespace() || c.is_control());
+    (!name.is_empty() && !unsafe_name).then(|| name.to_owned())
+}
+
 /// Parses one `%(refname)\x1f%(objectname)` line into `(branch, sha)`, stripping the remote prefix
 /// and skipping the symbolic `<remote>/HEAD`.
 fn parse_ref_line<'a>(line: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
@@ -84,6 +109,12 @@ impl RepoInspector for GitRepoInspector {
         }
         Err(failure(&args, &output))
     }
+
+    async fn repo_base_branch(&self, repo: &Path, rev: &str) -> Option<String> {
+        let object = format!("{rev}:{CONFIG_FILE}");
+        let output = run_git(repo, &["show", &object]).await.ok().filter(|o| o.status.success())?;
+        parse_base_branch(&String::from_utf8_lossy(&output.stdout))
+    }
 }
 
 #[cfg(test)]
@@ -96,6 +127,40 @@ mod tests {
         let inspector = GitRepoInspector::new();
         let entry = inspector.ref_reflog(repo, &format!("refs/remotes/origin/{branch}")).await.unwrap();
         classify_ref_move(entry.as_ref(), chrono::Utc::now().timestamp(), DEFAULT_MAX_COMMIT_AGE)
+    }
+
+    #[test]
+    fn repo_base_branch_is_parsed_and_unsafe_values_are_ignored() {
+        assert_eq!(parse_base_branch("[watch]\nbase_branch = \"develop\"\n"), Some("develop".into()));
+        assert_eq!(
+            parse_base_branch("[watch]\nbase_branch = \" release/1 \"\nenabled = true\n[gate]\nx=1"),
+            Some("release/1".into())
+        );
+        for none in [
+            "",
+            "[watch]\nenabled = false",
+            "[watch]\nbase_branch = \"\"",
+            "[watch]\nbase_branch = \"--force\"",
+            "[watch]\nbase_branch = \"a b\"",
+            "[watch]\nbase_branch = 3",
+            "not toml [",
+        ] {
+            assert_eq!(parse_base_branch(none), None, "{none}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reads_the_base_branch_from_the_config_at_the_given_commit_only() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let before = commit(dir.path(), "no config");
+        std::fs::write(dir.path().join(CONFIG_FILE), "[watch]\nbase_branch = \"develop\"\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        let after = commit(dir.path(), "with config");
+        let inspector = GitRepoInspector::new();
+        assert_eq!(inspector.repo_base_branch(dir.path(), &before).await, None);
+        assert_eq!(inspector.repo_base_branch(dir.path(), &after).await, Some("develop".into()));
+        assert_eq!(inspector.repo_base_branch(dir.path(), "nonexistent").await, None);
     }
 
     #[test]

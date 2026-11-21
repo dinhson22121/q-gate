@@ -259,6 +259,10 @@ p { margin: 4px 0; }
     { id: "watch", title: "Watcher & checks", blocks: [
       f("watch.run_repo_checks", "Run the [[checks]] commands from each repository's .qgate.toml", "bool", {
         warn: "These are commands chosen by whoever can push to the repository, executed inside the container. Turn this off if the mounted folder contains code you do not trust." }),
+      f("quality.enabled", "Run quality tools (secret scan, dependency vulnerabilities, linters, import boundaries)", "bool", {
+        hint: "Best effort: a missing tool becomes a note, never a failed review." }),
+      f("regression.enabled", "Detect regressions (re-run the repository's Go tests on the base commit and on this one)", "bool", {
+        hint: "The base commit's results are cached, so later pushes of a branch skip re-running them." }),
       f("watch.poll_interval_secs", "Poll interval (seconds)", "int"),
       f("watch.max_concurrent_reviews", "Reviews running at the same time (1-16)", "int"),
     ] },

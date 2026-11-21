@@ -109,6 +109,14 @@ remote = "origin"
 # Empty = auto-resolve <remote>/main then <remote>/master. Admin-only (QGATE_WATCH_BASE_BRANCH).
 base_branch = ""
 
+[quality]
+# Best-effort quality tools (secret scan, dependency vulnerabilities, linters) on every review. Env: QGATE_QUALITY_ENABLED.
+enabled = true
+
+[regression]
+# Re-run the repository's tests on the base commit to flag newly failing tests. Env: QGATE_REGRESSION_ENABLED.
+enabled = true
+
 [llm]
 # Anthropic API endpoint. Must be https://, except http://localhost or http://127.0.0.1 (local proxy).
 # Server-only: it receives the API key and the reviewed code, so repositories cannot change it.

@@ -21,6 +21,7 @@ use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta
 use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
 use crate::history::application::{RecordRun, ReviewRun, RunRepository, RunStatus, Trigger};
 use crate::history::infrastructure::SqliteRunRepository;
+use crate::impact::application::BaseRunStore;
 use crate::quality::{ImportBoundary, Language};
 use crate::review::application::ports::ChangeSource;
 use crate::review::application::{
@@ -150,6 +151,7 @@ struct ToolPrep<'a> {
     exec: Arc<dyn ExecBackend>,
     work_dir: &'a Path,
     head: &'a Path,
+    base_runs: Option<Arc<dyn BaseRunStore>>,
 }
 
 /// Head sha, base sha (the range base, or the commit's parent; `None` for a root commit) and the changes.
@@ -318,7 +320,15 @@ impl ReviewPipeline {
             report.estimated_cost_usd = Some(report.estimated_cost_usd.unwrap_or(0.0) + spent);
         }
         if let Some(snapshot) = snapshot.as_ref() {
-            let prep = ToolPrep { request, server: &server, db: &db, exec, work_dir: &work_dir, head: snapshot.path() };
+            let prep = ToolPrep {
+                request,
+                server: &server,
+                db: &db,
+                exec,
+                work_dir: &work_dir,
+                head: snapshot.path(),
+                base_runs: cache.base_runs(),
+            };
             let outcome = self.tool_outcome(prep).await;
             let acceptance =
                 GatePolicy { fail_on_unmet_criteria: policy.fail_on_unmet_criteria && !in_progress, ..policy };
@@ -342,7 +352,8 @@ impl ReviewPipeline {
         };
         let languages = quality_languages(&prep.server.agents.tests.languages);
         let mut notes = Vec::new();
-        let base_snapshot = match (&base_sha, languages.contains(&Language::Go)) {
+        let regression_on = prep.server.regression.enabled;
+        let base_snapshot = match (&base_sha, regression_on && languages.contains(&Language::Go)) {
             (Some(base), true) => export_commit(root, base, prep.work_dir)
                 .await
                 .map_err(|e| notes.push(format!("regression check skipped: cannot export the base commit: {e:#}")))
@@ -359,8 +370,9 @@ impl ReviewPipeline {
             languages,
             boundaries: self.boundaries(root, prep.db, prep.server),
             toolchains: discover_toolchains(),
-            quality_enabled: true,
-            regression_enabled: base_snapshot.is_some() || notes.is_empty(),
+            quality_enabled: prep.server.quality.enabled,
+            regression_enabled: regression_on && (base_snapshot.is_some() || notes.is_empty()),
+            base_runs: prep.base_runs,
         };
         let mut outcome = checks.run().await;
         notes.extend(outcome.notes);

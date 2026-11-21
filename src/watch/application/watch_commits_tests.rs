@@ -33,6 +33,8 @@ struct InspectorState {
     merge_bases: HashMap<(PathBuf, String, String), Option<String>>,
     fail_refs: HashSet<PathBuf>,
     fail_reflog: HashSet<PathBuf>,
+    /// `.qgate.toml` `watch.base_branch` per `(repo, commit)` it is read at.
+    repo_bases: HashMap<(PathBuf, String), String>,
 }
 
 #[derive(Clone, Default)]
@@ -128,6 +130,10 @@ impl RepoInspector for FakeInspector {
             return Err(WatchError::Git("index.lock exists".into()));
         }
         Ok(state.reflog.get(&(repo.to_path_buf(), branch_of(ref_name))).cloned())
+    }
+
+    async fn repo_base_branch(&self, repo: &Path, rev: &str) -> Option<String> {
+        self.0.lock().unwrap().repo_bases.get(&(repo.to_path_buf(), rev.to_owned())).cloned()
     }
 
     async fn merge_base(&self, repo: &Path, a: &str, b: &str) -> Result<Option<String>, WatchError> {
@@ -506,6 +512,51 @@ async fn a_configured_base_branch_is_skipped_and_used_as_base() {
     fx.inspector.set_merge_base("/a", "dev1", "c1", Some("devbase"));
     wait_until("review", || fx.notifier.titles().len() == 1).await;
     assert_eq!(fx.reviewer.reviews(), vec![review("feature", Some("devbase"), "c1")]);
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_repo_base_branch_wins_over_the_server_setting_and_the_default() {
+    let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
+    fx.inspector.push("/a", "develop", "dev1");
+    // Declared in the repo's config at the tip of the server-configured base ("release"), not at the push.
+    fx.inspector.push("/a", "release", "rel1");
+    fx.inspector.0.lock().unwrap().repo_bases.insert((PathBuf::from("/a"), "rel1".into()), "develop".into());
+    let running = fx.start(WatchConfig { base_branch: "release".into(), ..config() });
+    settle().await;
+
+    fx.inspector.push("/a", "feature", "c1");
+    fx.inspector.set_merge_base("/a", "dev1", "c1", Some("devbase"));
+    wait_until("review", || fx.notifier.titles().len() == 1).await;
+    assert_eq!(fx.reviewer.reviews(), vec![review("feature", Some("devbase"), "c1")], "repo override wins");
+
+    fx.inspector.push("/a", "develop", "dev2");
+    settle().await;
+    assert_eq!(fx.reviewer.calls().len(), 1, "a push to the overriding base branch is not reviewed");
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn without_a_repo_base_branch_the_server_setting_then_the_default_apply() {
+    let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
+    let running = fx.started().await;
+    fx.inspector.push("/a", "feature", "c1");
+    fx.inspector.set_merge_base("/a", MAIN_SHA, "c1", Some("mainbase"));
+    wait_until("review", || fx.notifier.titles().len() == 1).await;
+    assert_eq!(fx.reviewer.reviews(), vec![review("feature", Some("mainbase"), "c1")], "default main/master");
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_pushed_commit_cannot_choose_its_own_base_branch() {
+    let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
+    let running = fx.started().await;
+    // The override is only visible at the pushed commit "c1": it must not be consulted.
+    fx.inspector.0.lock().unwrap().repo_bases.insert((PathBuf::from("/a"), "c1".into()), "feature".into());
+    fx.inspector.push("/a", "feature", "c1");
+    fx.inspector.set_merge_base("/a", MAIN_SHA, "c1", Some("mainbase"));
+    wait_until("review", || fx.notifier.titles().len() == 1).await;
+    assert_eq!(fx.reviewer.reviews(), vec![review("feature", Some("mainbase"), "c1")]);
     running.stop().await;
 }
 

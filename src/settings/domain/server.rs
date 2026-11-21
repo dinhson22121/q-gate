@@ -39,6 +39,8 @@ pub const ENV_FIGMA_API_BASE_URL: &str = "QGATE_FIGMA_API_BASE_URL";
 pub const ENV_FIGMA_MCP_URL: &str = "QGATE_FIGMA_MCP_URL";
 pub const ENV_RUN_REPO_CHECKS: &str = "QGATE_RUN_REPO_CHECKS";
 pub const ENV_WATCH_BASE_BRANCH: &str = "QGATE_WATCH_BASE_BRANCH";
+pub const ENV_QUALITY_ENABLED: &str = "QGATE_QUALITY_ENABLED";
+pub const ENV_REGRESSION_ENABLED: &str = "QGATE_REGRESSION_ENABLED";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -159,7 +161,7 @@ impl ServerWatchConfig {
 
 /// A git remote or branch name: no whitespace, control characters or leading '-'. `allow_empty`
 /// permits "" (used for `watch.base_branch`, where empty means auto-resolve).
-fn require_ref_token(field: &str, value: &str, allow_empty: bool) -> ValidationResult {
+pub(super) fn require_ref_token(field: &str, value: &str, allow_empty: bool) -> ValidationResult {
     if value.is_empty() {
         return if allow_empty { Ok(()) } else { Err(ValidationError::new(field, "must not be empty")) };
     }
@@ -167,6 +169,32 @@ fn require_ref_token(field: &str, value: &str, allow_empty: bool) -> ValidationR
         return Err(ValidationError::new(field, "must not start with '-' or contain whitespace or control characters"));
     }
     Ok(())
+}
+
+/// Best-effort quality tools (gitleaks, osv-scanner, golangci-lint, govulncheck...) run on every review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QualityConfig {
+    pub enabled: bool,
+}
+
+impl Default for QualityConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Regression detection: re-runs the repository's tests on the base commit to find newly failing tests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RegressionConfig {
+    pub enabled: bool,
+}
+
+impl Default for RegressionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// Anthropic API connection. Only the server config may set it: the endpoint receives the API key and
@@ -198,6 +226,8 @@ pub struct ServerConfig {
     pub repos: ReposConfig,
     pub notify: NotifyConfig,
     pub watch: ServerWatchConfig,
+    pub quality: QualityConfig,
+    pub regression: RegressionConfig,
     pub llm: ServerLlmConfig,
     /// Default Jira settings for repositories that do not set them.
     pub jira: JiraConfig,
@@ -246,7 +276,7 @@ impl std::fmt::Debug for EnvOverride {
 }
 
 /// The single source of truth for env overrides: used both to apply them and to lock the fields they set.
-pub const ENV_OVERRIDES: [EnvOverride; 14] = [
+pub const ENV_OVERRIDES: [EnvOverride; 16] = [
     EnvOverride { env_var: ENV_BIND, field: "dashboard.bind", apply: |c, v| c.dashboard.bind = v.into() },
     EnvOverride { env_var: ENV_REPOS_ROOT, field: "repos.roots", apply: |c, v| c.repos.roots = split_list(v) },
     EnvOverride {
@@ -284,6 +314,16 @@ pub const ENV_OVERRIDES: [EnvOverride; 14] = [
         env_var: ENV_WATCH_BASE_BRANCH,
         field: "watch.base_branch",
         apply: |c, v| c.watch.base_branch = v.into(),
+    },
+    EnvOverride {
+        env_var: ENV_QUALITY_ENABLED,
+        field: "quality.enabled",
+        apply: |c, v| c.quality.enabled = parse_flag(v),
+    },
+    EnvOverride {
+        env_var: ENV_REGRESSION_ENABLED,
+        field: "regression.enabled",
+        apply: |c, v| c.regression.enabled = parse_flag(v),
     },
 ];
 
@@ -387,6 +427,17 @@ mod tests {
     }
 
     #[test]
+    fn quality_and_regression_default_on_and_env_overrides_turn_them_off() {
+        let defaults = ServerConfig::default();
+        assert!(defaults.quality.enabled && defaults.regression.enabled);
+        let off = ServerConfig::default()
+            .with_env_overrides(env(&[(ENV_QUALITY_ENABLED, "false"), (ENV_REGRESSION_ENABLED, "0")]));
+        assert!(!off.quality.enabled && !off.regression.enabled);
+        let on = off.with_env_overrides(env(&[(ENV_QUALITY_ENABLED, "true")]));
+        assert!(on.quality.enabled && !on.regression.enabled);
+    }
+
+    #[test]
     fn empty_env_values_are_ignored() {
         let config = ServerConfig::default().with_env_overrides(env(&[(ENV_BIND, "  ")]));
         assert_eq!(config, ServerConfig::default());
@@ -460,7 +511,7 @@ mod tests {
             ("jira.email", ENV_JIRA_EMAIL, "a@b.c")
         );
         assert!(format!("{:?}", active[0].0).contains("jira.email"));
-        assert_eq!(ENV_OVERRIDES.len(), 14);
+        assert_eq!(ENV_OVERRIDES.len(), 16);
     }
 
     #[test]

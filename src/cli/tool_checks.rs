@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use super::tool_findings::{quality_finding_to_finding, regression_to_finding};
 use crate::conventions::application::{Rule, RuleStatus, Rulebook};
-use crate::impact::application::{DEFAULT_MAX_PACKAGES, DetectRegressions, DetectRequest};
-use crate::impact::infrastructure::GoCli;
+use crate::impact::application::{BaseRunStore, DEFAULT_MAX_PACKAGES, DetectRegressions, DetectRequest};
+use crate::impact::domain::Regression;
+use crate::impact::infrastructure::{GoCli, locate_test, package_rel_dir};
 use crate::quality::domain::parse_boundary_directives;
 use crate::quality::{ChangedFile, ImportBoundary, Language, QualityConfig, QualityRequest, ToolchainPaths};
 use crate::review::domain::agent_results::AgentReport;
@@ -37,6 +38,8 @@ pub struct ToolChecks<'a> {
     pub toolchains: ToolchainPaths,
     pub quality_enabled: bool,
     pub regression_enabled: bool,
+    /// Where base-commit test runs are cached; `None` (a `no-cache` push, no cache database) always re-runs them.
+    pub base_runs: Option<Arc<dyn BaseRunStore>>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -89,9 +92,22 @@ impl ToolChecks<'_> {
             changed_files,
             max_packages: DEFAULT_MAX_PACKAGES,
         };
-        let report = DetectRegressions::new(Arc::new(GoCli::new(self.exec.clone()))).execute(&request).await;
-        outcome.findings.extend(report.regressions.iter().map(regression_to_finding));
+        let mut detect = DetectRegressions::new(Arc::new(GoCli::new(self.exec.clone())));
+        if let Some(store) = &self.base_runs {
+            detect = detect.with_base_store(store.clone());
+        }
+        let report = detect.execute(&request).await;
+        let findings = report.regressions.iter().map(|r| regression_to_finding(r, self.regression_location(r)));
+        outcome.findings.extend(findings);
         outcome.notes.extend(report.notes);
+    }
+
+    /// The failing test's file and line in the head snapshot; for a package-level failure its directory.
+    fn regression_location(&self, regression: &Regression) -> Option<(String, u32)> {
+        locate_test(self.head_snapshot, &regression.package, &regression.test).or_else(|| {
+            let dir = package_rel_dir(self.head_snapshot, &regression.package)?;
+            Some((if dir.is_empty() { ".".to_string() } else { dir }, 1))
+        })
     }
 }
 
@@ -278,6 +294,7 @@ mod tests {
             toolchains: ToolchainPaths::default(),
             quality_enabled: true,
             regression_enabled: true,
+            base_runs: None,
         }
     }
 
@@ -303,6 +320,23 @@ mod tests {
         let mut off = checks(head.path(), None);
         (off.quality_enabled, off.regression_enabled) = (false, false);
         assert_eq!(off.run().await, ToolOutcome::default());
+    }
+
+    #[test]
+    fn regression_location_prefers_the_test_file_then_the_package_directory() {
+        let head = tempfile::tempdir().unwrap();
+        std::fs::write(head.path().join("go.mod"), "module example.com/shop\n").unwrap();
+        std::fs::create_dir_all(head.path().join("cart")).unwrap();
+        std::fs::write(head.path().join("cart/cart_test.go"), "package cart\n\nfunc TestTotal(t *testing.T) {}\n")
+            .unwrap();
+        let checks = checks(head.path(), None);
+        let test = Regression::new("example.com/shop/cart", "TestTotal/sub", String::new());
+        assert_eq!(checks.regression_location(&test), Some(("cart/cart_test.go".into(), 3)));
+        let package = Regression::new("example.com/shop/cart", "", String::new());
+        assert_eq!(checks.regression_location(&package), Some(("cart".into(), 1)));
+        let root = Regression::new("example.com/shop", "", String::new());
+        assert_eq!(checks.regression_location(&root), Some((".".into(), 1)));
+        assert_eq!(checks.regression_location(&Regression::new("other/pkg", "TestX", String::new())), None);
     }
 
     fn report_with(findings: Vec<Finding>) -> ReviewReport {

@@ -53,6 +53,16 @@ fail_or_continue() {
 }
 
 mapfile -t toolchains < <(requested_toolchains)
+# The quality checks (secret scan, dependency vulnerabilities) are on by default (server setting quality.enabled), so
+# their tools are installed even when an older qgate.env lists only languages (QGATE_TOOLCHAINS=go,java).
+# Opt out with QGATE_GITLEAKS_VERSION=none / QGATE_OSV_SCANNER_VERSION=none, or QGATE_TOOLCHAINS=none.
+# Not applied with --strict (image builds install exactly QGATE_PREINSTALL).
+raw_toolchains="$(printf '%s' "${QGATE_TOOLCHAINS-$DEFAULT_TOOLCHAINS}" | tr '[:upper:]' '[:lower:]')"
+if [[ ${#toolchains[@]} -gt 0 && "$strict" != true && " ${toolchains[*]} " != *" quality "* ]] \
+  && [[ ",${raw_toolchains// /}," != *",none,"* ]]; then
+  qg_log "adding 'quality' (gitleaks, osv-scanner) to QGATE_TOOLCHAINS='${QGATE_TOOLCHAINS-}'; set QGATE_GITLEAKS_VERSION=none and QGATE_OSV_SCANNER_VERSION=none to skip them"
+  toolchains+=(quality)
+fi
 if [[ ${#toolchains[@]} -eq 0 ]]; then
   qg_log "no toolchains requested (QGATE_TOOLCHAINS='${QGATE_TOOLCHAINS-}')"
   exit 0

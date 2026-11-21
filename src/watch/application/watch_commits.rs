@@ -232,6 +232,17 @@ where
         events
     }
 
+    /// `watch.base_branch` from the repository's `.qgate.toml` at the tip of `default_base`, if it declares one.
+    async fn repo_override(
+        &self,
+        repo: &WatchedRepo,
+        default_base: Option<&str>,
+        refs: &[(String, String)],
+    ) -> Option<String> {
+        let trusted_tip = refs.iter().find(|(b, _)| Some(b.as_str()) == default_base).map(|(_, sha)| sha)?;
+        self.inspector.repo_base_branch(&repo.path, trusted_tip).await
+    }
+
     /// Decides what to do with a moved ref. A `(repo, branch, sha)` is remembered as handled only
     /// once the answer is definitive; inspection errors ask for a retry.
     async fn examine_push(
@@ -247,10 +258,19 @@ where
         }
         let label = format!("{} {branch}", repo.path.display());
         let branch_names: Vec<String> = refs.iter().map(|(b, _)| b.clone()).collect();
-        let base_branch = resolve_base_branch(&branch_names, &self.config.base_branch);
-        if base_branch.as_deref() == Some(branch) {
+        let default_base = resolve_base_branch(&branch_names, &self.config.base_branch);
+        if default_base.as_deref() == Some(branch) {
             state.recent.insert(repo.path, branch.to_owned(), sha.to_owned());
             return Move::Skip; // never review a push to the base branch
+        }
+        // The repository's own base branch wins; it is read from the default base's tip (trusted), not from the push.
+        let base_branch = match self.repo_override(&repo, default_base.as_deref(), refs).await {
+            Some(own) => Some(own),
+            None => default_base,
+        };
+        if base_branch.as_deref() == Some(branch) {
+            state.recent.insert(repo.path, branch.to_owned(), sha.to_owned());
+            return Move::Skip;
         }
 
         let full_ref = format!("refs/remotes/{}/{branch}", self.config.remote);

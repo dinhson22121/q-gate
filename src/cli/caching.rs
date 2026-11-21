@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use crate::cache::application::{CacheError, CacheTags, ContentIds, ContentKey, ResultCache};
 use crate::cache::infrastructure::SqliteResultCache;
+use crate::impact::application::BaseRunStore;
+use crate::impact::infrastructure::CachedBaseRuns;
 use crate::review::application::AgentSuite;
 use crate::testing::CachingTestAgent;
 
@@ -27,6 +29,13 @@ impl ReviewCache {
                 Self { cache: Arc::new(UnavailableCache), no_cache: true }
             }
         }
+    }
+}
+
+impl ReviewCache {
+    /// Store for the base commit's test run; `None` when caching is bypassed so the base tests always re-run.
+    pub fn base_runs(&self) -> Option<Arc<dyn BaseRunStore>> {
+        (!self.no_cache).then(|| Arc::new(CachedBaseRuns::new(self.cache.clone())) as Arc<dyn BaseRunStore>)
     }
 }
 
@@ -159,6 +168,19 @@ mod tests {
         let key = ContentKey::new("k", 1);
         assert_eq!(cache.cache.get(&key).unwrap(), None);
         assert!(cache.cache.put(&key, b"x").is_ok());
+    }
+
+    #[test]
+    fn base_run_store_is_attached_unless_the_cache_is_bypassed() {
+        use crate::impact::application::BaseRunKey;
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("c.db");
+        let key = BaseRunKey { base_sha: "a".repeat(40), packages: vec!["m/a".into()] };
+        let store = ReviewCache::open(&db, false).base_runs().expect("cache on: store attached");
+        store.put(&key, &Default::default());
+        assert!(store.get(&key).is_some());
+        assert!(ReviewCache::open(&db, true).base_runs().is_none(), "no-cache trailer bypasses the store");
+        assert!(ReviewCache::open(dir.path(), false).base_runs().is_none(), "unavailable cache bypasses the store");
     }
 
     #[test]

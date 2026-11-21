@@ -440,3 +440,34 @@ fn settings_html_renders_admin_only_fields_read_only() {
         assert!(html.contains(needle), "settings page must contain {needle}");
     }
 }
+
+#[test]
+fn settings_html_has_the_quality_and_regression_toggles() {
+    let html = include_str!("assets/settings.html");
+    for needle in ["f(\"quality.enabled\"", "f(\"regression.enabled\"", "\"bool\""] {
+        assert!(html.contains(needle), "settings page must contain {needle}");
+    }
+}
+
+#[tokio::test]
+async fn quality_and_regression_toggles_default_on_save_over_http_and_lock_to_env() {
+    let server = TestServer::start(&[]).await;
+    let mut config = server.settings().await["config"].clone();
+    assert_eq!((&config["quality"]["enabled"], &config["regression"]["enabled"]), (&json!(true), &json!(true)));
+    config["quality"]["enabled"] = json!(false);
+    config["regression"]["enabled"] = json!(false);
+    let (status, text) = server.put_config(json!({ "config": config })).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    let saved = server.store.load_raw().unwrap().unwrap();
+    assert!(!saved.quality.enabled && !saved.regression.enabled);
+    let mut config = server.settings().await["config"].clone();
+    config["quality"]["enabled"] = json!(true);
+    let (status, text) = server.put_config(json!({ "config": config })).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(server.store.load_raw().unwrap().unwrap().quality.enabled);
+
+    let locked = TestServer::start(&[("QGATE_REGRESSION_ENABLED", "false")]).await;
+    let settings = locked.settings().await;
+    assert_eq!(settings["config"]["regression"]["enabled"], json!(false));
+    assert!(settings["locked"].as_array().unwrap().iter().any(|l| l["field"] == "regression.enabled"), "{settings}");
+}

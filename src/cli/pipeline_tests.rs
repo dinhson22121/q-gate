@@ -226,3 +226,46 @@ async fn root_commit_is_reviewed_with_default_config() {
     let config = load_review_config(repo.path(), &DiffTarget::Commit(head)).await.unwrap();
     assert_eq!(config, Config::default());
 }
+
+#[tokio::test]
+async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks() {
+    let repo = tempfile::tempdir().unwrap();
+    let head = repo_with_commit(repo.path(), "");
+    let data = tempfile::tempdir().unwrap();
+    let run = |quality: bool, regression: bool| {
+        let (repo, data, head) = (repo.path().to_path_buf(), data.path().to_path_buf(), head.clone());
+        async move {
+            let mut ctx = context(&data, "http://127.0.0.1:1");
+            {
+                let mut server = ctx.server.write().unwrap();
+                server.quality.enabled = quality;
+                server.regression.enabled = regression;
+            }
+            ctx.env = Arc::new(|_: &str| None);
+            let pipeline = ReviewPipeline::new(Arc::new(ctx), None);
+            let request = ReviewRequest {
+                repo_root: repo.clone(),
+                target: DiffTarget::Commit(head.clone()),
+                trigger: Trigger::Commit,
+                explicit_ticket: None,
+                ticket_in_progress: false,
+            };
+            let server = pipeline.context.server();
+            let prep = ToolPrep {
+                request: &request,
+                server: &server,
+                db: &data.join("qgate.db"),
+                exec: pipeline.context.exec_backend(),
+                work_dir: &data.join("work"),
+                head: &repo,
+                base_runs: None,
+            };
+            pipeline.tool_outcome(prep).await
+        }
+    };
+    let both_off = run(false, false).await;
+    assert_eq!(both_off, ToolOutcome::default(), "disabled checks leave no findings and no notes");
+    let regression_only = run(false, true).await;
+    assert!(regression_only.notes.iter().all(|n| n.contains("regression")), "{:?}", regression_only.notes);
+    assert!(!regression_only.notes.is_empty(), "an enabled check reports why it could not run");
+}

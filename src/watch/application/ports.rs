@@ -49,6 +49,13 @@ pub trait RepoInspector: Send + Sync + 'static {
         a: &str,
         b: &str,
     ) -> impl Future<Output = Result<Option<String>, WatchError>> + Send;
+
+    /// The base branch the repository itself declares (`watch.base_branch` of its `.qgate.toml`), read at the
+    /// trusted commit `rev` (the tip of its default base branch, never the pushed commit). `None` when it
+    /// declares none, the file is missing or unreadable, or the value is not a valid branch name.
+    fn repo_base_branch(&self, _repo: &Path, _rev: &str) -> impl Future<Output = Option<String>> + Send {
+        async { None }
+    }
 }
 
 /// Reviews one commit (wired to the review context's use case by the composition root).

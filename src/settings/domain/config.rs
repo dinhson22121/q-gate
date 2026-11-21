@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::jira::{JiraConfig, JiraOverride, require_command};
+use super::server::require_ref_token;
 use super::validation::{ValidationError, ValidationResult, require_non_empty, require_range};
 use crate::review::application::{Category, CheckSpec, Confidence, GatePolicy, Severity};
 
@@ -231,11 +232,21 @@ pub struct WatchConfig {
     /// (the trigger is now a push, not a local commit).
     #[serde(alias = "review_on_commit")]
     pub review_on_push: bool,
+    /// Branch this repository's pushes are compared against (merge-base); overrides the server's
+    /// `watch.base_branch`. Empty = use the server setting. The watcher reads it from the repository's trusted
+    /// base branch, never from the pushed commit, so a branch cannot choose its own base.
+    pub base_branch: String,
 }
 
 impl Default for WatchConfig {
     fn default() -> Self {
-        Self { enabled: true, review_on_push: true }
+        Self { enabled: true, review_on_push: true, base_branch: String::new() }
+    }
+}
+
+impl WatchConfig {
+    fn validate(&self) -> ValidationResult {
+        require_ref_token("watch.base_branch", &self.base_branch, true)
     }
 }
 
@@ -262,6 +273,7 @@ impl Config {
             check.validate(index)?;
         }
         self.validate_unique_check_names()?;
+        self.watch.validate()?;
         self.jira.validate("jira")
     }
 
@@ -426,6 +438,12 @@ mod tests {
 
     #[test]
     fn watch_review_on_push_accepts_the_legacy_key() {
+        let own: Config = toml::from_str("[watch]\nbase_branch = \"develop\"\n").unwrap();
+        assert_eq!(own.watch.base_branch, "develop");
+        assert!(own.validate().is_ok());
+        assert_eq!(Config::default().watch.base_branch, "", "unset means: use the server setting");
+        let bad: Config = toml::from_str("[watch]\nbase_branch = \"--evil\"\n").unwrap();
+        assert_eq!(bad.validate().unwrap_err().field, "watch.base_branch");
         let legacy: Config = toml::from_str("[watch]\nreview_on_commit = false\n").unwrap();
         assert!(!legacy.watch.review_on_push);
         let current: Config = toml::from_str("[watch]\nreview_on_push = false\n").unwrap();

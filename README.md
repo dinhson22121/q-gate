@@ -2,15 +2,46 @@
 
 ## Overview
 
-qgate is a local quality gate for your git repositories. It runs as **one Docker container** on your
-machine (macOS, Windows or Linux with Docker) and, for every new commit in the repositories it watches:
+qgate is a local quality gate for your git repositories. It runs on your machine (macOS, Windows or Linux with
+Docker) as **two containers**: `qgate` (holds the secrets, talks to Claude/Jira/Figma, serves the dashboard) and
+`qgate-runner` (runs untrusted code: model-written tests, repository checks, build scripts; no secrets, see
+"Security notes"). It reviews on **`git push`**, not on every local commit: when a watched repository pushes a
+branch, qgate reviews the whole branch (`merge-base(<base-branch>, head)..head`) and:
 
 - reviews the change with Claude (bugs, security, maintainability, your repo's own guidelines),
 - checks the Jira ticket's acceptance criteria when a ticket key is in the branch name or commit message,
 - runs deterministic checks you configure (tests, linters) with the toolchains you chose,
+- runs a deterministic quality gate (dependency CVEs, secret leaks, architecture boundaries) and a regression
+  check (existing tests of impacted Go packages, base vs head),
 - shows the results on a local dashboard and, optionally, posts them to Slack.
 
 Your repositories are mounted **read-only**: qgate never changes your code.
+
+## When a review runs
+
+qgate watches `refs/remotes/<remote>/*` of every repository. A review is triggered when the reflog of a remote-tracking
+ref shows `update by push` or `forced-update`; `fetch` and `pull` are ignored. The reviewed range is
+`merge-base(<base-branch>, head)..head`, so the whole branch is judged, not only the last commit.
+
+- **Base branch:** admin setting `watch.base_branch` (env `QGATE_WATCH_BASE_BRANCH`; default: `origin/main`, else
+  `origin/master`). A repository can override it in `.qgate.toml`. Pushes to the base branch itself (main/master)
+  are not reviewed.
+- **`[WIP]`:** if the last commit subject contains `[WIP]`, acceptance criteria show progress only and never block
+  the gate.
+- **Cache:** results are content-addressed (keyed by git tree/blob hashes plus model, prompt and toolchain), so the
+  2nd and later pushes of a branch reuse everything that did not change. A `qgate: no-cache` commit trailer
+  bypasses the cache.
+
+## What is checked beyond the model review
+
+Two deterministic checks cover what SonarQube does not. They run in the runner container and fold into the review
+findings and the gate; findings carry prevention rules into `qgate-rules.md` (see "Review files").
+
+- **Quality gate (Go/Java), graded on NEW code only:** dependency CVEs (`govulncheck`, `osv-scanner`), secret leaks
+  (`gitleaks`) and architecture import boundaries (`depguard`, generated from approved Rulebook rules). It
+  deliberately does **not** duplicate SonarQube: no coverage, complexity, duplication, code smells or generic SAST.
+- **Regression:** finds the Go packages impacted by the diff and re-runs their existing tests on base and on head. A
+  test that passed on base and fails on head (reconfirmed) is a regression.
 
 ## Quickstart (Docker)
 
@@ -23,13 +54,15 @@ Requires Docker Desktop (macOS/Windows) or Docker Engine with the Compose plugin
 3. **Log in once:** open the link from `docker compose logs qgate | grep Dashboard`
    (`Dashboard: http://localhost:8080/login?token=...`, or run `docker compose exec qgate qgate login-url`).
    The browser then stays logged in for 30 days; afterwards the dashboard is at <http://localhost:8080>.
-4. **Commit** in any repository under `REPOS_PATH`: the review appears on the dashboard within seconds.
+4. **Push** a branch from any repository under `REPOS_PATH` (not main/master): the review appears on the dashboard
+   shortly after the push. Local commits alone do not trigger a review.
 
 Useful commands:
 
 | What | Command |
 |---|---|
-| Follow the logs | `docker compose logs -f qgate` |
+| Follow the logs | `docker compose logs -f qgate` (runner: `qgate-runner`) |
+| Dashboard login link | `docker compose exec qgate qgate login-url` |
 | Health check | `docker compose exec qgate qgate doctor` |
 | Installed toolchains | `docker compose exec qgate qgate-toolchains status` |
 | Apply changes to `qgate.env` | `docker compose up -d` |
@@ -47,9 +80,9 @@ qgate has three layers of configuration:
 
 | File | Scope | Contents |
 |---|---|---|
-| `qgate.env` (from `qgate.env.example`) | Docker setup | API key, repo folder, port, toolchains, Jira credentials, webhook, container uid/gid |
-| Settings page (<http://localhost:8080/settings>), stored in the `qgate-data` volume | Server | dashboard, repo scanning depth, poll interval, concurrency, Anthropic endpoint, Jira connection and defaults, agents, Figma. Seeded once from `config/qgate.toml` |
-| `.qgate.toml` in each repository | Repository | model, effort, gate policy, ignored paths, checks (`[[checks]]`), Jira `enabled`/`ac_field`/`key_pattern_projects` |
+| `qgate.env` (from `qgate.env.example`) | Docker setup | API key, repo folder, port, toolchains, Jira credentials, webhook, base branch, runner limits/network, container uid/gid |
+| Settings page (<http://localhost:8080/settings>), stored in the `qgate-data` volume | Server | dashboard, repo scanning depth, poll interval, concurrency, base branch, Anthropic endpoint, Jira connection and defaults, agents, Figma, review files. Seeded once from `config/qgate.toml` |
+| `.qgate.toml` in each repository | Repository | model, effort, gate policy, base branch, ignored paths, checks (`[[checks]]`), Jira `enabled`/`ac_field`/`key_pattern_projects` |
 
 **Server settings live in qgate's database** (`/data/qgate.db`, tables `server_settings` and
 `settings_schema_version`). On the very first start, `config/qgate.toml` (created from `config/qgate.toml.example`)
@@ -60,13 +93,13 @@ last 20 versions (a rollback is saved as a new version too).
 Environment variables win over the stored settings: `QGATE_BIND`, `QGATE_REPOS_ROOT`, `QGATE_WEBHOOK_URL`,
 `QGATE_LLM_BASE_URL`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `QGATE_JIRA_ENABLED`, `QGATE_OUTPUT_DIR`,
 `QGATE_JIRA_MCP_COMMAND` (space-separated), `QGATE_JIRA_MCP_ENV_PASSTHROUGH` (comma list), `QGATE_FIGMA_API_BASE_URL`,
-`QGATE_FIGMA_MCP_URL`, `QGATE_RUN_REPO_CHECKS`. The Settings page shows those fields
+`QGATE_FIGMA_MCP_URL`, `QGATE_RUN_REPO_CHECKS`, `QGATE_WATCH_BASE_BRANCH`. The Settings page shows those fields
 locked ("set by QGATE_…"); env values are never written to the database.
 
 **Admin-only settings** are never editable over HTTP (Settings page or Policy assistant), because any process
 that can reach the dashboard could otherwise send the API key elsewhere or run a command: `llm.base_url`,
 `jira.base_url`, `jira.mcp.command`, `jira.mcp.env_passthrough`, `figma.api_base_url`, `figma.mcp_url`, setting
-`notify.webhook_url` and turning `watch.run_repo_checks` on. Set them with the environment variables above in
+`notify.webhook_url`, `watch.base_branch` and turning `watch.run_repo_checks` on. Set them with the environment variables above in
 `qgate.env` (or in `config/qgate.toml` before the first start) and restart qgate. Clearing the webhook and turning
 repository checks off stay possible on the Settings page. Every change made through the dashboard also needs a
 per-start API token that the pages carry; after a restart, reload open pages. Most settings apply immediately; the
@@ -79,8 +112,11 @@ from the environment variable, its `*_FILE` variant, or the credential store (06
 OS keychain natively). The Settings page can set or remove a stored secret (write-only, never shown again) unless
 it comes from the environment. The webhook URL contains a token, so the page only shows whether one is configured.
 
-Inside the container: repositories are at `/repos`, data (SQLite history, logs, caches) in the `qgate-data`
-volume at `/data`, the server config at `/config`, toolchains in the `qgate-toolchains` volume at `/toolchains`.
+Inside the `qgate` container: repositories are at `/repos`, data (SQLite history, logs, caches) in the `qgate-data`
+volume at `/data`, the server config at `/config`, toolchains in the `qgate-toolchains` volume at `/toolchains`,
+review snapshots in the `qgate-work` volume at `/work`. The `qgate-runner` container sees only `/work`, `/toolchains`
+(read-only) and its own `qgate-runner-cache` volume at `/cache`; `/data`, `/config`, `/reviews` and `/repos` are
+empty and unreadable there. Its network is `QGATE_RUNNER_NETWORK` (default `bridge`; `none` = fully offline).
 
 Note on `qgate.env`: `docker-compose.yml` includes the service with `env_file: qgate.env`, so the same file
 both configures the container and provides `REPOS_PATH`, `QGATE_DASHBOARD_PORT` and `QGATE_UID`/`QGATE_GID` to
@@ -167,8 +203,11 @@ Figma REST API with a personal access token by default; provider "MCP" is only f
 
 ## Review files for your coding agent
 
-After every scan qgate writes a **review file** that you can hand to your coding agent (Claude Code, Cursor, …)
-to continue fixing and developing the feature. It is written for an LLM agent and a human alike:
+After every review qgate writes a **review file** (`latest.md`) and a companion **`qgate-rules.md`** (prevention
+rules derived from the findings) that you can hand to your coding agent (Claude Code, Cursor, …) to continue fixing
+and developing the feature. Optionally it also writes a self-contained **HTML report** (`latest.html` /
+`<sha7>.html`) to attach to Jira as evidence or print to PDF. The Markdown review is written for an LLM agent and a
+human alike:
 
 - the verdict (PASSED/FAILED) and why the gate failed;
 - **Do this first (blocking)**: numbered, self-contained tasks: what is wrong, `path:line`, the evidence, the
@@ -186,9 +225,9 @@ folder qgate writes to on your machine (on Linux create it first with `mkdir -p`
 named by the **path template** on the Settings page ("Review files"), default `{repo}/{branch}/{sha7}.md`.
 Placeholders: `{repo}` `{branch}` `{sha7}` `{sha}` `{date}` (UTC `YYYYMMDD-HHMMSS`) `{ticket}` (`no-ticket` when
 none) `{status}` (`passed`/`failed`). Values are sanitised to `[A-Za-z0-9._-]` (max 80 characters), so
-`feature/ABC-1` becomes `feature-ABC-1`. The template must be relative, end with `.md` and contain no `..`.
+`feature/ABC-1` becomes `feature-ABC-1`. The template must be relative, end with `.md` and contain no `..`; the HTML report uses the same name with `.html`.
 
-**Always up to date:** `<repo>/<branch>/latest.md` is rewritten after every scan (also for passing runs, so it
+**Always up to date:** `<repo>/<branch>/latest.md` (and `latest.html` when enabled) is rewritten after every review (also for passing runs, so it
 never shows a stale failure). Point your agent at it, e.g. in the repository's `CLAUDE.md`:
 
 ```text
@@ -196,7 +235,7 @@ Before continuing work, read ~/qgate-reviews/shop-api/<branch>/latest.md and fix
 ```
 
 Other settings (all apply without a restart, except the folder): enable/disable, **formats** (Markdown by default;
-JSON `qgate.review/v1` with the full report is opt-in), also write files for passing runs, and **keep last N**
+HTML report and JSON `qgate.review/v1` with the full report are opt-in: enable them in Settings → Review files), also write files for passing runs, and **keep last N**
 (default 20 per folder): older *generated* review files are deleted, nothing else in the folder is touched. Pruning
 only applies when the file name contains `{sha7}`, `{sha}` or `{date}`; otherwise each scan overwrites the same file.
 Files are written atomically (0644), never through symlinks and never outside the folder. Writing a review file can

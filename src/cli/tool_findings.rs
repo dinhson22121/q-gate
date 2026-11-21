@@ -42,13 +42,15 @@ pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
     }
 }
 
-/// A confirmed regression: a test that passed on base and fails on head. Always blocking.
-pub fn regression_to_finding(regression: &Regression) -> Finding {
+/// A confirmed regression: a test that passed on base and fails on head. Always blocking. `location` is the
+/// failing test's `(file, line)` when it could be found; otherwise the finding points at the package.
+pub fn regression_to_finding(regression: &Regression, location: Option<(String, u32)>) -> Finding {
+    let (file, line) = location.unwrap_or_else(|| (regression.package.clone(), FIRST_LINE));
     let subject = if regression.test.is_empty() { "package tests".to_string() } else { regression.test.clone() };
     let evidence = &regression.evidence;
     Finding {
-        file: regression.package.clone(),
-        line: FIRST_LINE,
+        file,
+        line,
         severity: Severity::Critical,
         category: Category::Correctness,
         confidence: Confidence::High,
@@ -150,7 +152,7 @@ mod tests {
     #[test]
     fn regression_is_a_blocking_correctness_finding_with_reproduction() {
         let regression = Regression::new("shop/cart", "TestTotal", "--- FAIL: TestTotal\n  got 1 want 2\n".into());
-        let finding = regression_to_finding(&regression);
+        let finding = regression_to_finding(&regression, None);
         assert_eq!(finding.category, Category::Correctness);
         assert_eq!(finding.file, "shop/cart");
         assert!(GatePolicy::default().is_blocking(&finding));
@@ -165,8 +167,16 @@ mod tests {
     }
 
     #[test]
+    fn regression_points_at_the_failing_test_when_it_was_located() {
+        let regression = Regression::new("shop/cart", "TestTotal", String::new());
+        let finding = regression_to_finding(&regression, Some(("cart/cart_test.go".into(), 42)));
+        assert_eq!((finding.file.as_str(), finding.line), ("cart/cart_test.go", 42));
+        assert!(finding.explanation.contains("shop/cart"), "the package stays in the explanation");
+    }
+
+    #[test]
     fn package_level_regression_names_the_package_tests() {
-        let finding = regression_to_finding(&Regression::new("shop/cart", "", String::new()));
+        let finding = regression_to_finding(&Regression::new("shop/cart", "", String::new()), None);
         assert!(finding.title.contains("package tests"));
     }
 }
