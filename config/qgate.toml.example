@@ -1,0 +1,166 @@
+# qgate server configuration (<config_dir>/qgate.toml).
+#
+# In Docker this file lives at ./config/qgate.toml on the host (mounted at /config). It is created from
+# this template on first start and only used to seed the settings database (in the qgate-data volume) on
+# that first start; after the import it is no longer read. Change settings on the Settings page
+# (http://localhost:8080/settings); every save is kept as a version you can roll back to.
+# Every setting is optional: delete a line to get the default shown here.
+#
+# Per-repository settings (model, gate policy, checks, Jira overrides) belong in each repo's .qgate.toml.
+# Endpoints and credentials-related settings ([llm] base_url, [jira] base_url/email/provider/[jira.mcp])
+# can only be set here, never in a repository's .qgate.toml (see README "Security notes").
+#
+# Environment variables from qgate.env win over this file:
+#   QGATE_BIND -> dashboard.bind     QGATE_REPOS_ROOT -> repos.roots    QGATE_WEBHOOK_URL -> notify.webhook_url
+#   JIRA_BASE_URL -> jira.base_url   JIRA_EMAIL -> jira.email       QGATE_LLM_BASE_URL -> llm.base_url
+#   QGATE_JIRA_ENABLED -> jira.enabled   QGATE_OUTPUT_DIR -> output.dir
+# Fields set by these variables are shown locked on the Settings page.
+# Secrets (ANTHROPIC_API_KEY, JIRA_API_TOKEN, FIGMA_TOKEN) are never read from this file - keep them in qgate.env,
+# use their *_FILE variants (Docker secrets, see README "Security notes") or set them on the Settings page.
+
+[dashboard]
+# Address the dashboard listens on. The image sets QGATE_BIND=0.0.0.0:8080 because Docker publishes the
+# port on 127.0.0.1 of the host only (see docker-compose.yml); outside Docker keep 127.0.0.1.
+bind = "127.0.0.1:8080"
+# Accepted Host header values (protects against DNS rebinding). Add a hostname here only if you put the
+# dashboard behind your own reverse proxy.
+allowed_hosts = ["localhost", "127.0.0.1"]
+
+[repos]
+# Absolute directories scanned for git repositories (inside the container: /repos = REPOS_PATH).
+roots = ["/repos"]
+# How many directory levels below each root are searched for repositories (1-10).
+scan_depth = 3
+
+[notify]
+# Webhook that receives review results (e.g. a Slack incoming webhook). Empty disables it.
+webhook_url = ""
+
+[watch]
+# How often repositories are polled for pushed branches, in seconds (1-3600). Polling (not file events)
+# is used so bind mounts work on Docker Desktop for macOS/Windows. qgate reviews a branch when it is
+# pushed (refs/remotes/<remote>/<branch> moves by "update by push"); plain fetches never trigger.
+poll_interval_secs = 2
+# Reviews running at the same time across all repositories (1-16).
+max_concurrent_reviews = 2
+# Run the [[checks]] commands from each repo's .qgate.toml (tests, linters) on every review.
+# They are repository-controlled commands: turn off if /repos contains code you do not trust.
+run_repo_checks = true
+# Git remote whose tracking refs are watched for pushes.
+remote = "origin"
+# Branch a pushed branch is compared against (merge-base); a push to it is never reviewed. Empty =
+# auto-resolve <remote>/main then <remote>/master. Admin-only: set it with QGATE_WATCH_BASE_BRANCH.
+base_branch = ""
+
+[llm]
+# Anthropic API endpoint. Must be https://, except http://localhost or http://127.0.0.1 (local proxy).
+# It receives the API key and the reviewed code, so repositories cannot override it.
+base_url = "https://api.anthropic.com"
+
+[jira]
+# Fetch acceptance criteria for the ticket referenced in the branch name / commit message.
+# Needs JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in qgate.env (REST provider).
+enabled = false
+base_url = "https://yourcompany.atlassian.net"
+email = ""
+# "rest" (Jira Cloud REST API, email + API token) or "mcp" (an MCP server such as mcp-atlassian).
+provider = "rest"
+# Custom field holding the acceptance criteria, e.g. "customfield_10050". Empty = standard fields only
+# (summary, description).
+ac_field = ""
+# Only recognise ticket keys of these projects, e.g. ["PROJ", "OPS"]. Empty = any key.
+key_pattern_projects = []
+
+# Used only when provider = "mcp". `uvx` needs the python toolchain (QGATE_TOOLCHAINS=...,python).
+[jira.mcp]
+command = ["uvx", "mcp-atlassian==0.23.1"]  # pinned: unpinned uvx runs whatever PyPI serves, with your Jira token
+tool = "jira_get_issue"
+# Environment variables passed to the MCP server; everything else is cleared.
+env_passthrough = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
+
+[agents]
+# Multi-agent ticket review: ticket analysis, generated tests and architecture conformance.
+enabled = true
+model = "claude-opus-5-5"
+# low | medium | high | xhigh | max
+effort = "high"
+# Sub-agents running at the same time for one review (1-8).
+max_parallel = 3
+# Hard stop for one review's agent spend in USD (up to 50); remaining agents are skipped and reported.
+budget_usd_per_review = 2.0
+
+[agents.ticket_analyst]
+enabled = true
+# Walk Sub-task -> Story -> Epic and merge their acceptance criteria and design links.
+include_parent_story = true
+# Pass the ticket description to reviewers as context (never gating).
+use_description = true
+# Re-fetch a ticket after this many minutes even if Jira's "updated" is unchanged (1-1440).
+cache_ttl_minutes = 10
+
+[agents.tests]
+# Generate and run tests for the acceptance criteria. Languages: go, java, python, rust
+# (JavaScript/TypeScript comes later).
+enabled = true
+languages = ["go", "java", "python", "rust"]
+# Scenarios per ticket (1-30), one agent each.
+max_scenarios = 8
+# Times an agent may fix its own test after a compile/setup error (0-6).
+max_repair_rounds = 3
+# Seconds per test run (10-3600).
+timeout_secs = 300
+# warn: shown on the dashboard | block: fails the gate. A failure only counts with complete evidence
+# (criterion, scenario, test source, command, exit code, assertion output, code under test, commit,
+# reproduce command); otherwise it is reported as inconclusive.
+on_fail = "warn"
+
+[agents.architecture]
+enabled = true
+# Rebuild a repository's cached rulebook after this many days even if no rule file changed (1-90).
+rulebook_refresh_days = 7
+# Inferred (not yet approved) rules are reported but never block.
+use_inferred_rules = true
+# warn | block
+on_violation = "warn"
+
+[figma]
+# Design checks against Figma frames linked from the ticket's parent Story.
+# Figma's cloud MCP server (mcp.figma.com) only accepts OAuth from catalog-listed clients, so qgate uses the
+# REST API with a personal access token (FIGMA_TOKEN / FIGMA_TOKEN_FILE, or the settings page).
+enabled = false
+# rest | mcp
+provider = "rest"
+api_base_url = "https://api.figma.com"
+# Only used with provider = "mcp".
+mcp_url = "https://mcp.figma.com/mcp"
+# copy: text missing from the code/i18n | component: other component than the design system's |
+# token: hard-coded colour/spacing/font where the design binds a variable | states: unhandled variants.
+checks = ["copy", "component", "token", "states"]
+# Checks that fail the gate (copy, component, token; "states" is judged by the model and cannot block).
+block_on = []
+
+[output]
+# Review files written after each scan, to hand to your coding agent (Claude Code, Cursor...).
+enabled = true
+# Absolute folder the files go to. In Docker it is /reviews, mounted from REVIEWS_PATH on your machine
+# (env override: QGATE_OUTPUT_DIR; changing it needs a restart).
+dir = "/reviews"
+# File path below dir. Placeholders: {repo} {branch} {sha7} {sha} {date} {ticket} {status}.
+# Must be relative and end with .md. Values are sanitised (feature/ABC-1 -> feature-ABC-1).
+path_template = "{repo}/{branch}/{sha7}.md"
+# Also write {repo}/{branch}/latest.md (and latest.json / latest.html when enabled) - point your coding agent at it.
+write_latest = true
+# markdown | json | html. Markdown is the coding agent's input; html is opt-in: a self-contained report
+# (all sections, escaped, prints cleanly) to attach to Jira as evidence or save as PDF.
+formats = ["markdown"]
+# Also write a file when the gate passed (latest.md is always kept current).
+include_passing = true
+# Generated files kept per folder (0-1000, 0 = keep all); older generated files are deleted, nothing else.
+keep_last = 20
+# Turn every finding into a rule for coding agents: merged into {repo}/<rules_file> after each scan
+# (deduplicated, with hit counts; state in .<name>.json next to it). Reference it from CLAUDE.md / AGENTS.md.
+rules_enabled = true
+# Plain .md file name in the repository's folder.
+rules_file = "qgate-rules.md"
+# Rules kept per repository (1-1000); the least severe, least recently seen are dropped first.
+rules_max = 100

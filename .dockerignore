@@ -1,0 +1,22 @@
+# Build output and VCS metadata
+target/
+.git/
+.github/
+
+# Local setup and secrets: never send them to the build context
+qgate.env
+.env
+*.env
+!qgate.env.example
+secrets/
+config/qgate.toml
+
+# Compose files and docs do not affect the image
+docker-compose*.yml
+README.md
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

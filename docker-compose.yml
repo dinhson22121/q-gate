@@ -1,0 +1,15 @@
+# qgate: `docker compose up -d`, then open http://localhost:8080
+#
+# Settings live in qgate.env (copy qgate.env.example). The service itself is defined in
+# docker/compose.qgate.yml and included here with `env_file: qgate.env`, which makes REPOS_PATH,
+# QGATE_DASHBOARD_PORT and QGATE_UID/QGATE_GID available for substitution - a plain env_file would only
+# reach the container, not this file.
+#
+# Optional customisation (baked-in toolchains, resource limits, Docker secrets): copy
+# docker-compose.override.example.yml to docker-compose.override.yml.
+name: qgate
+
+include:
+  - path: docker/compose.qgate.yml
+    project_directory: .
+    env_file: qgate.env

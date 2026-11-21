@@ -1,0 +1,23 @@
+//! Review use cases and the ports they need. Other contexts use the review context only through here.
+
+pub mod agent_ports;
+pub mod batching;
+pub mod caching_reviewer;
+pub mod ports;
+pub mod review_changes;
+pub mod run_agents;
+
+pub use crate::review::domain::agent_results::{
+    AgentReport, DesignMismatch, DesignMismatchKind, RuleViolation, TestEvidence, TestResult, TestScenario,
+    TestVerdict, TicketBrief, TicketContext,
+};
+pub use crate::review::domain::checks::{CheckOutcome, CheckResult, CheckSpec};
+pub use crate::review::domain::finding::{Category, Confidence, Finding, PreventionRule, Severity};
+pub use crate::review::domain::gate::GatePolicy;
+pub use crate::review::domain::report::{ReviewReport, SkipReason, TokenUsage};
+pub use crate::review::domain::requirements::{
+    AcceptanceCriterion, CriterionStatus, EvidenceRef, Requirements, RequirementsReport,
+};
+pub use caching_reviewer::CachingCodeReviewer;
+pub use review_changes::{NoProgress, ReviewChanges, ReviewError, ReviewProgress, ReviewSettings};
+pub use run_agents::{AgentRun, AgentSuite};

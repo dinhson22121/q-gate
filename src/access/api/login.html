@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>qgate · log in</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1d2330; }
+  main { max-width: 34rem; margin: 10vh auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h1 { font-size: 1.3rem; margin-top: 0; }
+  code { background: #eef0f4; padding: .1rem .3rem; border-radius: 4px; font-size: .9em; }
+  form { display: flex; gap: .5rem; margin-top: 1rem; }
+  input { flex: 1; padding: .45rem .6rem; border: 1px solid #c4c9d4; border-radius: 4px; font: inherit; }
+  button { padding: .45rem 1rem; border: 0; border-radius: 4px; background: #2f5bd3; color: #fff; font: inherit; cursor: pointer; }
+  .msg { font-weight: 600; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #14171c; color: #dde2ea; }
+    main { background: #1d2128; }
+    code { background: #2a2f38; }
+    input { background: #14171c; color: inherit; border-color: #3a404b; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>qgate dashboard</h1>
+  <p class="msg">__MESSAGE__</p>
+  <p>The login link is printed when qgate starts:</p>
+  <ul>
+    <li>Docker: <code>docker compose logs qgate | grep Dashboard</code> or <code>docker compose exec qgate qgate login-url</code></li>
+    <li>Native: the output of <code>qgate serve</code>, or <code>qgate login-url</code></li>
+  </ul>
+  <p>Open it once; this browser then stays logged in for 30 days. Or paste the token:</p>
+  <form method="post" action="/login">
+    <input type="password" name="token" autocomplete="off" aria-label="Dashboard token" placeholder="Dashboard token" required>
+    <button type="submit">Log in</button>
+  </form>
+</main>
+<script>
+  // Opened from a link on another site, the browser withholds the SameSite=Strict session cookie. A same-site
+  // navigation sends it: retry the dashboard once (at most every 10 s per tab) before asking to log in.
+  (function () {
+    var key = "qgate-login-retry", now = Date.now(), last = Number(sessionStorage.getItem(key)) || 0;
+    if (__RETRY__ && now - last > 10000) {
+      sessionStorage.setItem(key, String(now));
+      location.replace("/");
+    }
+  })();
+</script>
+</body>
+</html>

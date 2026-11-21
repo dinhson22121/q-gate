@@ -1,0 +1,157 @@
+# The qgate service and its isolated runner. Included from ../docker-compose.yml; relative paths are
+# resolved from the project root (the folder containing docker-compose.yml) and ${VARS} come from qgate.env.
+#
+# Untrusted code (repository checks, model-written tests and the build scripts they trigger: build.rs,
+# conftest.py, mvnw, ...) never runs in the qgate container. qgate exports each commit into the shared
+# qgate-work volume and asks qgate-runner, over a Unix socket in that volume, to run the command there.
+# The runner has no secrets (no env_file), no access to /data, /config, /reviews or /repos, read-only
+# toolchains, and sits on Docker's default bridge network. It can still reach the host's published dashboard
+# port (host.docker.internal on Docker Desktop/colima), so every dashboard route requires a login cookie whose
+# token lives in /data (not mounted in the runner) or in qgate.env (not passed to the runner).
+services:
+  qgate:
+    build:
+      context: .
+      args:
+        QGATE_UID: ${QGATE_UID:-1000}
+        QGATE_GID: ${QGATE_GID:-1000}
+    image: qgate:local
+    env_file: qgate.env
+    environment:
+      # Run every untrusted command in qgate-runner; if it is unreachable, checks/tests fail with a note
+      # (never a silent fallback to this container).
+      QGATE_RUNNER_SOCKET: /work/.runner/runner.sock
+      QGATE_WORK_DIR: /work
+      # Host port, for the login link qgate prints at startup.
+      QGATE_DASHBOARD_PORT: ${QGATE_DASHBOARD_PORT:-8080}
+    depends_on:
+      - qgate-runner
+    # Dashboard on localhost only: never expose it on your network (it shows code and review results).
+    # Every route needs the login cookie (link printed in `docker compose logs qgate`); /healthz is open.
+    ports:
+      - "127.0.0.1:${QGATE_DASHBOARD_PORT:-8080}:8080"
+    volumes:
+      # Your repositories, read-only. Windows: REPOS_PATH=C:/Users/me/code (Docker Desktop file sharing).
+      # Docker Desktop bind mounts are slower than on Linux and do not deliver file events reliably;
+      # qgate polls for new commits, so this works on every platform.
+      - type: bind
+        source: ${REPOS_PATH:?Set REPOS_PATH in qgate.env to the folder that contains your git repositories}
+        target: /repos
+        read_only: true
+        bind:
+          create_host_path: false
+      # Review files for your coding agent (<repo>/<branch>/latest.md ...). The only writable bind mount;
+      # qgate writes nothing else on your machine. Create the folder first (mkdir -p <REVIEWS_PATH>): Docker
+      # Desktop / colima cannot create or chown folders on macOS, and on Linux it would be owned by root.
+      - type: bind
+        source: ${REVIEWS_PATH:-./reviews}
+        target: /reviews
+        read_only: false
+        bind:
+          create_host_path: false
+      # Review history (SQLite), settings, logs.
+      - qgate-data:/data
+      # Commit snapshots, shared with qgate-runner (which runs checks/tests in them).
+      - qgate-work:/work
+      # Toolchains installed on first start (QGATE_TOOLCHAINS); shared (read-only) with qgate-runner.
+      - qgate-toolchains:/toolchains
+      # Server config: ./config/qgate.toml is created from the template on first start and imported once into
+      # the settings database (/data/qgate.db); afterwards change settings on the dashboard Settings page.
+      - ./config:/config
+    user: "${QGATE_UID:-1000}:${QGATE_GID:-1000}"
+    read_only: true
+    tmpfs:
+      # Scratch space for git and qgate itself (tests run in qgate-runner).
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # The first start may download toolchains before the dashboard is up.
+      start_period: 15m
+      start_interval: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Reviews are network-bound; tests and linters run in qgate-runner (sized by QGATE_MEMORY_LIMIT).
+    pids_limit: 512
+    mem_limit: ${QGATE_SERVICE_MEMORY_LIMIT:-1g}
+
+  qgate-runner:
+    image: qgate:local
+    # Same image as qgate (built by the qgate service); never pulled from a registry.
+    pull_policy: never
+    command: ["qgate", "runner", "--socket", "/work/.runner/runner.sock", "--max-jobs", "${QGATE_RUNNER_MAX_JOBS:-4}"]
+    # NO env_file: the runner holds no secrets. Only toolchain/cache locations, all in its own volumes.
+    environment:
+      QGATE_WORK_DIR: /work
+      HOME: /cache/home
+      XDG_CACHE_HOME: /cache
+      GOPATH: /cache/go
+      GOCACHE: /cache/go-build
+      GRADLE_USER_HOME: /cache/gradle
+      CARGO_HOME: /cache/cargo
+      npm_config_cache: /cache/npm
+      COREPACK_HOME: /cache/corepack
+      UV_CACHE_DIR: /cache/uv
+      PIP_CACHE_DIR: /cache/pip
+      PATH: /toolchains/go/current/bin:/cache/go/bin:/toolchains/java/current/bin:/toolchains/maven/current/bin:/toolchains/gradle/current/bin:/toolchains/node/current/bin:/toolchains/python/current/bin:/toolchains/uv/current:/toolchains/rust/cargo/bin:/cache/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    volumes:
+      - qgate-work:/work
+      - qgate-toolchains:/toolchains:ro
+      # Build caches (Go modules, ~/.m2, Gradle, npm, pip, cargo registry): written by untrusted code, so
+      # kept apart from everything qgate reads.
+      - qgate-runner-cache:/cache
+    # Docker's default bridge, NOT the compose network: dependency downloads work; the dashboard/API is not on this
+    # network, and its published host port requires a login the runner never gets.
+    # QGATE_RUNNER_NETWORK=none in qgate.env for fully offline runs (dependencies must be cached).
+    network_mode: ${QGATE_RUNNER_NETWORK:-bridge}
+    user: "${QGATE_UID:-1000}:${QGATE_GID:-1000}"
+    read_only: true
+    tmpfs:
+      # Scratch space for tests/linters; `exec` because `go test` and Maven run binaries from /tmp.
+      # Counts against memory; raise the size if your test suites need more.
+      - /tmp:size=1g,mode=1777,exec
+      # Empty, root-owned and unreadable: hides the image's VOLUME paths (no anonymous volumes).
+      - /data:size=4k,mode=0000
+      - /config:size=4k,mode=0000
+      - /repos:size=4k,mode=0000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "qgate", "runner", "--check", "--socket", "/work/.runner/runner.sock"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Size it for your heaviest test suite (raise QGATE_MEMORY_LIMIT for big Java/Gradle builds).
+    # The pids limit stops a runaway or malicious check (fork bomb) from taking down the host.
+    pids_limit: 2048
+    mem_limit: ${QGATE_MEMORY_LIMIT:-6g}
+    # CPU cap: Docker refuses values above the cores the Docker VM has, so it is opt-in. Uncomment to use:
+    # cpus: ${QGATE_CPUS:-2}
+
+volumes:
+  qgate-data:
+  qgate-work:
+  qgate-toolchains:
+  qgate-runner-cache:

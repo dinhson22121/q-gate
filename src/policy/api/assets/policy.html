@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
+<title>qgate policy assistant</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #0b5cad; --focus: #0b5cad;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --selected: #e6f0fb;
+  --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #6cb2ff; --focus: #6cb2ff;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6;
+    --code-bg: #10141a; --selected: #1b2a3d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+select, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1000px; margin: 0 auto; }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+.rule { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.rule-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.rule-head .title { font-weight: 600; flex: 1 1 240px; }
+.rule-actions { display: flex; gap: 6px; }
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+pre.quote { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 2px 0 6px; white-space: pre-wrap; }
+.label { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 6px; }
+.banner { padding: 8px 12px; border-radius: var(--radius); margin: 0; }
+.empty { color: var(--muted); font-style: italic; }
+p { margin: 4px 0; }
+@media (max-width: 480px) { header.top, main { padding-left: 12px; padding-right: 12px; } }
+
+textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; width: 100%; min-height: 160px; resize: vertical; }
+input[type=number] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; width: 80px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
+.row label { display: flex; gap: 6px; align-items: center; }
+.counter { font-size: 12px; color: var(--muted); margin-left: auto; }
+pre.diff { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 0; margin: 4px 0 10px; white-space: pre-wrap; }
+pre.diff span { display: block; padding: 0 8px; }
+pre.diff .added { background: var(--ok-bg); color: var(--ok-fg); }
+pre.diff .removed { background: var(--bad-bg); color: var(--bad-fg); }
+pre.diff .note { color: var(--warn-fg); font-style: italic; }
+.item { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 6px 0; background: var(--surface-2); }
+.item .head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.item .head .title { font-weight: 600; }
+.confirm { border: 1px solid var(--bad-fg); border-radius: var(--radius); padding: 8px 12px; background: var(--bad-bg); color: var(--bad-fg); }
+.confirm ul { margin: 4px 0 6px 18px; padding: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 14px; margin: 12px 0 6px; }
+ul.plain { list-style: none; padding: 0; margin: 0; }
+ul.plain li { padding: 3px 0; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate policy assistant</h1><a href="/">Dashboard</a><a href="/rulebook">Rulebook</a><a href="/settings">Settings</a></div>
+</header>
+<main>
+  <p class="banner info">Describe how your team reviews code. qgate turns it into a structured proposal (settings, rulebook rules,
+    a <span class="mono">.qgate.toml</span> patch), shows the diff and how it would have changed past runs, and applies nothing until you approve.
+    Settings are saved as a new version (roll back from Settings → History); rules go into the repository's rulebook; the repository patch is yours to commit.</p>
+  <div id="error" class="banner bad" role="alert" hidden></div>
+  <section class="panel" aria-labelledby="describe-title">
+    <h2 id="describe-title">Describe your review process</h2>
+    <div class="row">
+      <label>Repository <select id="repo" aria-label="Repository"><option value="">No repository (server settings only)</option></select></label>
+    </div>
+    <label for="description" class="label">How does your team review code?</label>
+    <textarea id="description" maxlength="8000" placeholder="e.g. Every change to the payment module needs a test. Failing generated tests should block the commit. Handlers must not run SQL directly."></textarea>
+    <div class="row">
+      <button type="button" class="primary" id="propose">Propose</button>
+      <span id="busy" class="muted" role="status"></span>
+      <span class="counter" id="counter">0 / 8000</span>
+    </div>
+  </section>
+  <section class="panel" id="proposal-panel" aria-labelledby="proposal-title" hidden>
+    <h2 id="proposal-title">Proposal</h2>
+    <div id="proposal"></div>
+  </section>
+  <section class="panel" id="dry-run-panel" aria-labelledby="dry-run-title" hidden>
+    <h2 id="dry-run-title">Dry-run on history</h2>
+    <div id="dry-run"></div>
+  </section>
+  <section class="panel" aria-labelledby="recent-title">
+    <h2 id="recent-title">Recent proposals</h2>
+    <div id="recent"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+<script>
+"use strict";
+(() => {
+  // Per-instance API token injected by the server into this page; required on every change.
+  const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
+  const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
+  const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "policy", "X-Qgate-Token": TOKEN, Accept: "application/json" };
+  const STATUS_CLASS = { draft: "warn", applied: "ok", rejected: "neutral" };
+  const LINE_CLASS = { added: "added", removed: "removed", note: "note", context: "" };
+  const state = { view: null };
+  const $ = (id) => document.getElementById(id);
+
+  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+  const replace = (node, ...children) => { node.replaceChildren(); node.append(...children.flat()); };
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+  const fmtTime = (iso) => new Date(iso).toLocaleString();
+  const show = (value) => value === null ? "(hidden)" : JSON.stringify(value);
+
+  function showError(message) {
+    $("error").hidden = !message;
+    $("error").textContent = message || "";
+  }
+
+  async function call(method, path, body) {
+    const options = { method, credentials: "same-origin", headers: method === "GET" ? { Accept: "application/json" } : HEADERS };
+    if (method !== "GET") options.body = JSON.stringify(body || {});
+    const response = await fetch(path, options);
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) throw new Error(RELOAD_HINT);
+    if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    return data;
+  }
+
+  async function busy(label, work) {
+    showError("");
+    $("busy").textContent = label;
+    document.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    try { await work(); } catch (err) { showError(err.message); }
+    finally {
+      $("busy").textContent = "";
+      document.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  function diffSection(section) {
+    return [el("h3", {}, section.title),
+      el("pre", { class: "diff" }, section.lines.map((l) => el("span", { class: LINE_CLASS[l.kind] }, l.text || " ")))];
+  }
+
+  function settingItem(change, index, editable) {
+    return el("div", { class: "item" },
+      el("label", { class: "head" },
+        editable && el("input", { type: "checkbox", "data-setting": index, checked: true, onchange: renderConfirm }),
+        el("span", { class: "title mono" }, change.path),
+        change.sensitivity.map((s) => chip(s.replace(/_/g, " "), "bad")),
+        change.restart_required && chip("restart needed", "warn")),
+      el("p", { class: "mono" }, show(change.old), " → ", JSON.stringify(change.new)),
+      change.reason && el("p", { class: "muted" }, change.reason));
+  }
+
+  function ruleItem(rule, index, editable) {
+    return el("div", { class: "item" },
+      el("div", { class: "head" },
+        editable && el("label", {}, el("input", { type: "checkbox", "data-rule": index, checked: true }), "Add"),
+        chip(rule.action === "edit" ? "edit " + rule.replaces[0] : "new", "info"),
+        el("span", { class: "title" }, rule.title),
+        editable && el("label", { class: "muted" }, el("input", { type: "checkbox", "data-rule-approved": index, checked: true }), "as Approved (untick: Proposed)")),
+      el("p", {}, rule.description),
+      el("p", { class: "muted" }, "Scope: ", el("span", { class: "mono" }, rule.scope_globs.length ? rule.scope_globs.join(", ") : "all files")),
+      rule.reason && el("p", { class: "muted" }, rule.reason));
+  }
+
+  function selectedSettings() {
+    return [...document.querySelectorAll("input[data-setting]")].filter((c) => c.checked).map((c) => Number(c.dataset.setting));
+  }
+
+  function renderConfirm() {
+    const box = $("confirm-box");
+    if (!box || !state.view) return;
+    const changes = state.view.proposal.content.settings;
+    const sensitive = selectedSettings().map((i) => changes[i]).filter((c) => c.sensitivity.length);
+    box.hidden = !sensitive.length;
+    replace($("confirm-list"), sensitive.map((c) => el("li", {}, el("span", { class: "mono" }, c.path), ": ",
+      c.sensitivity.map((s) => WARNINGS[s] || s).join("; "))));
+  }
+
+  const WARNINGS = {
+    endpoint: "changes where code, tickets or credentials are sent",
+    mcp_command: "changes the program qgate runs with your Jira credentials",
+    repo_checks: "changes whether qgate runs commands from repository files",
+    webhook: "changes where review results are posted",
+    gate_loosening: "loosens the gate: fewer problems will block a commit",
+  };
+
+  function renderProposal(view) {
+    state.view = view;
+    const p = view.proposal;
+    const c = p.content;
+    const editable = p.status === "draft" && !view.expired && !view.stale;
+    $("proposal-panel").hidden = false;
+    replace($("proposal-title"), "Proposal #" + p.id, chip(p.status, STATUS_CLASS[p.status]),
+      el("span", { class: "muted" }, fmtTime(p.created_at) + (p.repo ? " · " + p.repo : "")));
+    history.replaceState(null, "", "/policy?proposal=" + p.id);
+    const banners = [];
+    if (view.stale && p.status === "draft") banners.push(el("p", { class: "banner warn" },
+      "The settings changed since this proposal was made (v" + p.settings_version + " → v" + view.current_settings_version + "). Re-preview it before approving. ",
+      el("button", { type: "button", onclick: () => busy("Re-previewing…", async () => renderProposal(await call("POST", "/api/policy/proposals/" + p.id + "/repreview"))) }, "Re-preview")));
+    if (view.expired && p.status === "draft") banners.push(el("p", { class: "banner warn" }, "This proposal expired. Re-preview it or describe the change again."));
+    if (p.outcome) banners.push(el("p", { class: p.outcome.errors.length ? "banner warn" : "banner info" },
+      (p.outcome.settings_version ? "Settings saved as version " + p.outcome.settings_version + ". " : "") +
+      (p.outcome.rules_written.length ? "Rules written: " + p.outcome.rules_written.join(", ") + ". " : "") +
+      (p.outcome.restart_required.length ? "Restart needed for: " + p.outcome.restart_required.join(", ") + ". " : "") +
+      p.outcome.errors.join(" ")));
+    const nothing = !c.settings.length && !c.rules.length && !c.gate.length && !c.checks.length;
+    replace($("proposal"),
+      banners,
+      el("p", {}, c.summary || "No summary."),
+      nothing && el("p", { class: "empty" }, "Nothing in the description maps to a qgate setting, rule or check."),
+      view.preview.length ? [el("h3", {}, "Diff"), view.preview.map(diffSection)] : null,
+      c.settings.length ? [el("h3", {}, "Server settings"), c.settings.map((s, i) => settingItem(s, i, editable))] : null,
+      c.rules.length ? [el("h3", {}, "Rulebook rules"), c.rules.map((r, i) => ruleItem(r, i, editable))] : null,
+      view.repo_patch ? [el("h3", {}, "Repository patch (commit it yourself)"),
+        el("p", { class: "muted" }, "qgate never writes to repositories. Copy this into .qgate.toml:"),
+        el("pre", { class: "quote" }, view.repo_patch),
+        el("button", { type: "button", onclick: (e) => copy(view.repo_patch, e.target) }, "Copy patch"),
+        c.gate.some((g) => g.loosening) && el("p", { class: "banner bad" }, "This patch loosens the repository gate.")] : null,
+      c.rejected.length ? [el("h3", {}, "Not applicable (" + c.rejected.length + ")"),
+        el("ul", { class: "plain" }, c.rejected.map((r) => el("li", {}, chip(r.kind, "neutral"), " ", el("span", { class: "mono" }, r.subject), " — ", r.reason)))] : null,
+      c.unsupported.length ? [el("h3", {}, "Cannot be automated"), el("ul", {}, c.unsupported.map((u) => el("li", {}, u)))] : null,
+      el("div", { class: "confirm", id: "confirm-box", hidden: true },
+        el("strong", {}, "Sensitive changes need your explicit confirmation:"),
+        el("ul", { id: "confirm-list" }),
+        el("label", {}, el("input", { type: "checkbox", id: "confirm-sensitive" }), " I understand and want to apply these sensitive changes.")),
+      el("div", { class: "row" },
+        editable && (c.settings.length || c.rules.length) && el("button", { type: "button", class: "primary", onclick: approve }, "Approve selected"),
+        p.status === "draft" && el("button", { type: "button", onclick: reject }, "Reject"),
+        el("label", {}, "Dry-run on the last", el("input", { type: "number", id: "dry-limit", min: 1, max: 200, value: 50 }), "runs"),
+        el("button", { type: "button", onclick: dryRun }, "Dry-run")));
+    renderConfirm();
+  }
+
+  async function copy(text, button) {
+    try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
+    catch (_) { button.textContent = "Copy failed"; }
+    setTimeout(() => { button.textContent = "Copy patch"; }, 2000);
+  }
+
+  function approve() {
+    const id = state.view.proposal.id;
+    const rules = [...document.querySelectorAll("input[data-rule]")].filter((c) => c.checked).map((c) => {
+      const index = Number(c.dataset.rule);
+      const approved = document.querySelector('input[data-rule-approved="' + index + '"]');
+      return { index, status: approved && approved.checked ? "approved" : "proposed" };
+    });
+    const body = { settings: selectedSettings(), rules, confirm_sensitive: Boolean($("confirm-sensitive") && $("confirm-sensitive").checked) };
+    return busy("Applying…", async () => {
+      renderProposal(await call("POST", "/api/policy/proposals/" + id + "/approve", body));
+      loadRecent();
+    });
+  }
+
+  function reject() {
+    const id = state.view.proposal.id;
+    return busy("Rejecting…", async () => {
+      renderProposal(await call("POST", "/api/policy/proposals/" + id + "/reject"));
+      loadRecent();
+    });
+  }
+
+  function dryRun() {
+    const id = state.view.proposal.id;
+    const limit = Number($("dry-limit").value) || 50;
+    return busy("Replaying history…", async () => renderDryRun(await call("GET", "/api/policy/proposals/" + id + "/dry-run?limit=" + limit)));
+  }
+
+  function renderDryRun(report) {
+    $("dry-run-panel").hidden = false;
+    replace($("dry-run"),
+      el("p", {}, "Replayed " + report.evaluated + " run(s)" + (report.skipped ? " (" + report.skipped + " without a report skipped)" : "") + ": ",
+        chip(report.pass_to_fail + " pass → fail", report.pass_to_fail ? "bad" : "neutral"), " ",
+        chip(report.fail_to_pass + " fail → pass", report.fail_to_pass ? "warn" : "neutral")),
+      report.drifted ? el("p", { class: "muted" }, report.drifted + " run(s) would already be decided differently with today's settings (the policy changed since).") : null,
+      el("ul", {}, report.caveats.map((c) => el("li", { class: "muted" }, c))),
+      report.flips.length ? el("table", {},
+        el("thead", {}, el("tr", {}, ["Run", "Repository", "When", "Recorded", "Now", "With proposal"].map((h) => el("th", { scope: "col" }, h)))),
+        el("tbody", {}, report.flips.map((f) => el("tr", {},
+          el("td", {}, el("a", { href: "/#run=" + f.run_id }, "#" + f.run_id)),
+          el("td", {}, f.repo_name),
+          el("td", {}, fmtTime(f.created_at)),
+          el("td", {}, chip(f.recorded_passed ? "pass" : "fail", f.recorded_passed ? "ok" : "bad")),
+          el("td", {}, chip(f.before_passed ? "pass" : "fail", f.before_passed ? "ok" : "bad")),
+          el("td", {}, chip(f.after_passed ? "pass" : "fail", f.after_passed ? "ok" : "bad"))))))
+        : el("p", { class: "empty" }, "No run would change outcome."));
+  }
+
+  async function loadRecent() {
+    try {
+      const { proposals } = await call("GET", "/api/policy/proposals");
+      replace($("recent"), proposals.length ? el("ul", { class: "plain" }, proposals.map((p) => el("li", {},
+        el("a", { href: "/policy?proposal=" + p.id, onclick: (e) => { e.preventDefault(); openProposal(p.id); } }, "#" + p.id), " ",
+        chip(p.status, STATUS_CLASS[p.status]), " ", el("span", { class: "muted" }, fmtTime(p.created_at) + (p.repo ? " · " + p.repo : "")), " ",
+        p.summary)))
+        : el("p", { class: "empty" }, "No proposals yet."));
+    } catch (err) { showError(err.message); }
+  }
+
+  function openProposal(id) {
+    return busy("Loading…", async () => {
+      $("dry-run-panel").hidden = true;
+      renderProposal(await call("GET", "/api/policy/proposals/" + encodeURIComponent(id)));
+    });
+  }
+
+  async function init() {
+    const description = $("description");
+    const count = () => { $("counter").textContent = description.value.length + " / 8000"; };
+    description.addEventListener("input", count);
+    $("propose").addEventListener("click", () => busy("Asking the policy agent… this can take a minute.", async () => {
+      $("dry-run-panel").hidden = true;
+      renderProposal(await call("POST", "/api/policy/proposals", { description: description.value, repo: $("repo").value || null }));
+      loadRecent();
+    }));
+    const params = new URLSearchParams(location.search);
+    try {
+      const { repos } = await call("GET", "/api/policy/repos");
+      $("repo").append(...repos.map((r) => el("option", { value: r }, r)));
+      if (params.has("run") && params.has("finding")) {
+        const prefill = await call("GET", "/api/policy/prefill?run=" + encodeURIComponent(params.get("run")) + "&finding=" + encodeURIComponent(params.get("finding")));
+        description.value = prefill.description;
+        if (repos.includes(prefill.repo)) $("repo").value = prefill.repo;
+        count();
+        description.focus();
+      }
+    } catch (err) { showError(err.message); }
+    loadRecent();
+    if (params.has("proposal")) openProposal(params.get("proposal"));
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

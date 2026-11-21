@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>qgate dashboard</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #0b5cad; --focus: #0b5cad;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --selected: #e6f0fb;
+  --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #6cb2ff; --focus: #6cb2ff;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6;
+    --code-bg: #10141a; --selected: #1b2a3d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+.tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.tile { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 12px; min-width: 110px; }
+.tile .label { font-size: 12px; color: var(--muted); }
+.tile .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+select, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; padding: 16px 20px; }
+@media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; }
+.wide { grid-column: 1 / -1; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+tr.run-row { cursor: pointer; }
+tr.run-row:hover { background: var(--surface-2); }
+tr.run-row[aria-selected="true"] { background: var(--selected); }
+.row-btn { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.chip { display: inline-block; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.sev { display: inline-flex; gap: 4px; }
+.pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; color: var(--muted); }
+.muted { color: var(--muted); }
+.error-banner { margin: 12px 20px 0; padding: 8px 12px; border-radius: var(--radius); }
+.detail h3 { font-size: 14px; margin: 18px 0 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.detail h3:first-of-type { border-top: 0; padding-top: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); }
+.verdict { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; margin: 10px 0 4px; }
+ul.plain { list-style: none; padding: 0; margin: 0; }
+ul.plain > li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+ul.plain > li:last-child { border-bottom: 0; }
+ul.reasons { margin: 4px 0; padding-left: 20px; }
+.card { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface); }
+.card-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.card-title { font-weight: 600; }
+.file-group > h4 { font-family: var(--mono); font-size: 13px; margin: 12px 0 4px; word-break: break-all; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; margin: 6px 0; white-space: pre; max-height: 360px; }
+details > summary { cursor: pointer; color: var(--accent); }
+p { margin: 4px 0; }
+.empty { color: var(--muted); font-style: italic; }
+.side-by-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+@media (max-width: 700px) { .side-by-side { grid-template-columns: minmax(0, 1fr); } }
+.field { margin: 6px 0; }
+.field > .label { font-size: 12px; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.gwt { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 6px 0; }
+.gwt dt { font-weight: 600; color: var(--muted); }
+.gwt dd { margin: 0; }
+.progress { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate</h1><a href="/settings">Settings</a><a href="/policy">Policy assistant</a></div>
+  <div class="tiles" aria-label="Last 7 days">
+    <div class="tile"><div class="label">Gate pass rate (7d)</div><div class="value" id="t-pass">–</div></div>
+    <div class="tile"><div class="label">Runs (7d)</div><div class="value" id="t-runs">–</div></div>
+    <div class="tile"><div class="label">Findings (7d)</div><div class="value" id="t-findings">–</div></div>
+    <div class="tile"><div class="label">Est. cost (7d)</div><div class="value" id="t-cost">–</div></div>
+  </div>
+  <form class="filters" id="filters" role="search">
+    <label>Repository<select id="f-repo"><option value="">All repositories</option></select></label>
+    <label>Status<select id="f-status">
+      <option value="">Any status</option><option value="passed">Passed</option>
+      <option value="failed">Failed</option><option value="error">Error</option>
+    </select></label>
+    <button type="button" id="refresh">Refresh</button>
+  </form>
+</header>
+<div id="error" class="error-banner bad" role="alert" hidden></div>
+<main>
+  <section class="panel" aria-labelledby="runs-h">
+    <h2 id="runs-h">Review runs</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th scope="col">Time</th><th scope="col">Repo</th><th scope="col">Branch</th><th scope="col">Commit</th>
+          <th scope="col">Ticket</th><th scope="col">Status</th><th scope="col">Findings</th><th scope="col">AC met</th>
+        </tr></thead>
+        <tbody id="runs-body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <button type="button" id="prev">Previous</button>
+      <span id="page-info" aria-live="polite"></span>
+      <button type="button" id="next">Next</button>
+    </div>
+  </section>
+  <section class="panel detail" aria-labelledby="detail-h" aria-live="polite">
+    <h2 id="detail-h">Run detail</h2>
+    <div id="detail"><p class="empty">Select a run to see its gate verdict, acceptance criteria and findings.</p></div>
+  </section>
+  <section class="panel wide" aria-labelledby="rec-h">
+    <h2 id="rec-h">Recurring issues → promote to lint rule</h2>
+    <p class="muted">Every repeated review comment is a candidate for a deterministic lint rule. Findings seen 3+ times in the last 90 days, grouped by category and normalized title.</p>
+    <div id="recurring"></div>
+  </section>
+</main>
+<script>
+"use strict";
+(() => {
+  const PAGE_SIZE = 50;
+  const SEVERITIES = ["critical", "major", "minor", "info"];
+  const SEVERITY_CLASS = { critical: "bad", major: "warn", minor: "info", info: "neutral" };
+  const STATUS_CLASS = { passed: "ok", failed: "bad", error: "warn" };
+  const CRITERION_CLASS = { met: "ok", not_met: "bad", unclear: "warn" };
+  const CRITERION_LABEL = { met: "Met", not_met: "Not met", unclear: "Unclear" };
+  const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,11}$/;
+  const state = { offset: 0, total: 0, selected: null };
+  const $ = (id) => document.getElementById(id);
+
+  // Builds DOM nodes. Strings and numbers always become text nodes, so untrusted
+  // data (findings quote arbitrary code) is never parsed as HTML.
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    append(node, children);
+    return node;
+  }
+  function append(node, children) {
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+  }
+  function replace(node, ...children) { node.replaceChildren(); append(node, children); }
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+  const empty = (text) => el("p", { class: "empty" }, text);
+  const shortSha = (sha) => (sha ? sha.slice(0, 8) : "–");
+  const fmtTime = (iso) => new Date(iso).toLocaleString();
+  const fmtCost = (usd) => "$" + Number(usd || 0).toFixed(usd >= 1 ? 2 : 3);
+  const fmtPct = (rate) => (rate === null || rate === undefined ? "–" : Math.round(rate * 100) + "%");
+  const sumSeverity = (counts) => SEVERITIES.reduce((n, s) => n + (counts[s] || 0), 0);
+
+  function showError(message) {
+    const banner = $("error");
+    banner.textContent = message;
+    banner.hidden = !message;
+  }
+
+  async function getJson(path) {
+    const response = await fetch(path, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error((body && body.error) || ("HTTP " + response.status));
+    return body;
+  }
+
+  function severityChips(counts) {
+    const parts = SEVERITIES.filter((s) => counts[s] > 0).map((s) =>
+      chip(counts[s] + " " + s, SEVERITY_CLASS[s]));
+    return parts.length ? el("span", { class: "sev" }, parts) : el("span", { class: "muted" }, "none");
+  }
+
+  async function loadSummary() {
+    const summary = await getJson("/api/summary");
+    const week = summary.last_7_days;
+    $("t-pass").textContent = fmtPct(week.pass_rate);
+    $("t-runs").textContent = String(week.runs);
+    $("t-findings").textContent = String(sumSeverity(week.findings_by_severity));
+    $("t-cost").textContent = fmtCost(week.estimated_cost_usd);
+    const select = $("f-repo");
+    const current = select.value;
+    replace(select, el("option", { value: "" }, "All repositories"),
+      summary.repos.map((r) => el("option", { value: r }, r)));
+    select.value = summary.repos.includes(current) ? current : "";
+  }
+
+  async function loadRuns() {
+    const params = new URLSearchParams({ limit: PAGE_SIZE, offset: state.offset });
+    if ($("f-repo").value) params.set("repo", $("f-repo").value);
+    if ($("f-status").value) params.set("status", $("f-status").value);
+    const page = await getJson("/api/runs?" + params);
+    state.total = page.total;
+    const body = $("runs-body");
+    if (!page.items.length) {
+      replace(body, el("tr", {}, el("td", { colspan: 8 }, empty("No runs recorded yet."))));
+    } else {
+      replace(body, page.items.map(runRow));
+    }
+    const last = Math.min(state.offset + page.items.length, page.total);
+    $("page-info").textContent = page.total ? (state.offset + 1) + "–" + last + " of " + page.total : "";
+    $("prev").disabled = state.offset === 0;
+    $("next").disabled = last >= page.total;
+  }
+
+  function runRow(run) {
+    const open = () => selectRun(run.id);
+    return el("tr", { class: "run-row", "aria-selected": String(state.selected === run.id), "data-id": run.id, onclick: open },
+      el("td", {}, el("button", { type: "button", class: "row-btn", onclick: (e) => { e.stopPropagation(); open(); },
+        "aria-label": "Open run " + run.id }, fmtTime(run.created_at))),
+      el("td", { title: run.repo_path }, run.repo_name),
+      el("td", {}, run.branch || "–"),
+      el("td", { class: "mono", title: run.commit || "" }, shortSha(run.commit)),
+      el("td", {}, ticketLink(run.ticket_key)),
+      el("td", {}, chip(run.status, STATUS_CLASS[run.status])),
+      el("td", {}, run.status === "error" ? el("span", { class: "muted" }, "–") : severityChips(run.findings)),
+      el("td", { class: "num" }, run.criteria_total ? run.criteria_met + "/" + run.criteria_total : "–"));
+  }
+
+  // Internal link to the ticket view; plain text for anything that is not a valid key.
+  function ticketLink(key) {
+    if (!key) return "–";
+    if (!TICKET_KEY.test(key)) return key;
+    return el("a", { href: "#ticket-" + key, onclick: (e) => e.stopPropagation(), title: "All runs for " + key }, key);
+  }
+
+  async function selectRun(id) {
+    state.selected = id;
+    $("detail-h").textContent = "Run detail";
+    history.replaceState(null, "", "#run=" + id);
+    for (const row of document.querySelectorAll("tr.run-row")) {
+      row.setAttribute("aria-selected", String(row.dataset.id === String(id)));
+    }
+    try {
+      renderDetail(await getJson("/api/runs/" + encodeURIComponent(id)));
+      showError("");
+    } catch (err) {
+      replace($("detail"), empty("Could not load run " + id + ": " + err.message));
+    }
+  }
+
+  function codeBlock(text) { return el("pre", {}, el("code", {}, text)); }
+
+  function renderDetail(run) {
+    const report = run.report;
+    const nodes = [
+      el("div", { class: "meta" },
+        el("span", {}, el("strong", {}, run.repo_name)),
+        el("span", {}, "branch ", run.branch || "–"),
+        el("span", { class: "mono", title: run.commit || "" }, shortSha(run.commit)),
+        run.ticket_key ? el("span", {}, "ticket ", ticketLink(run.ticket_key)) : null,
+        el("span", {}, fmtTime(run.created_at)),
+        el("span", {}, "trigger ", run.trigger.replace("_", "-"))),
+    ];
+    if (run.error) nodes.push(el("div", { class: "card bad", role: "status" }, el("strong", {}, "Error: "), run.error));
+    if (!report) {
+      nodes.push(el("div", { class: "verdict" }, chip(run.status, STATUS_CLASS[run.status]), "No review report"));
+      replace($("detail"), nodes);
+      return;
+    }
+    nodes.push(verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
+      testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
+      architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
+      skippedSection(report.skipped), rejectedSection(report.rejected), usageSection(report));
+    replace($("detail"), nodes);
+  }
+
+  function criterionText(requirements, id) {
+    const found = requirements && requirements.requirements.criteria.find((c) => c.id === id);
+    return found ? found.text : "";
+  }
+
+  // Scenario by id, from the analyst brief or (when the brief is missing) the test evidence.
+  function scenarioIndex(agents) {
+    const index = new Map();
+    if (!agents) return index;
+    for (const t of agents.tests) if (t.evidence && t.evidence.scenario) index.set(t.scenario_id, t.evidence.scenario);
+    for (const sc of (agents.brief ? agents.brief.scenarios : [])) index.set(sc.id, sc);
+    return index;
+  }
+
+  const designKey = (d) => (d.kind + ":" + d.node_id).toLowerCase();
+
+  // Each reason is "hard" (always blocks when listed) or "policy" (blocks only if the policy says so).
+  function gateReasons(report) {
+    const gate = report.gate;
+    const agents = report.agents;
+    const reasons = [];
+    const add = (kind, group, ...content) => reasons.push({ kind, group, content });
+    for (const index of gate.blocking) {
+      const f = report.findings[index];
+      if (f) add("hard", "finding", "Blocking finding: ", chip(f.severity, SEVERITY_CLASS[f.severity]), " ", f.title,
+        " ", el("span", { class: "mono muted" }, f.file + ":" + f.line));
+    }
+    for (const name of gate.failed_checks) add("hard", "check", "Failed check: ", el("strong", {}, name));
+    for (const id of gate.unmet_criteria) {
+      const text = criterionText(report.requirements, id);
+      add("policy", "criteria", "Unmet acceptance criterion ", el("strong", {}, id), text ? ": " + text : "");
+    }
+    if (gate.incomplete) add("policy", "incomplete", "Review incomplete: some files could not be reviewed (see skipped files)");
+    const scenarios = scenarioIndex(agents);
+    for (const id of gate.failed_tests) {
+      const sc = scenarios.get(id);
+      add("policy", "tests", "Failed generated test ", el("strong", {}, id), sc ? ": " + sc.title : "",
+        sc && sc.criterion_ids.length ? el("span", { class: "muted" }, " (" + sc.criterion_ids.join(", ") + ")") : null);
+    }
+    for (const id of gate.rule_violations) {
+      const v = agents && agents.violations.find((x) => x.rule_id === id);
+      add("policy", "rules", "Approved rule violated: ", el("strong", {}, id), v && v.rule_title ? " — " + v.rule_title : "",
+        v ? el("span", { class: "mono muted" }, " " + v.file + ":" + v.line) : null);
+    }
+    for (const key of gate.design_mismatches) {
+      const d = agents && agents.design.find((x) => designKey(x) === key);
+      add("hard", "design", "Design mismatch ", chip(d ? d.kind : key.split(":")[0], "neutral"), " ",
+        d ? d.frame + ": design says “" + d.design_value + "”" : key,
+        d ? el("span", { class: "mono muted" }, " " + d.file + ":" + d.line) : null);
+    }
+    return reasons;
+  }
+
+  function verdictSection(report) {
+    const gate = report.gate;
+    const reasons = gateReasons(report);
+    // The gate JSON lists reasons, not which ones the policy blocks on: a policy reason is known to
+    // block only when it is the sole kind of reason for a failed gate.
+    const policyGroups = new Set(reasons.filter((r) => r.kind === "policy").map((r) => r.group));
+    const soleCause = !reasons.some((r) => r.kind === "hard") && policyGroups.size === 1;
+    const label = (r) => {
+      if (gate.passed) return chip("warning", "warn");
+      if (r.kind === "hard" || soleCause) return chip("blocking", "bad");
+      return chip("blocking or warning (per policy)", "warn");
+    };
+    const items = reasons.map((r) => el("li", {}, label(r), " ", r.content));
+    return el("div", {},
+      el("h3", {}, "Gate verdict"),
+      el("div", { class: "verdict" }, chip(gate.passed ? "PASSED" : "FAILED", gate.passed ? "ok" : "bad"),
+        gate.passed ? "Commit passes the quality gate" : "Commit blocked by the quality gate"),
+      items.length && gate.passed ? el("p", { class: "muted" }, "Warnings (reported, not blocking):") : null,
+      items.length ? el("ul", { class: "reasons" }, items) : null);
+  }
+
+  function safeTicketLink(url, label) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "https:") return el("a", { href: parsed.href, rel: "noopener noreferrer", target: "_blank" }, label);
+    } catch (_) { /* not a URL: show as text */ }
+    return label;
+  }
+
+  function httpsUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === "https:" ? parsed : null;
+    } catch (_) { return null; }
+  }
+
+  // Jira link for any key of the same site, derived from the requirements URL (".../browse/KEY").
+  function jiraUrl(requirements, key) {
+    const base = requirements && requirements.requirements.url && httpsUrl(requirements.requirements.url);
+    if (!base || !TICKET_KEY.test(key)) return null;
+    const at = base.pathname.lastIndexOf("/browse/");
+    if (at < 0) return null;
+    return base.origin + base.pathname.slice(0, at) + "/browse/" + key;
+  }
+
+  const criterionTicket = (id, owner) => (id.includes("/") ? id.split("/")[0] : owner);
+
+  function ticketSection(report) {
+    const ctx = report.ticket;
+    const req = report.requirements;
+    const brief = report.agents && report.agents.brief;
+    if (!ctx && !req && !brief) return null;
+    const keys = ctx && ctx.keys.length ? ctx.keys : (req ? [req.requirements.key] : []);
+    const section = el("section", { "aria-label": "Ticket" }, el("h3", {}, "Ticket"));
+    if (keys.length) {
+      section.append(el("p", { class: "card-head" }, "Keys: ", keys.map((key) => {
+        const jira = jiraUrl(req, key);
+        return el("span", { class: "card-head" }, ticketLink(key),
+          jira ? el("a", { href: jira, rel: "noopener noreferrer", target: "_blank", class: "muted" }, "(Jira)") : null);
+      })));
+    }
+    if (ctx && ctx.description) {
+      section.append(el("details", {}, el("summary", {}, "Description"), el("p", { style: "white-space: pre-wrap" }, ctx.description)));
+    }
+    const links = ctx ? ctx.design_links.map(httpsUrl).filter(Boolean) : [];
+    if (links.length) {
+      section.append(el("div", { class: "field" }, el("div", { class: "label" }, "Figma"),
+        el("ul", { class: "reasons" }, links.map((u) => el("li", {},
+          el("a", { href: u.href, rel: "noopener noreferrer", target: "_blank" }, u.hostname + u.pathname))))));
+    }
+    if (brief && brief.implicit_requirements.length) {
+      section.append(el("div", { class: "field" },
+        el("div", { class: "label" }, "Implicit requirements ", chip("suggested, not gating", "neutral")),
+        el("ul", { class: "reasons" }, brief.implicit_requirements.map((text) => el("li", {}, text)))));
+    }
+    return section;
+  }
+
+  function assessmentItem(requirements, a) {
+    return el("li", {},
+      el("div", { class: "card-head" }, chip(CRITERION_LABEL[a.status] || a.status, CRITERION_CLASS[a.status]),
+        el("strong", {}, a.criterion_id), criterionText(requirements, a.criterion_id)),
+      a.explanation ? el("p", {}, a.explanation) : null,
+      a.evidence.map((e) => el("div", {}, el("span", { class: "mono muted" }, e.file + ":" + e.line),
+        e.quote ? codeBlock(e.quote) : null)));
+  }
+
+  function criteriaSection(requirements) {
+    const section = el("section", { "aria-label": "Acceptance criteria" }, el("h3", {}, "Acceptance criteria"));
+    if (!requirements) {
+      section.append(empty("No ticket linked to this run."));
+      return section;
+    }
+    const ticket = requirements.requirements;
+    const label = ticket.key + (ticket.title ? " — " + ticket.title : "");
+    section.append(el("p", {}, ticket.url ? safeTicketLink(ticket.url, label) : label));
+    if (!requirements.assessments.length) section.append(empty("The ticket has no acceptance criteria."));
+    const byTicket = new Map();
+    for (const a of requirements.assessments) {
+      const key = criterionTicket(a.criterion_id, ticket.key);
+      byTicket.set(key, [...(byTicket.get(key) || []), a]);
+    }
+    for (const [key, items] of byTicket) {
+      section.append(el("div", { class: "file-group" },
+        byTicket.size > 1 ? el("h4", {}, key) : null,
+        el("ul", { class: "plain" }, items.map((a) => assessmentItem(requirements, a)))));
+    }
+    return section;
+  }
+
+  // Shell-style quoting so the displayed command can be pasted as is.
+  function shellQuote(arg) {
+    return /^[\w@%+=:,./-]+$/.test(arg) ? arg : "'" + arg.replace(/'/g, "'\\''") + "'";
+  }
+
+  function selectContents(node) {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Code block with a Copy button; falls back to selecting the text when the clipboard is unavailable.
+  function copyableCode(text, label) {
+    const code = el("code", {}, text);
+    const button = el("button", { type: "button", "aria-label": "Copy " + label, onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied";
+      } catch (_) {
+        selectContents(code);
+        button.textContent = "Selected: press Ctrl/Cmd+C";
+      }
+      setTimeout(() => { button.textContent = "Copy"; }, 2000);
+    } }, "Copy");
+    return el("div", { class: "field" }, el("div", { class: "label" }, label, button), el("pre", {}, code));
+  }
+
+  const field = (label, ...content) => el("div", { class: "field" }, el("div", { class: "label" }, label), ...content);
+
+  function evidenceBlock(ev) {
+    return el("div", {},
+      field("Acceptance criteria", el("ul", { class: "reasons" }, ev.criterion_ids.map((id, i) =>
+        el("li", {}, el("strong", {}, id), ev.criterion_texts[i] ? ": " + ev.criterion_texts[i] : "")))),
+      field("Test file", el("span", { class: "mono" }, ev.test_file || "–")),
+      ev.test_source ? copyableCode(ev.test_source, "Test source") : null,
+      field("Command", el("span", { class: "mono" }, ev.command.map(shellQuote).join(" ") || "–"),
+        el("span", { class: "muted" }, " · exit code " + (ev.exit_code === null ? "–" : ev.exit_code))),
+      ev.output ? field("Failing output", codeBlock(ev.output)) : null,
+      ev.code_under_test.length ? field("Code under test", ev.code_under_test.map((c) => el("div", {},
+        el("span", { class: "mono muted" }, c.file + ":" + c.line), c.quote ? codeBlock(c.quote) : null))) : null,
+      field("Commit", el("span", { class: "mono" }, ev.commit || "–")),
+      ev.reproduce ? copyableCode(ev.reproduce, "Reproduce") : null);
+  }
+
+  const VERDICT = {
+    passed: ["passed", "ok"], failed_assertion: ["failed", "bad"], inconclusive: ["inconclusive", "warn"],
+  };
+
+  function testCard(scenario, result, failedInGate) {
+    const [label, cls] = result ? (VERDICT[result.verdict] || [result.verdict, "neutral"]) : ["not run", "neutral"];
+    const showEvidence = result && result.evidence && result.verdict !== "passed";
+    return el("div", { class: "card" },
+      el("div", { class: "card-head" }, chip(label, cls), el("strong", {}, scenario.id),
+        el("span", { class: "card-title" }, scenario.title),
+        scenario.criterion_ids.map((id) => chip(id, "info")),
+        failedInGate ? chip("listed by gate", "bad") : null,
+        result && result.language ? el("span", { class: "muted" }, result.language) : null),
+      el("dl", { class: "gwt" }, el("dt", {}, "Given"), el("dd", {}, scenario.given),
+        el("dt", {}, "When"), el("dd", {}, scenario.when), el("dt", {}, "Then"), el("dd", {}, scenario.then)),
+      result && result.note ? el("p", { class: "muted" }, "Note: " + result.note) : null,
+      showEvidence ? el("details", { open: result.verdict === "failed_assertion" },
+        el("summary", {}, "Evidence"), evidenceBlock(result.evidence)) : null);
+  }
+
+  function testsSection(report) {
+    const agents = report.agents;
+    if (!agents) return null;
+    const scenarios = scenarioIndex(agents);
+    const results = new Map(agents.tests.map((t) => [t.scenario_id, t]));
+    const ids = [...new Set([...scenarios.keys(), ...results.keys()])];
+    const section = el("section", { "aria-label": "Generated tests" }, el("h3", {}, "Generated tests (" + ids.length + ")"));
+    if (!ids.length) {
+      section.append(empty("No test scenarios for this run."));
+      return section;
+    }
+    const failed = new Set(report.gate.failed_tests);
+    for (const id of ids) {
+      const scenario = scenarios.get(id) || { id, title: "", criterion_ids: [], given: "", when: "", then: "" };
+      section.append(testCard(scenario, results.get(id), failed.has(id)));
+    }
+    return section;
+  }
+
+  function groupBy(items, keyOf) {
+    const groups = new Map();
+    for (const item of items) groups.set(keyOf(item), [...(groups.get(keyOf(item)) || []), item]);
+    return groups;
+  }
+
+  function architectureSection(report, repoName) {
+    const agents = report.agents;
+    if (!agents) return null;
+    const section = el("section", { "aria-label": "Architecture" },
+      el("h3", {}, "Architecture conformance (" + agents.violations.length + ")"),
+      el("p", {}, el("a", { href: "/rulebook?repo=" + encodeURIComponent(repoName) }, "Open the rulebook for " + repoName)));
+    if (!agents.violations.length) {
+      section.append(empty("No rule violations."));
+      return section;
+    }
+    for (const [ruleId, items] of groupBy(agents.violations, (v) => v.rule_id)) {
+      const first = items[0];
+      section.append(el("div", { class: "file-group" },
+        el("div", { class: "card-head" }, el("strong", {}, ruleId), first.rule_title,
+          first.approved ? chip("approved rule", "info") : chip("inferred rule (never blocks)", "neutral")),
+        items.map((v) => el("div", { class: "card" },
+          el("span", { class: "mono muted" }, v.file + ":" + v.line),
+          v.evidence ? codeBlock(v.evidence) : null,
+          v.explanation ? el("p", {}, v.explanation) : null,
+          v.suggestion ? el("p", {}, el("strong", {}, "Suggestion: "), v.suggestion) : null))));
+    }
+    return section;
+  }
+
+  function designSection(report) {
+    const agents = report.agents;
+    if (!agents) return null;
+    const section = el("section", { "aria-label": "Design" }, el("h3", {}, "Design conformance (" + agents.design.length + ")"));
+    if (!agents.design.length) {
+      section.append(empty("No design mismatches."));
+      return section;
+    }
+    const blocking = new Set(report.gate.design_mismatches);
+    for (const [frame, items] of groupBy(agents.design, (d) => d.frame)) {
+      section.append(el("div", { class: "file-group" }, el("h4", {}, frame || "(unnamed frame)"),
+        items.map((d) => el("div", { class: "card" },
+          el("div", { class: "card-head" }, chip(d.kind, "info"), el("span", { class: "mono muted" }, "node " + d.node_id),
+            blocking.has(designKey(d)) ? chip("listed by gate", "bad") : null),
+          el("div", { class: "side-by-side" },
+            field("Design", codeBlock(d.design_value)),
+            field("Code " + d.file + ":" + d.line, codeBlock(d.code_evidence))),
+          d.explanation ? el("p", {}, d.explanation) : null))));
+    }
+    return section;
+  }
+
+  function agentNotesSection(agents) {
+    if (!agents || (!agents.notes.length && agents.cost_usd === null)) return null;
+    return el("section", { "aria-label": "Agent notes" }, el("h3", {}, "Agent notes"),
+      agents.notes.length ? el("ul", { class: "reasons" }, agents.notes.map((n) => el("li", {}, n))) : null,
+      agents.cost_usd === null ? null : el("p", { class: "muted" }, "Agent cost " + fmtCost(agents.cost_usd)));
+  }
+
+  function checksSection(checks) {
+    return el("section", { "aria-label": "Deterministic checks" }, el("h3", {}, "Deterministic checks"),
+      checks.length ? el("ul", { class: "plain" }, checks.map((c) => el("li", {},
+        el("div", { class: "card-head" },
+          chip(c.outcome.replace("_", " "), c.outcome === "passed" ? "ok" : (c.required ? "bad" : "warn")),
+          el("strong", {}, c.name), c.required ? null : chip("optional", "neutral"),
+          el("span", { class: "muted" }, "exit " + (c.exit_code === null ? "–" : c.exit_code) + " · " + c.duration_ms + " ms")),
+        c.output_tail ? el("details", { open: c.outcome !== "passed" }, el("summary", {}, "Output tail"), codeBlock(c.output_tail)) : null)))
+        : empty("No checks configured."));
+  }
+
+  function findingCard(f) {
+    return el("div", { class: "card" },
+      el("div", { class: "card-head" }, chip(f.severity, SEVERITY_CLASS[f.severity]), chip(f.category.replace("_", " "), "neutral"),
+        el("span", { class: "muted" }, "confidence " + f.confidence), el("span", { class: "mono muted" }, "line " + f.line)),
+      el("p", { class: "card-title" }, f.title),
+      f.explanation ? el("p", {}, f.explanation) : null,
+      f.evidence ? codeBlock(f.evidence) : null,
+      f.suggestion ? el("p", {}, el("strong", {}, "Suggestion: "), f.suggestion) : null,
+      f.prevention_rule ? el("p", {}, el("strong", {}, "Rule for coding agents: "), f.prevention_rule.text,
+        f.prevention_rule.scope ? el("span", { class: "mono muted" }, " (" + f.prevention_rule.scope + ")") : null) : null);
+  }
+
+  function findingsSection(findings, runId) {
+    const section = el("section", { "aria-label": "Code-quality findings" }, el("h3", {}, "Code-quality findings (" + findings.length + ")"));
+    if (!findings.length) {
+      section.append(empty("No verified findings."));
+      return section;
+    }
+    const byFile = new Map();
+    findings.forEach((f, index) => byFile.set(f.file, [...(byFile.get(f.file) || []), { f, index }]));
+    // "Prevent this": opens the Policy assistant with the finding's context pre-filled.
+    const withPrevent = ({ f, index }) => {
+      const card = findingCard(f);
+      card.append(el("p", {}, el("a", { href: "/policy?run=" + encodeURIComponent(runId) + "&finding=" + index }, "Prevent this from happening again →")));
+      return card;
+    };
+    for (const [file, items] of byFile) {
+      section.append(el("div", { class: "file-group" }, el("h4", {}, file), items.map(withPrevent)));
+    }
+    return section;
+  }
+
+  function skippedSection(skipped) {
+    if (!skipped.length) return null;
+    return el("section", { "aria-label": "Skipped files" }, el("h3", {}, "Skipped files (" + skipped.length + ")"),
+      el("ul", { class: "reasons" }, skipped.map((s) => el("li", {}, el("span", { class: "mono" }, s.path), " — ",
+        s.reason.kind.replace(/_/g, " "), s.reason.detail ? ": " + s.reason.detail : ""))));
+  }
+
+  function rejectedSection(rejected) {
+    if (!rejected.length) return null;
+    return el("section", { "aria-label": "Rejected findings" }, el("h3", {}, "Rejected (unverified) findings"),
+      el("details", {}, el("summary", {}, rejected.length + " finding(s) dropped because their evidence could not be verified"),
+        rejected.map((r) => el("div", { class: "card" },
+          el("div", { class: "card-head" }, chip(r.reason.replace(/_/g, " "), "neutral"),
+            el("span", { class: "mono muted" }, r.finding.file + ":" + r.finding.line)),
+          el("p", { class: "card-title" }, r.finding.title),
+          r.finding.evidence ? codeBlock(r.finding.evidence) : null))));
+  }
+
+  function usageSection(report) {
+    const u = report.usage;
+    return el("p", { class: "muted" }, "Files reviewed: " + report.files_reviewed.length +
+      " · tokens in " + u.input_tokens + " / out " + u.output_tokens +
+      (report.estimated_cost_usd === null ? "" : " · est. cost " + fmtCost(report.estimated_cost_usd)) +
+      (report.agents && report.agents.cost_usd !== null ? " · agents " + fmtCost(report.agents.cost_usd) : ""));
+  }
+
+  function lintTicket(issue) {
+    return [
+      "Promote recurring review finding to a lint rule",
+      "Category: " + issue.category,
+      "Pattern: " + issue.normalized_title,
+      "Seen " + issue.occurrences + " times in: " + issue.repos.join(", "),
+      "Example: " + issue.example_title + " (" + issue.example_file + ")",
+      "", issue.example_evidence,
+    ].join("\n");
+  }
+
+  async function copyTicket(issue, button) {
+    try {
+      await navigator.clipboard.writeText(lintTicket(issue));
+      button.textContent = "Copied";
+    } catch (_) {
+      button.textContent = "Copy failed";
+    }
+    setTimeout(() => { button.textContent = "Copy rule proposal"; }, 2000);
+  }
+
+  async function loadRecurring() {
+    const issues = await getJson("/api/recurring");
+    if (!issues.length) {
+      replace($("recurring"), empty("No recurring issues yet."));
+      return;
+    }
+    replace($("recurring"), el("div", { class: "table-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["Seen", "Category", "Pattern", "Repos", "Last seen", "Example", ""].map((h) => el("th", { scope: "col" }, h)))),
+      el("tbody", {}, issues.map((issue) => el("tr", {},
+        el("td", { class: "num" }, issue.occurrences + "×"),
+        el("td", {}, chip(issue.category.replace("_", " "), "neutral")),
+        el("td", { style: "white-space: normal" }, el("strong", {}, issue.normalized_title)),
+        el("td", { style: "white-space: normal" }, issue.repos.join(", ")),
+        el("td", {}, fmtTime(issue.last_seen)),
+        el("td", { style: "white-space: normal; min-width: 260px" },
+          el("details", {}, el("summary", {}, issue.example_title),
+            el("div", { class: "mono muted" }, issue.example_file), codeBlock(issue.example_evidence))),
+        el("td", {}, el("button", { type: "button", onclick: (e) => copyTicket(issue, e.currentTarget) }, "Copy rule proposal"))))))));
+  }
+
+  function progressDots(history) {
+    // history is newest first; show oldest -> newest.
+    return el("span", { class: "progress", "aria-label": "Status per run, oldest first" },
+      [...history].reverse().map((p) => el("span", {
+        class: "dot " + (CRITERION_CLASS[p.status] || "neutral"),
+        title: (CRITERION_LABEL[p.status] || p.status) + " · run " + p.run_id + " · " + shortSha(p.commit) + " · " + fmtTime(p.created_at),
+      })));
+  }
+
+  function renderTicket(data) {
+    const runs = data.runs;
+    const nodes = [
+      el("p", { class: "muted" }, runs.length + " run(s) concern this ticket (as the reviewed ticket or as parent Story)."),
+      el("h3", {}, "Acceptance criteria progress"),
+    ];
+    if (!data.criteria.length) nodes.push(empty("No assessed criteria for this ticket yet."));
+    else nodes.push(el("div", { class: "table-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["Criterion", "Latest", "Latest run", "History"].map((h) => el("th", { scope: "col" }, h)))),
+      el("tbody", {}, data.criteria.map((c) => el("tr", {},
+        el("td", { style: "white-space: normal" }, el("strong", {}, c.id), c.text ? " " + c.text : ""),
+        el("td", {}, chip(CRITERION_LABEL[c.latest.status] || c.latest.status, CRITERION_CLASS[c.latest.status])),
+        el("td", { class: "mono" }, el("a", { href: "#run=" + c.latest.run_id }, shortSha(c.latest.commit))),
+        el("td", {}, progressDots(c.history))))))));
+    nodes.push(el("h3", {}, "Runs (newest first)"));
+    if (!runs.length) nodes.push(empty("No runs recorded for this ticket."));
+    else nodes.push(el("ul", { class: "plain" }, runs.map((r) => el("li", { class: "card-head" },
+      chip(r.status, STATUS_CLASS[r.status]),
+      el("a", { href: "#run=" + r.id }, fmtTime(r.created_at)),
+      el("span", {}, r.repo_name), el("span", { class: "mono muted" }, shortSha(r.commit)),
+      el("span", { class: "muted" }, r.branch || ""),
+      el("span", { class: "muted" }, r.criteria_total ? "AC " + r.criteria_met + "/" + r.criteria_total : "")))));
+    replace($("detail"), nodes);
+  }
+
+  async function showTicket(key) {
+    state.selected = null;
+    for (const row of document.querySelectorAll("tr.run-row")) row.setAttribute("aria-selected", "false");
+    $("detail-h").textContent = "Ticket " + key;
+    try {
+      renderTicket(await getJson("/api/tickets/" + encodeURIComponent(key)));
+    } catch (err) {
+      replace($("detail"), empty("Could not load ticket " + key + ": " + err.message));
+    }
+  }
+
+  // Hash routes: #run=<id> and #ticket-<KEY>.
+  function route() {
+    const run = /^#run=(\d+)$/.exec(location.hash);
+    if (run) return selectRun(Number(run[1]));
+    const ticket = /^#ticket-(.+)$/.exec(location.hash);
+    if (ticket && TICKET_KEY.test(ticket[1])) return showTicket(ticket[1]);
+    return null;
+  }
+
+  async function refresh() {
+    try {
+      await Promise.all([loadSummary(), loadRuns(), loadRecurring()]);
+      showError("");
+    } catch (err) {
+      showError("Could not load dashboard data: " + err.message);
+    }
+  }
+
+  async function reloadRuns() {
+    try { await loadRuns(); showError(""); } catch (err) { showError("Could not load runs: " + err.message); }
+  }
+
+  $("f-repo").addEventListener("change", () => { state.offset = 0; reloadRuns(); });
+  $("f-status").addEventListener("change", () => { state.offset = 0; reloadRuns(); });
+  $("refresh").addEventListener("click", refresh);
+  $("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - PAGE_SIZE); reloadRuns(); });
+  $("next").addEventListener("click", () => { state.offset += PAGE_SIZE; reloadRuns(); });
+
+  window.addEventListener("hashchange", route);
+  refresh().then(route);
+})();
+</script>
+</body>
+</html>

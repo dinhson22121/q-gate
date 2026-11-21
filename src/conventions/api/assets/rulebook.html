@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
+<title>qgate rulebook</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #0b5cad; --focus: #0b5cad;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --selected: #e6f0fb;
+  --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #6cb2ff; --focus: #6cb2ff;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6;
+    --code-bg: #10141a; --selected: #1b2a3d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+select, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1000px; margin: 0 auto; }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+.rule { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.rule-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.rule-head .title { font-weight: 600; flex: 1 1 240px; }
+.rule-actions { display: flex; gap: 6px; }
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+pre.quote { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 2px 0 6px; white-space: pre-wrap; }
+.label { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 6px; }
+.banner { padding: 8px 12px; border-radius: var(--radius); margin: 0; }
+.empty { color: var(--muted); font-style: italic; }
+p { margin: 4px 0; }
+@media (max-width: 480px) { header.top, main { padding-left: 12px; padding-right: 12px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate rulebook</h1><a href="/">Dashboard</a><a href="/settings">Settings</a><a href="/policy">Policy assistant</a></div>
+  <div class="filters">
+    <label>Repository <select id="repo" aria-label="Repository"></select></label>
+    <button type="button" class="primary" id="rebuild" disabled>Rebuild now</button>
+  </div>
+</header>
+<main>
+  <p class="banner info">Rules are derived once per repository from its rule files (CLAUDE.md, ADRs, lint configs) and a code sample,
+    then reused for every commit. Explicit rules start approved; inferred rules start proposed and never block.
+    Rejected rules are never checked. Decisions survive rebuilds. Team rules (added from the Policy assistant) are kept across rebuilds.</p>
+  <div id="error" class="banner bad" role="alert" hidden></div>
+  <div id="status" class="banner warn" role="status" hidden></div>
+  <div id="groups"><p class="empty">Loading…</p></div>
+</main>
+<script>
+"use strict";
+(() => {
+  // Per-instance API token injected by the server into this page; required on every change.
+  const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
+  const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
+  const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "rulebook", "X-Qgate-Token": TOKEN, Accept: "application/json" };
+  const GROUPS = [
+    ["approved", "Approved", "ok"],
+    ["proposed", "Proposed", "warn"],
+    ["rejected", "Rejected", "neutral"],
+  ];
+  const POLL_MS = 3000;
+  const state = { repo: "", timer: null };
+  const $ = (id) => document.getElementById(id);
+
+  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+  const replace = (node, ...children) => { node.replaceChildren(); node.append(...children.flat()); };
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+
+  function showError(message) {
+    $("error").hidden = !message;
+    $("error").textContent = message || "";
+  }
+
+  async function call(method, path, body) {
+    const options = { method, credentials: "same-origin", headers: method === "GET" ? { Accept: "application/json" } : HEADERS };
+    if (method !== "GET") options.body = JSON.stringify(body || {});
+    const response = await fetch(path, options);
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) throw new Error(RELOAD_HINT);
+    if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    return data;
+  }
+
+  const repoPath = (repo) => "/api/rulebook/" + encodeURIComponent(repo);
+
+  function ruleCard(rule) {
+    const decide = (status) => async () => {
+      try {
+        showError("");
+        render(await call("POST", repoPath(state.repo) + "/rules/" + encodeURIComponent(rule.id) + "/decision", { status }));
+      } catch (err) { showError(err.message); }
+    };
+    const actions = el("div", { class: "rule-actions" },
+      rule.status !== "approved" && el("button", { type: "button", onclick: decide("approved") }, "Approve"),
+      rule.status !== "rejected" && el("button", { type: "button", onclick: decide("rejected") }, "Reject"));
+    const scope = rule.scope_globs.length ? rule.scope_globs.join(", ") : "all files";
+    return el("article", { class: "rule" },
+      el("div", { class: "rule-head" },
+        el("span", { class: "mono muted" }, rule.id),
+        el("span", { class: "title" }, rule.title),
+        chip(rule.kind, rule.kind === "explicit" ? "info" : rule.kind === "team" ? "ok" : "neutral"),
+        actions),
+      el("p", {}, rule.description),
+      el("p", { class: "muted" }, "Scope: ", el("span", { class: "mono" }, scope)),
+      rule.examples.length && el("div", { class: "label" }, "Examples"),
+      rule.examples.map((ex) => [
+        el("div", { class: "mono muted" }, ex.file + ":" + ex.line),
+        el("pre", { class: "quote" }, ex.quote),
+      ]),
+      rule.lint_suggestion && [el("div", { class: "label" }, "Could be a lint rule"), el("p", { class: "mono" }, rule.lint_suggestion)]);
+  }
+
+  function render(view) {
+    const book = view.rulebook;
+    const status = $("status");
+    status.hidden = !view.building && !view.last_error;
+    status.textContent = view.building ? "Rebuilding the rulebook… this page refreshes when it is done."
+      : view.last_error ? "Last rebuild failed: " + view.last_error : "";
+    $("rebuild").disabled = view.building;
+    clearTimeout(state.timer);
+    if (view.building) state.timer = setTimeout(load, POLL_MS);
+    const created = new Date(book.created_at).toLocaleString();
+    const sections = GROUPS.map(([key, title, cls]) => {
+      const rules = book.rules.filter((r) => r.status === key);
+      return el("section", { class: "panel" },
+        el("h2", {}, title, chip(String(rules.length), cls)),
+        rules.length ? rules.map(ruleCard) : el("p", { class: "empty" }, "No " + title.toLowerCase() + " rules."));
+    });
+    replace($("groups"), el("p", { class: "muted" }, "Built " + created + " · " + book.rules.length + " rules"), sections);
+  }
+
+  async function load() {
+    if (!state.repo) return;
+    try {
+      showError("");
+      render(await call("GET", "/api/rulebook?repo=" + encodeURIComponent(state.repo)));
+    } catch (err) { showError(err.message); }
+  }
+
+  async function init() {
+    try {
+      const { repos } = await call("GET", "/api/rulebook/repos");
+      const select = $("repo");
+      replace(select, repos.map((r) => el("option", { value: r }, r)));
+      if (!repos.length) {
+        replace($("groups"), el("p", { class: "empty" }, "No rulebook yet. One is built on the first reviewed commit of each repository."));
+        return;
+      }
+      const wanted = new URLSearchParams(location.search).get("repo");
+      state.repo = repos.includes(wanted) ? wanted : repos[0];
+      select.value = state.repo;
+      select.addEventListener("change", () => { state.repo = select.value; load(); });
+      $("rebuild").addEventListener("click", async () => {
+        try {
+          showError("");
+          $("rebuild").disabled = true;
+          await call("POST", repoPath(state.repo) + "/rebuild", {});
+          load();
+        } catch (err) { showError(err.message); $("rebuild").disabled = false; }
+      });
+      await load();
+    } catch (err) { showError(err.message); }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

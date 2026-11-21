@@ -1,0 +1,382 @@
+<title>qgate Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one reading column; each figure scrolls sideways on its own at phone width. */
+  :root {
+    --bg: #f5f7f9;
+    --surface: #ffffff;
+    --fg: #18212c;
+    --muted: #5a6674;
+    --line: #c6ced8;
+    --accent: #0a6d96;
+    --accent-soft: #e2f0f6;
+    --store: #6b4fa0;
+    --store-soft: #efeaf7;
+    --danger: #b3261e;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11151b; --surface: #19202a; --fg: #e3e8ee; --muted: #9ba6b4; --line: #3a4553;
+      --accent: #5ec3ea; --accent-soft: #153140; --store: #b9a2e8; --store-soft: #2a2340; --danger: #f2827a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11151b; --surface: #19202a; --fg: #e3e8ee; --muted: #9ba6b4; --line: #3a4553;
+    --accent: #5ec3ea; --accent-soft: #153140; --store: #b9a2e8; --store-soft: #2a2340; --danger: #f2827a;
+    color-scheme: dark;
+  }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 1000px; margin: 0 auto; padding-block: 40px 64px; display: grid; gap: 44px; }
+  header { display: grid; gap: 10px; max-width: 72ch; }
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0; font-weight: 600; text-wrap: balance; }
+  h2 { font-size: 19px; margin: 0; font-weight: 600; text-wrap: balance; }
+  p { margin: 0; max-width: 72ch; color: var(--muted); }
+  code { font-family: var(--font-mono); font-size: 0.9em; color: var(--fg); }
+  section { display: grid; gap: 12px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 780px; height: auto; color: var(--fg); }
+  figcaption { margin-top: 12px; font-size: 13px; color: var(--muted); max-width: 82ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .sw { width: 22px; height: 14px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--surface); }
+  .sw.live { border-color: var(--fg); }
+  .sw.plan { border-style: dashed; border-color: var(--muted); }
+  .sw.store { border-color: var(--store); background: var(--store-soft); }
+  .sw.key { border-color: var(--accent); background: var(--accent-soft); }
+  ul { margin: 0; padding-left: 20px; color: var(--muted); display: grid; gap: 4px; max-width: 78ch; }
+  li strong { color: var(--fg); font-weight: 500; }
+
+  /* SVG marks, colours from theme tokens only */
+  .box { fill: var(--surface); stroke: var(--fg); stroke-width: 1.3; }
+  .plan { fill: var(--surface); stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 5 4; }
+  .key { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .store { fill: var(--store-soft); stroke: var(--store); stroke-width: 1.4; }
+  .zone { fill: none; stroke: var(--line); stroke-width: 1.2; }
+  .zone-c { fill: none; stroke: var(--accent); stroke-width: 1.3; stroke-dasharray: 6 4; }
+  .edge { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+  .edge-k { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+  .edge-s { fill: none; stroke: var(--store); stroke-width: 1.4; }
+  .t { fill: var(--fg); font-family: var(--font-body); font-size: 13px; font-weight: 500; }
+  .ts { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  .te { fill: var(--muted); font-family: var(--font-mono); font-size: 10.5px; }
+  .tz { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.07em; }
+  .tzc { fill: var(--accent); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.07em; }
+  .td { fill: var(--danger); font-family: var(--font-mono); font-size: 11px; }
+  .hd { fill: var(--muted); }
+  .hk { fill: var(--accent); }
+  .hs { fill: var(--store); }
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">qgate · kiến trúc và luồng dữ liệu</span>
+    <h1>Từ git commit tới gate verdict</h1>
+    <p>Một container Docker trên máy dev theo dõi các repo được mount. Với mỗi commit, qgate kiểm bằng check deterministic, các agent Claude và AC của ticket Jira. Kết quả, cache và config đều nằm trong SQLite ở <code>/data</code>. Sau mỗi lần scan, qgate ghi một file review Markdown để agent của dev đọc và sửa tiếp. LLM không tự quyết định pass hay fail.</p>
+    <div class="legend" aria-label="Chú giải">
+      <span><i class="sw live"></i>đã chạy được</span>
+            <span><i class="sw store"></i>SQLite /data/qgate.db</span>
+      <span><i class="sw key"></i>điểm quyết định</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. Triển khai</h2>
+    <figure>
+      <svg viewBox="0 0 960 290" role="img" aria-label="Ba vùng: máy dev, container qgate, dịch vụ ngoài. Repo được mount read-only, watcher chuyển commit cho pipeline, pipeline gọi Claude, Jira, Figma và Slack, ghi vào SQLite, dashboard đọc SQLite và chỉ mở trên localhost.">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hd"/></marker>
+          <marker id="m1k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hk"/></marker>
+          <marker id="m1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hs"/></marker>
+        </defs>
+
+        <rect x="10" y="12" width="210" height="266" rx="8" class="zone"/>
+        <text x="24" y="268" class="tz">MÁY DEV</text>
+        <rect x="250" y="12" width="460" height="266" rx="8" class="zone-c"/>
+        <text x="264" y="268" class="tzc">CONTAINER · NON-ROOT · ROOTFS READ-ONLY</text>
+        <rect x="740" y="12" width="210" height="266" rx="8" class="zone"/>
+        <text x="754" y="268" class="tz">DỊCH VỤ NGOÀI · HTTPS</text>
+
+        <rect x="30" y="40" width="170" height="56" rx="6" class="box"/>
+        <text x="115" y="64" text-anchor="middle" class="t">Repos (~/code)</text>
+        <text x="115" y="82" text-anchor="middle" class="ts">git commit</text>
+        <rect x="30" y="120" width="170" height="56" rx="6" class="box"/>
+        <text x="115" y="144" text-anchor="middle" class="t">qgate.env</text>
+        <text x="115" y="162" text-anchor="middle" class="ts">secret · toolchains</text>
+        <rect x="30" y="200" width="170" height="56" rx="6" class="box"/>
+        <text x="115" y="224" text-anchor="middle" class="t">Browser</text>
+        <text x="115" y="242" text-anchor="middle" class="ts">localhost:8080</text>
+
+        <rect x="280" y="40" width="170" height="56" rx="6" class="box"/>
+        <text x="365" y="64" text-anchor="middle" class="t">Watcher</text>
+        <text x="365" y="82" text-anchor="middle" class="ts">poll HEAD · reflog</text>
+        <rect x="510" y="40" width="170" height="56" rx="6" class="key"/>
+        <text x="595" y="64" text-anchor="middle" class="t">Review pipeline</text>
+        <text x="595" y="82" text-anchor="middle" class="ts">agents · verify · gate</text>
+        <rect x="280" y="120" width="170" height="56" rx="6" class="box"/>
+        <text x="365" y="144" text-anchor="middle" class="t">/toolchains</text>
+        <text x="365" y="162" text-anchor="middle" class="ts">cài lazy lần đầu</text>
+        <rect x="510" y="120" width="170" height="56" rx="6" class="store"/>
+        <text x="595" y="144" text-anchor="middle" class="t">SQLite</text>
+        <text x="595" y="162" text-anchor="middle" class="ts">runs · cache · settings</text>
+        <rect x="280" y="200" width="170" height="56" rx="6" class="box"/>
+        <text x="365" y="224" text-anchor="middle" class="t">Dashboard · Settings</text>
+        <text x="365" y="242" text-anchor="middle" class="ts">axum · Host check</text>
+
+        <rect x="760" y="32" width="170" height="40" rx="6" class="box"/>
+        <text x="845" y="57" text-anchor="middle" class="t">Claude API</text>
+        <rect x="760" y="88" width="170" height="40" rx="6" class="box"/>
+        <text x="845" y="113" text-anchor="middle" class="t">Jira REST</text>
+        <rect x="760" y="144" width="170" height="40" rx="6" class="box"/>
+        <text x="845" y="169" text-anchor="middle" class="t">Figma REST</text>
+        <rect x="760" y="200" width="170" height="40" rx="6" class="box"/>
+        <text x="845" y="225" text-anchor="middle" class="t">Slack webhook</text>
+
+        <line x1="200" y1="68" x2="278" y2="68" class="edge-k" marker-end="url(#m1k)"/>
+        <text x="239" y="60" text-anchor="middle" class="te">mount :ro</text>
+        <line x1="450" y1="68" x2="508" y2="68" class="edge" marker-end="url(#m1)"/>
+        <text x="479" y="60" text-anchor="middle" class="te">base..head</text>
+        <line x1="200" y1="148" x2="278" y2="148" class="edge" marker-end="url(#m1)"/>
+        <text x="239" y="140" text-anchor="middle" class="te">env</text>
+        <line x1="450" y1="140" x2="508" y2="88" class="edge" marker-end="url(#m1)"/>
+        <text x="458" y="122" class="te">checks</text>
+        <line x1="595" y1="96" x2="595" y2="118" class="edge-s" marker-end="url(#m1s)"/>
+        <line x1="510" y1="168" x2="452" y2="208" class="edge-s" marker-end="url(#m1s)"/>
+        <text x="486" y="204" class="te">đọc</text>
+        <line x1="280" y1="228" x2="202" y2="228" class="edge-k" marker-end="url(#m1k)"/>
+        <text x="241" y="220" text-anchor="middle" class="te">127.0.0.1</text>
+
+        <path d="M680 68 H720 V220" class="edge"/>
+        <line x1="720" y1="52" x2="758" y2="52" class="edge" marker-end="url(#m1)"/>
+        <line x1="720" y1="108" x2="758" y2="108" class="edge" marker-end="url(#m1)"/>
+        <line x1="720" y1="164" x2="758" y2="164" class="edge" marker-end="url(#m1)"/>
+        <line x1="720" y1="220" x2="758" y2="220" class="edge" marker-end="url(#m1)"/>
+        <path d="M680 68 H720 V52" class="edge"/>
+      </svg>
+      <figcaption>Repo chỉ được đọc qua mount <code>:ro</code>, và dashboard chỉ publish trên loopback. Mọi kết nối ra ngoài đều đi từ pipeline, tới các endpoint lấy từ config server. Repo không tự đổi được các endpoint này.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. Data flow của một lần review</h2>
+    <figure>
+      <svg viewBox="0 0 960 540" role="img" aria-label="Năm nguồn dữ liệu: diff của commit, ticket Jira kèm Story, frame Figma, rule của repo và settings. Ticket, Figma và rule được cache trong SQLite. Năm agent đọc dữ liệu, kết quả qua bước verify bằng chứng, rồi tới gate. Report được redact rồi mới lưu và gửi đi.">
+        <defs>
+          <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hd"/></marker>
+          <marker id="m2k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hk"/></marker>
+          <marker id="m2s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hs"/></marker>
+        </defs>
+
+        <text x="20" y="22" class="tz">NGUỒN</text>
+        <text x="220" y="22" class="tz">CACHE (SQLITE)</text>
+        <text x="430" y="22" class="tz">AGENTS → CLAUDE API</text>
+        <text x="670" y="22" class="tz">KIỂM</text>
+        <text x="820" y="22" class="tz">ĐẦU RA</text>
+
+        <!-- sources -->
+        <rect x="20" y="40" width="160" height="56" rx="6" class="box"/>
+        <text x="100" y="64" text-anchor="middle" class="t">Diff base..head</text>
+        <text x="100" y="82" text-anchor="middle" class="ts">git, snapshot</text>
+        <rect x="20" y="140" width="160" height="56" rx="6" class="box"/>
+        <text x="100" y="164" text-anchor="middle" class="t">Ticket + Story</text>
+        <text x="100" y="182" text-anchor="middle" class="ts">AC · description</text>
+        <rect x="20" y="240" width="160" height="56" rx="6" class="box"/>
+        <text x="100" y="264" text-anchor="middle" class="t">Figma frames</text>
+        <text x="100" y="282" text-anchor="middle" class="ts">link từ Story</text>
+        <rect x="20" y="340" width="160" height="56" rx="6" class="box"/>
+        <text x="100" y="364" text-anchor="middle" class="t">Rule của repo</text>
+        <text x="100" y="382" text-anchor="middle" class="ts">CLAUDE.md · lint · ADR</text>
+        <rect x="20" y="440" width="160" height="56" rx="6" class="store"/>
+        <text x="100" y="464" text-anchor="middle" class="t">Settings</text>
+        <text x="100" y="482" text-anchor="middle" class="ts">env &gt; SQLite</text>
+
+        <!-- caches -->
+        <rect x="220" y="140" width="170" height="56" rx="6" class="store"/>
+        <text x="305" y="164" text-anchor="middle" class="t">Ticket cache</text>
+        <text x="305" y="182" text-anchor="middle" class="ts">key + updated · 10m</text>
+        <rect x="220" y="240" width="170" height="56" rx="6" class="store"/>
+        <text x="305" y="264" text-anchor="middle" class="t">Figma cache</text>
+        <text x="305" y="282" text-anchor="middle" class="ts">file + node + version</text>
+        <rect x="220" y="340" width="170" height="56" rx="6" class="store"/>
+        <text x="305" y="364" text-anchor="middle" class="t">Rulebook</text>
+        <text x="305" y="382" text-anchor="middle" class="ts">hash rule · 7 ngày</text>
+
+        <!-- agents -->
+        <rect x="430" y="40" width="200" height="56" rx="6" class="box"/>
+        <text x="530" y="64" text-anchor="middle" class="t">Code review</text>
+        <text x="530" y="82" text-anchor="middle" class="ts">bug · security</text>
+        <rect x="430" y="140" width="200" height="56" rx="6" class="box"/>
+        <text x="530" y="164" text-anchor="middle" class="t">Ticket Analyst</text>
+        <text x="530" y="182" text-anchor="middle" class="ts">Brief: AC, kịch bản</text>
+        <rect x="430" y="240" width="200" height="56" rx="6" class="box"/>
+        <text x="530" y="264" text-anchor="middle" class="t">Design check</text>
+        <text x="530" y="282" text-anchor="middle" class="ts">copy · component · token</text>
+        <rect x="430" y="340" width="200" height="56" rx="6" class="box"/>
+        <text x="530" y="364" text-anchor="middle" class="t">Architecture</text>
+        <text x="530" y="382" text-anchor="middle" class="ts">diff + Rulebook</text>
+        <rect x="430" y="440" width="200" height="56" rx="6" class="box"/>
+        <text x="530" y="464" text-anchor="middle" class="t">Test agents</text>
+        <text x="530" y="482" text-anchor="middle" class="ts">viết + chạy test</text>
+
+        <!-- verify / gate / outputs -->
+        <rect x="660" y="190" width="130" height="160" rx="6" class="key"/>
+        <text x="725" y="250" text-anchor="middle" class="t">Verify</text>
+        <text x="725" y="268" text-anchor="middle" class="ts">quote có thật</text>
+        <text x="725" y="284" text-anchor="middle" class="ts">test chạy thật</text>
+        <text x="725" y="300" text-anchor="middle" class="ts">đủ evidence</text>
+
+        <rect x="820" y="40" width="126" height="56" rx="6" class="key"/>
+        <text x="883" y="64" text-anchor="middle" class="t">Gate</text>
+        <text x="883" y="82" text-anchor="middle" class="ts">không có LLM</text>
+        <rect x="820" y="140" width="126" height="56" rx="6" class="box"/>
+        <text x="883" y="164" text-anchor="middle" class="t">Redact</text>
+        <text x="883" y="182" text-anchor="middle" class="ts">key · token</text>
+        <rect x="820" y="240" width="126" height="56" rx="6" class="store"/>
+        <text x="883" y="264" text-anchor="middle" class="t">Runs</text>
+        <text x="883" y="282" text-anchor="middle" class="ts">SQLite</text>
+        <rect x="820" y="340" width="126" height="56" rx="6" class="box"/>
+        <text x="883" y="364" text-anchor="middle" class="t">Dashboard</text>
+        <text x="883" y="382" text-anchor="middle" class="ts">theo ticket</text>
+        <rect x="820" y="440" width="126" height="56" rx="6" class="box"/>
+        <text x="883" y="464" text-anchor="middle" class="t">File review .md</text>
+        <text x="883" y="482" text-anchor="middle" class="ts">+ Slack · cho agent dev</text>
+
+        <!-- source → cache -->
+        <line x1="180" y1="168" x2="218" y2="168" class="edge-s" marker-end="url(#m2s)"/>
+        <line x1="180" y1="268" x2="218" y2="268" class="edge-s" marker-end="url(#m2s)"/>
+        <line x1="180" y1="368" x2="218" y2="368" class="edge-s" marker-end="url(#m2s)"/>
+        <!-- cache → agents -->
+        <line x1="390" y1="168" x2="428" y2="168" class="edge" marker-end="url(#m2)"/>
+        <line x1="390" y1="268" x2="428" y2="268" class="edge" marker-end="url(#m2)"/>
+        <line x1="390" y1="368" x2="428" y2="368" class="edge" marker-end="url(#m2)"/>
+        <!-- diff bus -->
+        <line x1="180" y1="68" x2="428" y2="68" class="edge" marker-end="url(#m2)"/>
+        <path d="M410 68 V484" class="edge"/>
+        <line x1="410" y1="184" x2="428" y2="184" class="edge" marker-end="url(#m2)"/>
+        <line x1="410" y1="284" x2="428" y2="284" class="edge" marker-end="url(#m2)"/>
+        <line x1="410" y1="384" x2="428" y2="384" class="edge" marker-end="url(#m2)"/>
+        <line x1="410" y1="484" x2="428" y2="484" class="edge" marker-end="url(#m2)"/>
+        <text x="300" y="60" text-anchor="middle" class="te">không cache: luôn mới</text>
+        <!-- settings → agents (config) -->
+        <path d="M180 468 H200 V520 H530 V498" class="edge-s" marker-end="url(#m2s)"/>
+        <text x="300" y="514" text-anchor="middle" class="te">model · ngân sách · bật/tắt</text>
+        <!-- brief → test agents -->
+        <path d="M630 168 H646 V468 H632" class="edge" marker-end="url(#m2)"/>
+        <text x="600" y="430" class="te">Brief</text>
+        <!-- agents → verify -->
+        <line x1="630" y1="68" x2="672" y2="192" class="edge" marker-end="url(#m2)"/>
+        <line x1="630" y1="268" x2="658" y2="268" class="edge" marker-end="url(#m2)"/>
+        <line x1="630" y1="368" x2="658" y2="330" class="edge" marker-end="url(#m2)"/>
+        <line x1="646" y1="468" x2="700" y2="352" class="edge" marker-end="url(#m2)"/>
+        <!-- verify → gate → redact → runs → dashboard/slack -->
+        <path d="M790 270 H805 V68 H818" class="edge-k" marker-end="url(#m2k)"/>
+        <line x1="883" y1="96" x2="883" y2="138" class="edge" marker-end="url(#m2)"/>
+        <line x1="883" y1="196" x2="883" y2="238" class="edge-s" marker-end="url(#m2s)"/>
+        <line x1="883" y1="296" x2="883" y2="338" class="edge" marker-end="url(#m2)"/>
+        <path d="M946 168 H954 V468 H948" class="edge" marker-end="url(#m2)"/>
+      </svg>
+      <figcaption>Diff không được cache vì mỗi commit một khác. Ticket, Figma và Rulebook được cache theo phiên bản của nguồn, nên các commit sau của cùng ticket rẻ hơn nhiều. Dữ liệu gửi sang Claude gồm diff, text của ticket và frame. Redaction chỉ áp lên report trước khi lưu và gửi đi.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. Gate: khi nào commit bị chặn</h2>
+    <figure>
+      <svg viewBox="0 0 960 210" role="img" aria-label="Gate nhận kết quả đã verify và config đọc từ commit cha. Commit fail khi có finding critical, AC not met, check bắt buộc fail, review không hoàn tất, hoặc kết quả của các agent khi chính sách được đặt là chặn.">
+        <defs>
+          <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hd"/></marker>
+        </defs>
+        <rect x="20" y="30" width="190" height="56" rx="6" class="box"/>
+        <text x="115" y="54" text-anchor="middle" class="t">Kết quả đã verify</text>
+        <text x="115" y="72" text-anchor="middle" class="ts">finding · AC · check</text>
+        <rect x="20" y="120" width="190" height="56" rx="6" class="box"/>
+        <text x="115" y="144" text-anchor="middle" class="t">.qgate.toml</text>
+        <text x="115" y="162" text-anchor="middle" class="ts">đọc từ commit CHA</text>
+        <rect x="270" y="75" width="150" height="56" rx="6" class="key"/>
+        <text x="345" y="99" text-anchor="middle" class="t">Gate policy</text>
+        <text x="345" y="117" text-anchor="middle" class="ts">deterministic</text>
+        <line x1="210" y1="58" x2="268" y2="92" class="edge" marker-end="url(#m3)"/>
+        <line x1="210" y1="148" x2="268" y2="114" class="edge" marker-end="url(#m3)"/>
+        <line x1="420" y1="103" x2="478" y2="103" class="edge" marker-end="url(#m3)"/>
+
+        <text x="490" y="40" class="td">FAIL khi có một trong:</text>
+        <text x="490" y="64" class="ts">· finding critical, confidence high, nhóm security/correctness</text>
+        <text x="490" y="84" class="ts">· AC not_met (bằng chứng trích code hoặc test fail)</text>
+        <text x="490" y="104" class="ts">· check bắt buộc fail hoặc timeout</text>
+        <text x="490" y="124" class="ts">· review không hoàn tất (Claude lỗi, refusal)</text>
+        <text x="490" y="144" class="ts">· test agent fail, nếu on_fail = block</text>
+        <text x="490" y="164" class="ts">· lệch design copy/component/token, nếu block_on</text>
+        <text x="490" y="184" class="ts">· vi phạm rule đã duyệt, nếu on_violation = block</text>
+      </svg>
+      <figcaption>Thiếu bằng chứng không bao giờ làm fail: finding bị loại, AC thành "unclear", test thành "inconclusive". Config lấy từ commit cha, nên một commit không thể tự nới lỏng gate cho chính nó.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. Luồng config</h2>
+    <figure>
+      <svg viewBox="0 0 960 230" role="img" aria-label="Trang Settings gửi PUT có header chống CSRF. Server validate, chặn các field bị env khóa, ghi một version mới vào SQLite và thay config đang dùng. Review kế tiếp đọc config mới. Secret đi riêng vào credential store.">
+        <defs>
+          <marker id="m4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hd"/></marker>
+          <marker id="m4s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" class="hs"/></marker>
+        </defs>
+        <rect x="20" y="40" width="150" height="56" rx="6" class="box"/>
+        <text x="95" y="64" text-anchor="middle" class="t">Trang Settings</text>
+        <text x="95" y="82" text-anchor="middle" class="ts">/settings</text>
+        <rect x="210" y="40" width="160" height="56" rx="6" class="key"/>
+        <text x="290" y="64" text-anchor="middle" class="t">Validate</text>
+        <text x="290" y="82" text-anchor="middle" class="ts">env khóa · range</text>
+        <rect x="410" y="40" width="170" height="56" rx="6" class="store"/>
+        <text x="495" y="64" text-anchor="middle" class="t">server_settings</text>
+        <text x="495" y="82" text-anchor="middle" class="ts">version mới · rollback</text>
+        <rect x="620" y="40" width="150" height="56" rx="6" class="box"/>
+        <text x="695" y="64" text-anchor="middle" class="t">Config đang dùng</text>
+        <text x="695" y="82" text-anchor="middle" class="ts">thay ngay</text>
+        <rect x="810" y="40" width="136" height="56" rx="6" class="box"/>
+        <text x="878" y="64" text-anchor="middle" class="t">Review kế tiếp</text>
+        <text x="878" y="82" text-anchor="middle" class="ts">watcher · pipeline</text>
+
+        <line x1="170" y1="68" x2="208" y2="68" class="edge" marker-end="url(#m4)"/>
+        <text x="189" y="34" text-anchor="middle" class="te">PUT + CSRF</text>
+        <line x1="370" y1="68" x2="408" y2="68" class="edge-s" marker-end="url(#m4s)"/>
+        <line x1="580" y1="68" x2="618" y2="68" class="edge" marker-end="url(#m4)"/>
+        <line x1="770" y1="68" x2="808" y2="68" class="edge" marker-end="url(#m4)"/>
+
+        <rect x="210" y="140" width="160" height="56" rx="6" class="box"/>
+        <text x="290" y="164" text-anchor="middle" class="t">Biến môi trường</text>
+        <text x="290" y="182" text-anchor="middle" class="ts">qgate.env · ưu tiên cao nhất</text>
+        <line x1="290" y1="140" x2="290" y2="98" class="edge" marker-end="url(#m4)"/>
+        <rect x="410" y="140" width="170" height="56" rx="6" class="box"/>
+        <text x="495" y="164" text-anchor="middle" class="t">qgate.toml</text>
+        <text x="495" y="182" text-anchor="middle" class="ts">chỉ seed lần đầu</text>
+        <line x1="495" y1="140" x2="495" y2="98" class="edge-s" marker-end="url(#m4s)"/>
+        <rect x="20" y="140" width="150" height="56" rx="6" class="box"/>
+        <text x="95" y="164" text-anchor="middle" class="t">Secret</text>
+        <text x="95" y="182" text-anchor="middle" class="ts">env · *_FILE · file 0600</text>
+        <line x1="95" y1="96" x2="95" y2="138" class="edge" marker-end="url(#m4)"/>
+        <text x="104" y="122" class="te">write-only</text>
+        <text x="620" y="164" class="ts">Field cần restart: bind, allowed_hosts,</text>
+        <text x="620" y="182" class="ts">repos.roots, scan_depth, poll interval,</text>
+        <text x="620" y="200" class="ts">max_concurrent_reviews</text>
+      </svg>
+      <figcaption>Secret không vào SQLite và không bao giờ được trả về trình duyệt. Mỗi lần Save tạo một version mới trong SQLite, nên luôn rollback được.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Ranh giới tin cậy</h2>
+    <ul>
+      <li><strong>Repo được phép chọn:</strong> model, effort, gate, ignore, <code>[[checks]]</code>, <code>ac_field</code>, danh sách project Jira.</li>
+      <li><strong>Chỉ server được đặt:</strong> endpoint của Claude, Jira và Figma, lệnh MCP, webhook. HTTP redirect bị tắt.</li>
+      <li><strong>Checks và test agent chạy code của repo</strong> trong container riêng <code>qgate-runner</code> (qua Unix socket trên volume <code>qgate-work</code>): không có secret, không mount <code>/data</code>, <code>/config</code>, <code>/reviews</code>, <code>/repos</code>, toolchains read-only, mạng bridge mặc định nên không gọi được dashboard. Mỗi scenario test có snapshot riêng. Chỉ watch repo bạn tin tưởng.</li>
+    </ul>
+  </section>
+</main>

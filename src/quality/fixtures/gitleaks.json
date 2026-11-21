@@ -1,0 +1,16 @@
+[
+ {
+  "RuleID": "github-pat",
+  "Description": "Uncovered a GitHub Personal Access Token, potentially leading to unauthorized repository access and sensitive content exposure.",
+  "StartLine": 8,
+  "EndLine": 8,
+  "StartColumn": 23,
+  "EndColumn": 62,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "internal/domain/user.go",
+  "Entropy": 5.121928,
+  "Tags": [],
+  "Fingerprint": "internal/domain/user.go:github-pat:8"
+ }
+]

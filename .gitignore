@@ -1,0 +1,13 @@
+/target
+
+# Local setup and secrets
+qgate.env
+.env
+secrets/
+config/qgate.toml
+config/credentials.toml
+config/repos.toml
+
+# Review files written by qgate (REVIEWS_PATH default, native .qgate/reviews)
+reviews/
+.qgate/reviews/

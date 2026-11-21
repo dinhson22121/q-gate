@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
+<title>qgate settings</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #0b5cad; --focus: #0b5cad;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --selected: #e6f0fb;
+  --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #6cb2ff; --focus: #6cb2ff;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6;
+    --code-bg: #10141a; --selected: #1b2a3d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
+input, select, textarea, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+input[type="text"], input[type="number"], input[type="password"], select, textarea { width: 100%; max-width: 100%; }
+textarea { font-family: var(--mono); font-size: 12.5px; min-height: 64px; resize: vertical; }
+input:disabled, select:disabled, textarea:disabled { background: var(--surface-2); color: var(--muted); }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 20px 88px; max-width: 920px; margin: 0 auto; }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; scroll-margin-top: 12px; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; }
+h3.sub { font-size: 14px; margin: 18px 0 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 16px; }
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field > label, .field > .label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field.check { flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; }
+.field.check > label { font-size: 14px; color: var(--text); font-weight: 400; flex: 1 1 0; min-width: 0; }
+.field.check > input { margin-top: 4px; }
+.field.check > .hint, .field.check > .note, .field.check > .field-error { flex-basis: 100%; padding-left: 22px; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.note { font-size: 12px; margin: 0; }
+.field-error { font-size: 12px; color: var(--bad-fg); margin: 0; font-weight: 600; }
+.field.invalid input, .field.invalid select, .field.invalid textarea { border-color: var(--bad-fg); }
+fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px 8px; margin: 0; min-width: 0; }
+fieldset > legend { font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 4px; }
+.opt { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; }
+.opt > input { margin-top: 4px; }
+.opt .hint { display: block; }
+.opt.disabled { color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.chip button { border: 0; background: none; padding: 0 2px; line-height: 1; color: inherit; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row > input { flex: 1 1 160px; width: auto; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.banner { padding: 8px 12px; border-radius: var(--radius); margin: 0; }
+.banner code, .card code { font-family: var(--mono); font-size: 12.5px; }
+.card { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.card ul { margin: 4px 0; padding-left: 20px; }
+.secret { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; }
+.secret-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.card-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: flex-end; }
+.savebar .status { flex: 1 1 200px; color: var(--muted); }
+p { margin: 4px 0; }
+.empty { color: var(--muted); font-style: italic; }
+@media (max-width: 480px) {
+  header.top, main { padding-left: 12px; padding-right: 12px; }
+  section.panel { padding: 10px 12px; }
+  .savebar { padding: 8px 12px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate settings</h1><a href="/">Dashboard</a></div>
+  <nav class="toc" aria-label="Sections" id="toc"></nav>
+</header>
+<main id="main">
+  <p class="banner info">Server settings are stored in qgate's database; changes are saved as a new version (see History).
+    Per-repository settings (model, gate policy, checks, Jira overrides) live in each repository's <span class="mono">.qgate.toml</span>,
+    which is mounted read-only and cannot be edited here.</p>
+  <div id="error" class="banner bad" role="alert" hidden></div>
+  <div id="restart" class="banner warn" role="status" hidden></div>
+  <div id="sections"><p class="empty">Loading settings…</p></div>
+</main>
+<div class="savebar">
+  <span class="status" id="save-status" aria-live="polite"></span>
+  <button type="button" id="reload">Discard changes</button>
+  <button type="button" class="primary" id="save">Save settings</button>
+</div>
+<script>
+"use strict";
+(() => {
+  // Per-instance API token injected by the server into this page; required on every change.
+  const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
+  const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
+  const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "settings", "X-Qgate-Token": TOKEN, Accept: "application/json" };
+  const EFFORTS = ["low", "medium", "high", "xhigh", "max"].map((v) => [v, v]);
+  const ACTIONS = [["warn", "Warn (show on dashboard, gate unaffected)"], ["block", "Block (fail the gate)"]];
+  const SOURCE_LABEL = { env: "environment variable", env_file: "secret file", store: "credential store", missing: "" };
+  const state = { view: null, chips: {} };
+  const $ = (id) => document.getElementById(id);
+
+  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    append(node, children);
+    return node;
+  }
+  function append(node, children) {
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+  }
+  function replace(node, ...children) { node.replaceChildren(); append(node, children); }
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+  const fieldId = (path) => "f-" + path.replace(/[^a-z0-9]+/gi, "-");
+  const getPath = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  function setPath(obj, path, value) {
+    const keys = path.split(".");
+    const last = keys.pop();
+    keys.reduce((o, k) => o[k], obj)[last] = value;
+  }
+
+  // ---- field definitions ------------------------------------------------------------------
+  const f = (path, label, kind, extra) => Object.assign({ path, label, kind }, extra || {});
+  const sub = (title, intro) => ({ sub: title, intro });
+  const secret = (name, label) => ({ secret: name, label });
+
+  const DESIGN_CHECKS = [
+    ["copy", "Copy", "Text in the frame that is missing from the changed code and its i18n files."],
+    ["component", "Component", "The design uses a design-system component but the code renders something else."],
+    ["token", "Token", "Hard-coded colour, spacing or font where the design binds a variable."],
+    ["states", "States", "Design variants (loading, empty, error, disabled) the code does not handle."],
+  ];
+  const EVIDENCE = [
+    "Acceptance criterion id and text",
+    "Scenario (Given / When / Then)",
+    "Generated test file path and its full source",
+    "Exact command that was run",
+    "Exit code",
+    "Failing assertion output",
+    "The code under test (file:line and a quote)",
+    "Commit sha",
+    "A command to reproduce it locally",
+  ];
+
+  const SECTIONS = [
+    { id: "claude", title: "Claude", blocks: [
+      secret("anthropic_api_key", "Anthropic API key"),
+      f("llm.base_url", "API endpoint (llm.base_url)", "text", { hint: "Must be https, except localhost or 127.0.0.1 (local proxy). It receives the API key and the reviewed code." }),
+    ] },
+    { id: "jira", title: "Jira", blocks: [
+      f("jira.enabled", "Check commits against the Jira ticket's acceptance criteria", "bool"),
+      f("jira.base_url", "Jira site (jira.base_url)", "text", { hint: "Your Jira Cloud site over https, e.g. yourcompany.atlassian.net." }),
+      f("jira.email", "Account email", "text", { hint: "The account the API token belongs to (REST provider)." }),
+      f("jira.provider", "Provider", "select", { options: [["rest", "REST API (email + API token)"], ["mcp", "MCP server"]] }),
+      f("jira.ac_field", "Acceptance-criteria field", "text", { hint: "Custom field id such as customfield_10050. Empty: read the description." }),
+      f("jira.key_pattern_projects", "Allowed project keys", "chips", { hint: "Only ticket keys of these projects are recognised (e.g. PROJ). Empty: any project." }),
+      secret("jira_api_token", "Jira API token"),
+      sub("MCP server", "Used only when the provider is MCP. The command runs without a shell."),
+      f("jira.mcp.command", "Command (one argument per line)", "lines"),
+      f("jira.mcp.tool", "Tool returning an issue", "text"),
+      f("jira.mcp.env_passthrough", "Environment variables passed to the server (one per line)", "lines", { hint: "Everything else is cleared." }),
+    ] },
+    { id: "figma", title: "Figma", blocks: [
+      f("figma.enabled", "Check changes against Figma frames linked from the ticket's parent Story", "bool"),
+      f("figma.provider", "Provider", "select", { options: [["rest", "REST API with a personal access token (recommended)"], ["mcp", "MCP server"]],
+        hint: "Figma's cloud MCP server only accepts OAuth from clients listed in Figma's catalog, which qgate cannot complete unattended. Use REST unless you run your own MCP bridge." }),
+      f("figma.api_base_url", "REST API base URL", "text"),
+      f("figma.mcp_url", "MCP server URL", "text", { hint: "Only used with the MCP provider." }),
+      secret("figma_token", "Figma personal access token"),
+      f("figma.checks", "Checks", "set", { options: DESIGN_CHECKS.map(([v, l, h]) => ({ value: v, label: l, hint: h })) }),
+      f("figma.block_on", "Fail the gate on", "set", { options: DESIGN_CHECKS.map(([v, l]) => ({ value: v, label: l,
+        disabled: v === "states" ? "States are judged by the model from code alone, so they can never block." : null })),
+        hint: "A blocking check must also be enabled under Checks." }),
+    ] },
+    { id: "agents", title: "Agents", blocks: [
+      f("agents.enabled", "Run the multi-agent ticket review", "bool"),
+      f("agents.model", "Model", "text"),
+      f("agents.effort", "Effort", "select", { options: EFFORTS }),
+      f("agents.max_parallel", "Agents running in parallel (1-8)", "int"),
+      f("agents.budget_usd_per_review", "Budget per review (USD, up to 50)", "float", { hint: "Remaining agents are skipped and reported once the budget is spent." }),
+      sub("Ticket analyst"),
+      f("agents.ticket_analyst.enabled", "Analyse the ticket before reviewing", "bool"),
+      f("agents.ticket_analyst.include_parent_story", "Include the parent Story and Epic (criteria and design links)", "bool"),
+      f("agents.ticket_analyst.use_description", "Pass the ticket description as context (never gating)", "bool"),
+      f("agents.ticket_analyst.cache_ttl_minutes", "Re-fetch a ticket after (minutes)", "int"),
+      sub("Test agents", "Write and run tests for the ticket's acceptance criteria."),
+      f("agents.tests.enabled", "Generate and run tests", "bool"),
+      f("agents.tests.languages", "Languages", "set", { options: [
+        { value: "go", label: "Go" }, { value: "java", label: "Java" }, { value: "python", label: "Python" }, { value: "rust", label: "Rust" },
+        { value: "", label: "JavaScript/TypeScript", disabled: "Coming later." }] }),
+      f("agents.tests.max_scenarios", "Scenarios per ticket (1-30)", "int"),
+      f("agents.tests.max_repair_rounds", "Repair rounds after compile/setup errors (0-6)", "int"),
+      f("agents.tests.timeout_secs", "Timeout per test run (seconds)", "int"),
+      f("agents.tests.on_fail", "When a generated test fails", "select", { options: ACTIONS }),
+      { evidence: true },
+      sub("Architecture rulebook"),
+      f("agents.architecture.enabled", "Check changes against the repository's architecture rules", "bool"),
+      f("agents.architecture.rulebook_refresh_days", "Rebuild the rulebook after (days)", "int"),
+      f("agents.architecture.use_inferred_rules", "Report inferred (not yet approved) rules; they never block", "bool"),
+      f("agents.architecture.on_violation", "On a violation", "select", { options: ACTIONS }),
+    ] },
+    { id: "output", title: "Review files", blocks: [
+      { intro: "After each scan qgate writes a review file your coding agent (Claude Code, Cursor…) can read to continue fixing the feature. Point it at <repo>/<branch>/latest.md." },
+      f("output.enabled", "Write a review file after each scan", "bool"),
+      f("output.dir", "Folder (in the container)", "readonly", { hint: "Mounted from REVIEWS_PATH on your machine (qgate.env). Change REVIEWS_PATH there and restart." }),
+      f("output.path_template", "File path template", "text", { hint: "Relative, ends with .md. Placeholders: {repo} {branch} {sha7} {sha} {date} {ticket} {status}. Values are sanitised (feature/ABC-1 → feature-ABC-1)." }),
+      { preview: "output.path_template" },
+      f("output.formats", "Formats", "set", { options: [
+        { value: "markdown", label: "Markdown (.md)", hint: "For your coding agent and for you." },
+        { value: "json", label: "JSON (.json)", hint: "Optional, for tools: schema qgate.review/v1 with the full report." },
+        { value: "html", label: "HTML (.html)", hint: "Optional, for Jira: one self-contained report with every section; print it to PDF from the browser." }] }),
+      f("output.include_passing", "Also write a file when the gate passed", "bool", { hint: "latest.md is always kept current, so it never shows a stale failure." }),
+      f("output.keep_last", "Generated files kept per folder (0 = all, up to 1000)", "int", { hint: "Older generated review files are deleted; other files in the folder are never touched." }),
+      sub("Rules for coding agents"),
+      f("output.rules_enabled", "Turn every finding into a rule in a per-repository rules file", "bool", { hint: "Each finding's prevention rule is merged into <repo>/qgate-rules.md (deduplicated, with hit counts). Add @<reviews folder>/<repo>/qgate-rules.md to CLAUDE.md or AGENTS.md. Rules come from automated review: read them before trusting them." }),
+      f("output.rules_file", "Rules file name", "text", { hint: "A plain .md file name in the repository's folder, e.g. qgate-rules.md. Its state is kept in .<name>.json next to it." }),
+      f("output.rules_max", "Rules kept per repository (1-1000)", "int", { hint: "When full, the least severe, least recently seen rules are dropped first." }),
+    ] },
+    { id: "watch", title: "Watcher & checks", blocks: [
+      f("watch.run_repo_checks", "Run the [[checks]] commands from each repository's .qgate.toml", "bool", {
+        warn: "These are commands chosen by whoever can push to the repository, executed inside the container. Turn this off if the mounted folder contains code you do not trust." }),
+      f("watch.poll_interval_secs", "Poll interval (seconds)", "int"),
+      f("watch.max_concurrent_reviews", "Reviews running at the same time (1-16)", "int"),
+    ] },
+    { id: "notify", title: "Notifications", blocks: [{ webhook: true }] },
+    { id: "dashboard", title: "Dashboard & repositories", blocks: [
+      f("dashboard.bind", "Listen address (IP:port)", "text"),
+      f("dashboard.allowed_hosts", "Allowed Host names (one per line)", "lines", { hint: "Protects against DNS rebinding. Add a name only for your own reverse proxy." }),
+      f("repos.roots", "Repository folders (absolute, one per line)", "lines"),
+      f("repos.scan_depth", "Folder levels searched (1-10)", "int"),
+    ] },
+  ];
+  const FIELDS = SECTIONS.flatMap((s) => s.blocks.filter((b) => b.path));
+
+  // ---- rendering --------------------------------------------------------------------------
+  const lockOf = (path) => state.view.locked.find((l) => l.field === path);
+  const needsRestart = (path) => state.view.restart_required_fields.includes(path);
+  // Endpoints, commands, the webhook and turning repository checks on are never editable over HTTP.
+  const adminOf = (path) => state.view.admin_only.find((a) => a.field === path);
+  const RUN_REPO_CHECKS = "watch.run_repo_checks";
+  // Turning repository checks off stays allowed (it only tightens); turning them on is admin-only.
+  const isReadOnly = (path, value) => Boolean(lockOf(path)) || (Boolean(adminOf(path)) && !(path === RUN_REPO_CHECKS && value));
+  const adminNote = (admin) => el("p", { class: "note muted" }, "Read-only here for security: set " + admin.env_var +
+    " in qgate.env (or config/qgate.toml before the first start) and restart qgate.");
+
+  function fieldShell(def, control, opts) {
+    const lock = lockOf(def.path);
+    const restart = needsRestart(def.path);
+    const label = opts.legend ? null : el("label", { for: fieldId(def.path) }, def.label, restart ? " *" : null);
+    return el("div", { class: "field" + (def.kind === "bool" ? " check" : ""), "data-field": def.path },
+      def.kind === "bool" ? [control, label] : [label, control],
+      def.hint ? el("p", { class: "hint" }, def.hint) : null,
+      def.warn ? el("p", { class: "note chip warn", style: "white-space: normal" }, def.warn) : null,
+      restart ? el("p", { class: "hint" }, "* Applies after restart (docker compose restart qgate).") : null,
+      lock ? el("p", { class: "note muted" }, "Set by " + lock.env_var + " in qgate.env; change it there.") : null,
+      !lock && adminOf(def.path) ? adminNote(adminOf(def.path)) : null,
+      el("p", { class: "field-error", id: fieldId(def.path) + "-err", hidden: true }));
+  }
+
+  function renderField(def) {
+    const value = getPath(state.view.config, def.path);
+    const disabled = isReadOnly(def.path, value);
+    const common = { id: fieldId(def.path), disabled, "aria-describedby": fieldId(def.path) + "-err" };
+    switch (def.kind) {
+      case "bool": {
+        const input = el("input", Object.assign({ type: "checkbox" }, common));
+        input.checked = Boolean(value);
+        return fieldShell(def, input, {});
+      }
+      case "int": case "float":
+        return fieldShell(def, el("input", Object.assign({ type: "number", inputmode: def.kind === "int" ? "numeric" : "decimal",
+          step: def.kind === "int" ? "1" : "0.01", value: value }, common)), {});
+      case "text":
+        return fieldShell(def, el("input", Object.assign({ type: "text", value: value, autocomplete: "off", spellcheck: "false" }, common)), {});
+      case "select": {
+        const select = el("select", common, def.options.map(([v, l]) => el("option", { value: v }, l)));
+        select.value = value;
+        return fieldShell(def, select, {});
+      }
+      case "lines": {
+        const area = el("textarea", Object.assign({ rows: Math.max(2, value.length + 1), spellcheck: "false" }, common));
+        area.value = value.join("\n");
+        return fieldShell(def, area, {});
+      }
+      case "readonly":
+        return fieldShell(def, el("input", Object.assign({}, common, { type: "text", value: value, readonly: true, disabled: false })), {});
+      case "chips": return renderChips(def, value, disabled);
+      case "set": return renderSet(def, value, disabled);
+      default: return null;
+    }
+  }
+
+  function renderChips(def, values, disabled) {
+    state.chips[def.path] = values.slice();
+    const list = el("div", { class: "chips", role: "list" });
+    const input = el("input", { type: "text", id: fieldId(def.path), disabled, autocomplete: "off", placeholder: "PROJ",
+      "aria-describedby": fieldId(def.path) + "-err" });
+    const draw = () => replace(list, state.chips[def.path].map((key) => el("span", { class: "chip info", role: "listitem" }, key,
+      el("button", { type: "button", disabled, "aria-label": "Remove " + key, onclick: () => {
+        state.chips[def.path] = state.chips[def.path].filter((k) => k !== key); draw(); } }, "×"))));
+    const add = () => {
+      for (const key of input.value.split(/[\s,]+/).map((k) => k.trim().toUpperCase()).filter(Boolean)) {
+        if (!state.chips[def.path].includes(key)) state.chips[def.path].push(key);
+      }
+      input.value = "";
+      draw();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } });
+    draw();
+    return fieldShell(def, el("div", {}, list, el("div", { class: "row" }, input,
+      el("button", { type: "button", disabled, onclick: add }, "Add"))), {});
+  }
+
+  function renderSet(def, values, disabled) {
+    const options = def.options.map((opt) => {
+      const id = fieldId(def.path) + "-" + (opt.value || "later");
+      const input = el("input", { type: "checkbox", id, value: opt.value, "data-set": def.path, disabled: disabled || Boolean(opt.disabled) });
+      input.checked = Boolean(opt.value) && values.includes(opt.value);
+      return el("div", { class: "opt" + (opt.disabled ? " disabled" : "") }, input,
+        el("label", { for: id }, el("strong", {}, opt.label),
+          opt.hint ? el("span", { class: "hint" }, opt.hint) : null,
+          opt.disabled ? el("span", { class: "hint" }, opt.disabled) : null));
+    });
+    const lock = lockOf(def.path);
+    return el("div", { class: "field", "data-field": def.path },
+      el("fieldset", { id: fieldId(def.path), "aria-describedby": fieldId(def.path) + "-err" }, el("legend", {}, def.label), options),
+      def.hint ? el("p", { class: "hint" }, def.hint) : null,
+      lock ? el("p", { class: "note muted" }, "Set by " + lock.env_var + " in qgate.env.") : null,
+      el("p", { class: "field-error", id: fieldId(def.path) + "-err", hidden: true }));
+  }
+
+  function renderSecret(name, label) {
+    const status = state.view.secrets.find((s) => s.name === name);
+    const fromEnv = status.source === "env" || status.source === "env_file";
+    const id = "secret-" + name;
+    const input = el("input", { type: "password", id, autocomplete: "new-password", spellcheck: "false", disabled: fromEnv,
+      placeholder: status.configured ? "Enter a new value to replace it" : "Paste the value", "aria-describedby": id + "-err" });
+    const badge = status.configured
+      ? chip("Configured · " + SOURCE_LABEL[status.source], "ok")
+      : chip("Missing", status.error ? "bad" : "warn");
+    const save = () => secretRequest(name, "PUT", { value: input.value }, input);
+    return el("div", { class: "secret", "data-field": "secrets." + name },
+      el("div", { class: "secret-head" }, el("label", { for: id }, el("strong", {}, label)), badge),
+      status.error ? el("p", { class: "note muted" }, "Credential store: " + status.error) : null,
+      fromEnv ? el("p", { class: "note muted" }, "Set by " + status.env_var + " in qgate.env; change or remove it there and restart qgate.") : null,
+      el("div", { class: "row" }, input,
+        el("button", { type: "button", disabled: fromEnv, onclick: save }, status.configured ? "Replace" : "Save"),
+        el("button", { type: "button", disabled: fromEnv || !status.configured, onclick: () => {
+          if (confirm("Remove the stored " + label + "?")) secretRequest(name, "DELETE", null, input);
+        } }, "Remove")),
+      el("p", { class: "hint" }, "Write-only: the value is never shown again. Stored in qgate's credential store, not in the settings database."),
+      el("p", { class: "field-error", id: id + "-err", hidden: true }));
+  }
+
+  function renderWebhook() {
+    const lock = lockOf("notify.webhook_url");
+    const configured = state.view.webhook_configured;
+    const admin = adminOf("notify.webhook_url");
+    const disabled = Boolean(lock);
+    return el("div", { class: "field", "data-field": "notify.webhook_url" },
+      el("div", { class: "secret-head" }, el("label", { for: "webhook-url" }, el("strong", {}, "Webhook (Slack-compatible)")),
+        configured ? chip("Configured", "ok") : chip("Not configured", "neutral")),
+      el("input", { type: "password", id: "webhook-url", autocomplete: "off", spellcheck: "false", disabled: disabled || Boolean(admin),
+        placeholder: admin ? "Set via " + admin.env_var : "Webhook URL", "aria-describedby": "notify-webhook-url-err" }),
+      el("div", { class: "opt" }, el("input", { type: "checkbox", id: "webhook-clear", disabled: disabled || !configured }),
+        el("label", { for: "webhook-clear" }, "Remove the webhook on save")),
+      el("p", { class: "hint" }, "The URL contains a token, so it is never shown. It can be removed here (applied when you save the page)."),
+      lock ? el("p", { class: "note muted" }, "Set by " + lock.env_var + " in qgate.env; change it there.") : null,
+      !lock && admin ? adminNote(admin) : null,
+      el("p", { class: "field-error", id: "notify-webhook-url-err", hidden: true }));
+  }
+
+  function renderEvidence() {
+    return el("div", { class: "card", role: "note", "aria-labelledby": "evidence-h" },
+      el("strong", { id: "evidence-h" }, "Evidence required for a failure"),
+      el("p", { class: "muted" }, "Every failing generated test must carry all of the following, or it is downgraded to inconclusive (never blocking):"),
+      el("ul", {}, EVIDENCE.map((item) => el("li", {}, item))));
+  }
+
+  // ---- review-file path preview -----------------------------------------------------------
+  const OUTPUT_PLACEHOLDERS = ["repo", "branch", "sha7", "sha", "date", "ticket", "status"];
+  const OUTPUT_EXAMPLE = { repo: "shop-api", branch: "feature-SHOP-7-pay", sha7: "3f9c2ab", sha: "3f9c2ab7d1e04c5b8a6f9e2d1c0b3a4f5e6d7c8b",
+    date: "20261120-143005", ticket: "SHOP-7", status: "failed" };
+  // Mirrors the server rules for a quick hint; the server validates on save.
+  function previewTemplate(template) {
+    if (!template.endsWith(".md")) return { error: "must end with .md" };
+    if (template.startsWith("/") || /[\\:]/.test(template)) return { error: "must be a relative path using /" };
+    if (template.split("/").some((s) => s === "" || s === "." || s === "..")) return { error: "must not contain empty, . or .. segments" };
+    let unknown = null;
+    const path = template.replace(/\{([^{}]*)\}/g, (match, name) => {
+      if (!OUTPUT_PLACEHOLDERS.includes(name)) unknown = unknown || match;
+      return OUTPUT_EXAMPLE[name] || match;
+    });
+    if (unknown) return { error: "unknown placeholder " + unknown };
+    if (/[{}]/.test(path)) return { error: "has an unmatched { or }" };
+    return { path };
+  }
+  function renderPreview(path) {
+    return el("div", { class: "field", "data-preview": path },
+      el("p", { class: "hint", id: "output-preview", "aria-live": "polite" }));
+  }
+  function updatePreview() {
+    const input = $(fieldId("output.path_template"));
+    const target = $("output-preview");
+    if (!input || !target) return;
+    const result = previewTemplate(input.value.trim());
+    const dir = getPath(state.view.config, "output.dir") || "";
+    if (result.error) {
+      replace(target, chip("Invalid", "bad"), " ", result.error);
+      return;
+    }
+    replace(target, "Example: ", el("code", {}, dir + "/" + result.path), el("br"),
+      "Latest: ", el("code", {}, dir + "/" + OUTPUT_EXAMPLE.repo + "/" + OUTPUT_EXAMPLE.branch + "/latest.md"));
+  }
+  function wirePreview() {
+    const input = $(fieldId("output.path_template"));
+    if (input) input.addEventListener("input", updatePreview);
+    updatePreview();
+  }
+
+  function renderBlock(block) {
+    if (block.path) return renderField(block);
+    if (block.preview) return renderPreview(block.preview);
+    if (block.intro) return el("p", { class: "muted" }, block.intro);
+    if (block.secret) return renderSecret(block.secret, block.label);
+    if (block.webhook) return renderWebhook();
+    if (block.evidence) return renderEvidence();
+    return null;
+  }
+
+  function renderSection(section) {
+    const body = [];
+    let grid = el("div", { class: "grid" });
+    const flush = () => { if (grid.childNodes.length) body.push(grid); grid = el("div", { class: "grid" }); };
+    for (const block of section.blocks) {
+      if (block.sub) {
+        flush();
+        body.push(el("h3", { class: "sub" }, block.sub));
+        if (block.intro) body.push(el("p", { class: "muted" }, block.intro));
+      } else if (block.secret || block.evidence || block.webhook || block.preview || block.intro || block.kind === "set" || block.kind === "bool") {
+        flush();
+        body.push(renderBlock(block));
+      } else {
+        grid.append(renderBlock(block));
+      }
+    }
+    flush();
+    return el("section", { class: "panel", id: "s-" + section.id, "aria-labelledby": "h-" + section.id },
+      el("h2", { id: "h-" + section.id }, section.title), body,
+      el("div", { class: "card-foot" }, el("button", { type: "button", class: "primary", onclick: save }, "Save settings")));
+  }
+
+  function renderHistory(entries) {
+    const rows = entries.map((entry, index) => el("tr", {},
+      el("td", { class: "num" }, "v" + entry.version),
+      el("td", { class: "num" }, new Date(entry.created_at).toLocaleString()),
+      el("td", {}, entry.changed_by),
+      el("td", { class: "mono" }, entry.changed_fields.length ? entry.changed_fields.join(", ") : "no changes"),
+      el("td", {}, index === 0 ? chip("current", "ok") : el("button", { type: "button",
+        "aria-label": "Roll back to version " + entry.version, onclick: () => rollback(entry.version) }, "Roll back"))));
+    return el("section", { class: "panel", id: "s-history", "aria-labelledby": "h-history" },
+      el("h2", { id: "h-history" }, "History"),
+      el("p", { class: "muted" }, "The last 20 saved versions. Rolling back saves that version again as a new version; secrets are not affected."),
+      entries.length ? el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, ["Version", "Saved", "By", "Changed", ""].map((h) => el("th", { scope: "col" }, h)))),
+        el("tbody", {}, rows))) : el("p", { class: "empty" }, "No versions saved yet."));
+  }
+
+  function render(history) {
+    replace($("toc"), SECTIONS.map((s) => el("a", { href: "#s-" + s.id }, s.title)), el("a", { href: "#s-history" }, "History"));
+    replace($("sections"), el("div", { style: "display: grid; gap: 16px" }, SECTIONS.map(renderSection), renderHistory(history)));
+    showRestart(state.view.pending_restart, false);
+    wirePreview();
+  }
+
+  // ---- messages ---------------------------------------------------------------------------
+  function showError(message) { $("error").textContent = message || ""; $("error").hidden = !message; }
+  function setStatus(message) { $("save-status").textContent = message || ""; }
+  function showRestart(fields, justSaved) {
+    const banner = $("restart");
+    if (!fields || !fields.length) { banner.hidden = true; return; }
+    replace(banner, justSaved ? "Saved. " : "", "These saved settings take effect after a restart: ",
+      el("strong", {}, fields.join(", ")), ". Run ", el("code", {}, "docker compose restart qgate"), ".");
+    banner.hidden = false;
+  }
+  function clearFieldErrors() {
+    for (const node of document.querySelectorAll(".field-error")) { node.textContent = ""; node.hidden = true; }
+    for (const node of document.querySelectorAll(".invalid")) node.classList.remove("invalid");
+  }
+  // Shows `message` under the field `path` (or its closest parent path); falls back to the banner.
+  function showFieldError(path, message) {
+    let key = path || "";
+    while (key) {
+      const box = document.querySelector('[data-field="' + CSS.escape(key) + '"]');
+      const err = box && box.querySelector(".field-error");
+      if (err) {
+        err.textContent = message;
+        err.hidden = false;
+        box.classList.add("invalid");
+        box.scrollIntoView({ block: "center", behavior: "smooth" });
+        const focusable = box.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled])");
+        if (focusable) focusable.focus({ preventScroll: true });
+        return;
+      }
+      key = key.includes(".") ? key.slice(0, key.lastIndexOf(".")) : "";
+    }
+    showError((path ? path + ": " : "") + message);
+  }
+
+  // ---- requests ---------------------------------------------------------------------------
+  async function request(method, path, body) {
+    const response = await fetch(path, { method, credentials: "same-origin",
+      headers: method === "GET" ? { Accept: "application/json" } : HEADERS, body: body === undefined ? undefined : JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(response.status === 401 ? RELOAD_HINT : (data && data.error) || ("HTTP " + response.status));
+      error.field = data && data.field;
+      throw error;
+    }
+    return data;
+  }
+
+  async function load() {
+    try {
+      const [view, history] = await Promise.all([request("GET", "/api/settings"), request("GET", "/api/settings/history")]);
+      state.view = view;
+      render(history);
+      showError("");
+      setStatus("");
+    } catch (err) {
+      showError("Could not load settings: " + err.message);
+    }
+  }
+
+  function readField(def, config) {
+    const node = $(fieldId(def.path));
+    switch (def.kind) {
+      case "bool": return node.checked;
+      case "int": {
+        if (!/^-?\d+$/.test(node.value.trim())) throw Object.assign(new Error("must be a whole number"), { field: def.path });
+        return Number(node.value);
+      }
+      case "float": {
+        const n = Number(node.value);
+        if (node.value.trim() === "" || !Number.isFinite(n)) throw Object.assign(new Error("must be a number"), { field: def.path });
+        return n;
+      }
+      case "lines": return node.value.split("\n").map((s) => s.trim()).filter(Boolean);
+      case "chips": return state.chips[def.path].slice();
+      case "set": return Array.from(document.querySelectorAll('input[data-set="' + def.path + '"]'))
+        .filter((box) => box.checked && box.value).map((box) => box.value);
+      case "text": return node.value.trim();
+      default: return getPath(config, def.path);
+    }
+  }
+
+  function webhookChange() {
+    const clear = $("webhook-clear");
+    const url = $("webhook-url");
+    if (clear && clear.checked) return { action: "clear" };
+    if (url && !url.disabled && url.value.trim()) return { action: "set", url: url.value.trim() };
+    return { action: "keep" };
+  }
+
+  async function save() {
+    if (!state.view) return;
+    clearFieldErrors();
+    showError("");
+    const config = structuredClone(state.view.config);
+    try {
+      for (const def of FIELDS) setPath(config, def.path, readField(def, config));
+    } catch (err) {
+      showFieldError(err.field, err.message);
+      return;
+    }
+    setButtons(true);
+    setStatus("Saving…");
+    try {
+      const result = await request("PUT", "/api/settings", { config, webhook: webhookChange() });
+      state.view = result.settings;
+      render(await request("GET", "/api/settings/history"));
+      const applied = result.applied;
+      setStatus(applied.version ? "Saved as version " + applied.version + "." : "No changes to save.");
+      showRestart(applied.restart_required, Boolean(applied.version));
+    } catch (err) {
+      setStatus("Not saved.");
+      showFieldError(err.field, err.message);
+    } finally {
+      setButtons(false);
+    }
+  }
+
+  async function rollback(version) {
+    if (!confirm("Save version " + version + " again as the current settings?")) return;
+    clearFieldErrors();
+    try {
+      const result = await request("POST", "/api/settings/rollback/" + encodeURIComponent(version), {});
+      state.view = result.settings;
+      render(await request("GET", "/api/settings/history"));
+      setStatus("Rolled back: saved as version " + result.applied.version + ".");
+      showRestart(result.applied.restart_required, true);
+    } catch (err) {
+      showFieldError(err.field, err.message);
+    }
+  }
+
+  async function secretRequest(name, method, body, input) {
+    clearFieldErrors();
+    if (method === "PUT" && !input.value.trim()) { showFieldError("secrets." + name, "Enter a value first."); return; }
+    try {
+      const result = await request(method, "/api/secrets/" + encodeURIComponent(name), body === null ? {} : body);
+      input.value = "";
+      const index = state.view.secrets.findIndex((s) => s.name === name);
+      state.view.secrets[index] = result.secret;
+      const box = document.querySelector('[data-field="secrets.' + name + '"]');
+      const label = box.querySelector("strong").textContent;
+      box.replaceWith(renderSecret(name, label));
+      setStatus(method === "PUT" ? label + " saved." : label + " removed.");
+    } catch (err) {
+      input.value = "";
+      showFieldError(err.field && err.field !== "value" ? err.field : "secrets." + name, err.message);
+    }
+  }
+
+  function setButtons(busy) {
+    for (const button of document.querySelectorAll("button.primary")) button.disabled = busy;
+  }
+
+  $("save").addEventListener("click", save);
+  $("reload").addEventListener("click", () => { clearFieldErrors(); load(); });
+  load();
+})();
+</script>
+</body>
+</html>

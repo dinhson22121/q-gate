@@ -1,0 +1,39 @@
+# Copy to docker-compose.override.yml (picked up automatically by `docker compose`) and keep what you need.
+# Note: ${VARS} in this file come from your shell / a .env file, NOT from qgate.env - use literal values.
+
+services:
+  qgate:
+    build:
+      args:
+        # Bake toolchains into the image at build time with the same verified installer scripts (the build
+        # fails if a download or checksum fails). Useful for CI and offline machines:
+        #   docker compose build && docker compose up -d
+        # A NEW qgate-toolchains volume is seeded from the image. An existing volume keeps its content, so
+        # after changing this list remove it once: docker compose down && docker volume rm qgate_qgate-toolchains
+        # Keep QGATE_TOOLCHAINS and the version variables in qgate.env in sync with what you bake.
+        QGATE_PREINSTALL: go,java
+        # Extra Debian packages, e.g. a C toolchain for Rust crates, cgo or Python C extensions.
+        # QGATE_APT_PACKAGES: build-essential
+
+    # Strictly offline: never download at start, only use what is baked in / already cached.
+    # environment:
+    #   QGATE_TOOLCHAINS_SKIP_INSTALL: "true"
+
+    # Resource caps for qgate itself (tests and linters run in qgate-runner; add the same block under
+    # a `qgate-runner:` service to cap those).
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "4"
+    #       memory: 6g
+
+    # Keep the API key out of qgate.env with a Docker secret:
+    #   mkdir -p secrets && printf '%s' "$KEY" > secrets/anthropic_api_key && chmod 600 secrets/anthropic_api_key
+    # (on Linux the file must be readable by QGATE_UID), then uncomment the lines below, clear
+    # ANTHROPIC_API_KEY and set ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key in qgate.env.
+    # secrets:
+    #   - anthropic_api_key
+
+# secrets:
+#   anthropic_api_key:
+#     file: ./secrets/anthropic_api_key

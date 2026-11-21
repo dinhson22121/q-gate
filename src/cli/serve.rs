@@ -1,0 +1,283 @@
+//! `qgate serve`: commit watcher + dashboard in one process (the Docker container's main command).
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use tokio::net::TcpListener;
+use tokio::sync::watch;
+
+use super::agents::rulebook_service;
+use super::login::{dashboard_secret, login_url};
+use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest, load_review_config};
+use super::policy::policy_service;
+use super::snapshot::sweep_stale_snapshots;
+use crate::access::api::{AccessState, protect};
+use crate::conventions::{RulebookApiState, router as rulebook_router};
+use crate::history::api::{DashboardState, router_guarded, serve_router};
+use crate::history::application::Trigger;
+use crate::policy::{PolicyApiState, router as policy_router};
+use crate::review::application::NoProgress;
+use crate::review::infrastructure::local_git::DiffTarget;
+use crate::settings::api::{SettingsApiState, router as settings_router};
+use crate::watch::application::ports::{CommitEvent, CommitReviewer, CommitVerdict, Notifier, WatchError};
+use crate::watch::application::watch_commits::{WatchCommits, WatchConfig};
+use crate::watch::infrastructure::composite_registry::CompositeRegistry;
+use crate::watch::infrastructure::git_inspector::GitRepoInspector;
+use crate::watch::infrastructure::instance_guard::InstanceGuard;
+use crate::watch::infrastructure::log_notifier::{LogNotifier, TeeNotifier};
+use crate::watch::infrastructure::scan_registry::ScanRepoRegistry;
+use crate::watch::infrastructure::toml_registry::TomlRepoRegistry;
+use crate::watch::infrastructure::webhook_notifier::WebhookNotifier;
+use crate::web::ApiToken;
+
+const LOCK_FILE: &str = "watch.lock";
+pub const REPOS_FILE: &str = "repos.toml";
+
+pub async fn serve(context: Arc<AppContext>) -> Result<()> {
+    harden_process();
+    let _guard = InstanceGuard::acquire(&context.paths.data_dir.join(LOCK_FILE))
+        .context("another qgate service is already running")?;
+    let history = context.open_history()?;
+    sweep_stale_snapshots(&context.work_dir());
+    let server = context.server();
+    let addr = server.dashboard.bind_addr()?;
+    // Before binding: a bad QGATE_DASHBOARD_TOKEN or unwritable data dir stops the service, never an open dashboard.
+    let secret = dashboard_secret(&context)?;
+    let login_link = login_url(&context, &secret)?;
+    // Bind before watching, so a busy port fails the service at once instead of running without a dashboard.
+    let listener = TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
+
+    let stop_tx = Arc::new(watch::channel(false).0);
+    let stop_rx = stop_tx.subscribe();
+    let signal_tx = stop_tx.clone();
+    tokio::spawn(async move {
+        wait_for_termination().await;
+        let _ = signal_tx.send(true);
+    });
+
+    let state = DashboardState::with_allowed_hosts(history.clone(), server.dashboard.allowed_hosts.clone());
+    let hosts = server.dashboard.allowed_hosts.clone();
+    // One settings dependency set: the settings page and the policy assistant share its write lock.
+    let settings_deps = context.settings_deps();
+    let rulebooks = rulebook_service(context.clone())?;
+    let policy = policy_service(context.clone(), settings_deps.clone(), rulebooks.clone(), history.clone())?;
+    // One token per process, required on every mutating dashboard route; a restart invalidates open pages.
+    let token = ApiToken::generate().context("cannot generate the dashboard API token")?;
+    let settings_page = settings_router(SettingsApiState::new(settings_deps, hosts.clone(), token.clone()))
+        .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
+        .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
+    let dashboard_stop = stop_tx.clone();
+    let dashboard_shutdown = stopped(stop_rx.clone());
+    // Every route needs the session cookie from the login link (except /login and /healthz).
+    let access = AccessState::new(secret);
+    let app = router_guarded(state, settings_page, |routes| protect(routes, access));
+    let dashboard = async move {
+        let result = serve_router(listener, app, dashboard_shutdown).await;
+        // If the dashboard dies, stop the watcher too, so the container restarts cleanly.
+        let _ = dashboard_stop.send(true);
+        result
+    };
+    let watcher = WatchCommits::new(
+        GitRepoInspector::new(),
+        PipelineReviewer { pipeline: ReviewPipeline::new(context.clone(), Some(history)) },
+        build_notifier(&server.notify.webhook_url)?,
+        repo_source(&context),
+        WatchConfig {
+            poll_interval: Duration::from_secs(server.watch.poll_interval_secs),
+            max_concurrent_reviews: server.watch.max_concurrent_reviews,
+            remote: server.watch.remote.clone(),
+            base_branch: server.watch.base_branch.clone(),
+            ..WatchConfig::default()
+        },
+    );
+    println!(
+        "qgate: dashboard on http://{addr} · settings on http://{addr}/settings · watching {}",
+        server.repos.roots.join(", ")
+    );
+    // The only place the login token is printed (also: `qgate login-url`).
+    println!("Dashboard: {login_link}");
+    let (dashboard_result, report) = tokio::join!(dashboard, watcher.run(stopped(stop_rx)));
+    println!("qgate: stopped after {} review(s), {} aborted", report.reviews_completed, report.reviews_aborted);
+    dashboard_result.with_context(|| format!("dashboard failed on {addr}"))
+}
+
+pub fn repo_source(context: &AppContext) -> CompositeRegistry<TomlRepoRegistry, ScanRepoRegistry> {
+    let repos = context.server().repos;
+    let roots = repos.roots.iter().map(PathBuf::from).collect();
+    CompositeRegistry::new(
+        TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
+        ScanRepoRegistry::new(roots).with_max_depth(repos.scan_depth as usize),
+    )
+}
+
+/// Adapter: the watcher's `CommitReviewer` port backed by the full review pipeline.
+struct PipelineReviewer {
+    pipeline: ReviewPipeline,
+}
+
+impl CommitReviewer for PipelineReviewer {
+    async fn review_commit(&self, event: &CommitEvent) -> Result<CommitVerdict, WatchError> {
+        // Read from the base (merge-base) commit, like the rest of the config: a branch cannot opt
+        // itself out of review.
+        let enabled = load_review_config(&event.repo.path, &review_target(event))
+            .await
+            .map(|c| c.watch.enabled && c.watch.review_on_push)
+            .map_err(|e| WatchError::Config(format!("{e:#}")))?;
+        if !enabled {
+            return Ok(CommitVerdict {
+                passed: true,
+                blocking_issues: 0,
+                summary: "push review disabled in .qgate.toml".into(),
+                run_id: None,
+            });
+        }
+        let request = ReviewRequest {
+            repo_root: event.repo.path.clone(),
+            target: review_target(event),
+            trigger: Trigger::Push,
+            explicit_ticket: None,
+            // The pipeline detects a [WIP] tip from the range's commit messages.
+            ticket_in_progress: false,
+        };
+        let outcome =
+            self.pipeline.run(&request, &NoProgress).await.map_err(|e| WatchError::Review(format!("{e:#}")))?;
+        let gate = &outcome.report.gate;
+        let blocking_issues = gate.blocking.len() + gate.unmet_criteria.len() + gate.failed_checks.len();
+        Ok(CommitVerdict {
+            passed: gate.passed,
+            blocking_issues,
+            summary: summarize(&outcome.report, event.note.as_deref()),
+            run_id: outcome.run_id,
+        })
+    }
+}
+
+/// The whole pushed branch is reviewed as one diff: `base..head` from the merge base with the base
+/// branch, or the pushed tip alone when there is no merge base (orphan/unrelated history).
+fn review_target(event: &CommitEvent) -> DiffTarget {
+    match &event.base {
+        Some(base) => DiffTarget::Range { base: base.clone(), head: event.sha.clone() },
+        None => DiffTarget::Commit(event.sha.clone()),
+    }
+}
+
+fn summarize(report: &crate::review::application::ReviewReport, note: Option<&str>) -> String {
+    let prefix = note.map(|n| format!("{n}; ")).unwrap_or_default();
+    format!("{prefix}{}", summarize_report(report))
+}
+
+fn summarize_report(report: &crate::review::application::ReviewReport) -> String {
+    let criteria = report
+        .requirements
+        .as_ref()
+        .map(|r| format!(", AC {}/{} met", r.assessments.len() - r.unmet().len(), r.assessments.len()))
+        .unwrap_or_default();
+    format!("{} finding(s){criteria}, {} check(s)", report.findings.len(), report.checks.len())
+}
+
+/// Log line always; Slack-compatible webhook too when configured.
+enum AnyNotifier {
+    Log(LogNotifier),
+    LogAndWebhook(TeeNotifier<LogNotifier, WebhookNotifier>),
+}
+
+impl Notifier for AnyNotifier {
+    async fn notify(&self, title: &str, body: &str) {
+        match self {
+            Self::Log(n) => n.notify(title, body).await,
+            Self::LogAndWebhook(n) => n.notify(title, body).await,
+        }
+    }
+}
+
+fn build_notifier(webhook_url: &str) -> Result<AnyNotifier> {
+    if webhook_url.trim().is_empty() {
+        return Ok(AnyNotifier::Log(LogNotifier::new()));
+    }
+    let webhook = WebhookNotifier::new(webhook_url).context("invalid notify.webhook_url")?;
+    Ok(AnyNotifier::LogAndWebhook(TeeNotifier::new(LogNotifier::new(), webhook)))
+}
+
+async fn stopped(mut stop: watch::Receiver<bool>) {
+    let _ = stop.wait_for(|stopped| *stopped).await;
+}
+
+/// Marks the process non-dumpable on Linux, so repository checks running as the same user cannot
+/// read its memory or `/proc/<pid>/environ` (which holds the API keys).
+fn harden_process() {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: prctl(PR_SET_DUMPABLE, 0) only changes this process's dumpable flag.
+        let result = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
+        if result != 0 {
+            eprintln!("qgate: warning: could not mark the process non-dumpable");
+        }
+    }
+}
+
+/// Ctrl-C, or SIGTERM from `docker stop`.
+pub(super) async fn wait_for_termination() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notifier_uses_webhook_only_when_configured() {
+        assert!(matches!(build_notifier("").unwrap(), AnyNotifier::Log(_)));
+        assert!(matches!(build_notifier("https://hooks.example.com/x").unwrap(), AnyNotifier::LogAndWebhook(_)));
+        assert!(build_notifier("ftp://nope").is_err());
+    }
+
+    #[tokio::test]
+    async fn stopped_resolves_after_signal() {
+        let (tx, rx) = watch::channel(false);
+        let waiter = tokio::spawn(stopped(rx));
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), waiter).await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn review_target_covers_the_whole_pushed_branch() {
+        use crate::watch::application::ports::WatchedRepo;
+        let mut event = CommitEvent {
+            repo: WatchedRepo::from_path(PathBuf::from("/repos/a")),
+            sha: "c4".into(),
+            base: Some("c1".into()),
+            branch: Some("feature".into()),
+            note: None,
+        };
+        assert_eq!(review_target(&event), DiffTarget::Range { base: "c1".into(), head: "c4".into() });
+        event.base = None;
+        assert_eq!(review_target(&event), DiffTarget::Commit("c4".into()));
+    }
+
+    #[test]
+    fn summarize_prefixes_a_note_when_present() {
+        let report = crate::review::application::ReviewReport::default();
+        assert!(summarize(&report, Some("no merge-base; reviewing whole branch")).starts_with("no merge-base;"));
+        assert!(!summarize(&report, None).starts_with(';'));
+    }
+}

@@ -1,0 +1,113 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "/snap/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "golang.org/x/text",
+            "version": "0.3.7",
+            "ecosystem": "Go",
+            "purl": "pkg:golang/golang.org/x/text@0.3.7"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2022-1059",
+                "GHSA-69ch-w2m2-3vjp"
+              ],
+              "aliases": [
+                "CVE-2022-32149",
+                "GHSA-69ch-w2m2-3vjp",
+                "GO-2022-1059"
+              ],
+              "max_severity": "7.5"
+            },
+            {
+              "ids": [
+                "GO-2026-5970"
+              ],
+              "aliases": [
+                "CVE-2026-56852",
+                "GO-2026-5970"
+              ],
+              "max_severity": ""
+            },
+            {
+              "ids": [
+                "GO-2026-6629"
+              ],
+              "aliases": [
+                "CVE-2026-56851",
+                "GO-2026-6629"
+              ],
+              "max_severity": ""
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "aliases": [
+                "CVE-2022-32149",
+                "GHSA-69ch-w2m2-3vjp"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2022-1059"
+              },
+              "id": "GO-2022-1059",
+              "summary": "Denial of service via crafted Accept-Language header in golang.org/x/text/language"
+            },
+            {
+              "aliases": [
+                "CVE-2026-56852"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5970"
+              },
+              "id": "GO-2026-5970",
+              "summary": "Infinite loop on invalid input in golang.org/x/text"
+            },
+            {
+              "aliases": [
+                "CVE-2026-56851"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6629"
+              },
+              "id": "GO-2026-6629",
+              "summary": "Panic parsing crafted input in x/text/secure/precis in golang.org/x/text"
+            },
+            {
+              "aliases": [
+                "CVE-2022-32149",
+                "GO-2022-1059"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-772"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2022-10-28T20:11:26Z",
+                "nvd_published_at": "2022-10-14T15:15:00Z",
+                "severity": "HIGH"
+              },
+              "id": "GHSA-69ch-w2m2-3vjp",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "golang.org/x/text/language Denial of service via crafted Accept-Language header"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
