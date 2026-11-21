@@ -1,7 +1,3 @@
-//! SQLite implementation of `ServerConfigStore`: append-only versions of the raw server settings.
-//!
-//! Shares the history database file but owns its own tables (`settings_schema_version`, `server_settings`).
-
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -14,7 +10,6 @@ use crate::settings::domain::ServerConfig;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ordered schema migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE server_settings (
         version     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +30,6 @@ fn storage(err: impl std::fmt::Display) -> SettingsError {
 }
 
 impl SqliteServerConfigStore {
-    /// Opens (creating parent directories and the file if needed) and migrates the settings tables.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SettingsError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -84,7 +78,6 @@ fn encode(config: &ServerConfig) -> Result<String, SettingsError> {
     serde_json::to_string(config).map_err(storage)
 }
 
-/// Row → stored settings; a config that no longer parses is an error (never silently replaced by defaults).
 fn read_row(row: &Row<'_>) -> rusqlite::Result<(i64, String, Option<String>, String)> {
     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
 }

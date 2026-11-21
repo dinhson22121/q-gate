@@ -1,29 +1,19 @@
-//! Results of the ticket agents (test agents, architecture conformance, design checks) as the
-//! review context sees them, and the evidence rules that decide whether a result may affect the gate.
-
 use serde::{Deserialize, Serialize};
 
 use super::change_set::ChangeSet;
 use super::requirements::EvidenceRef;
 use super::verification::evidence_exists;
 
-/// Ticket material beyond acceptance criteria: the reviewers use it as context, never as a gate.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TicketContext {
-    /// Keys whose criteria are being checked (the ticket and its parent Story, if any).
     pub keys: Vec<String>,
-    /// Plain-text descriptions (ticket first, then parent Story), already truncated.
     pub description: String,
-    /// Figma links found on the ticket or its parent Story.
     pub design_links: Vec<String>,
 }
 
-/// A behaviour to verify, derived from acceptance criteria by the ticket analyst.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestScenario {
-    /// Stable within one brief, e.g. "S1".
     pub id: String,
-    /// Acceptance criteria this scenario proves, e.g. ["SHOP-7/AC-1"].
     pub criterion_ids: Vec<String>,
     pub title: String,
     pub given: String,
@@ -31,13 +21,10 @@ pub struct TestScenario {
     pub then: String,
 }
 
-/// What the ticket analyst produced for one review.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TicketBrief {
     pub scenarios: Vec<TestScenario>,
-    /// Requirements implied by the description but not written as criteria. Informational only.
     pub implicit_requirements: Vec<String>,
-    /// Short context for the other reviewers (intent, constraints, non-functional needs).
     pub context: String,
 }
 
@@ -45,35 +32,26 @@ pub struct TicketBrief {
 #[serde(rename_all = "snake_case")]
 pub enum TestVerdict {
     Passed,
-    /// The test ran and an assertion about the required behaviour failed.
     FailedAssertion,
-    /// Could not decide: the test did not compile, setup failed, budget ran out, or evidence is incomplete.
     Inconclusive,
 }
 
-/// Everything a reader needs to check a test result without trusting the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestEvidence {
     pub criterion_ids: Vec<String>,
-    /// Criterion texts, so the evidence stands on its own.
     pub criterion_texts: Vec<String>,
     pub scenario: TestScenario,
-    /// Path of the generated test inside the snapshot, relative to the repository root.
     pub test_file: String,
     pub test_source: String,
     pub command: Vec<String>,
     pub exit_code: Option<i32>,
-    /// Failing assertion and surrounding output (tail).
     pub output: String,
-    /// The production code the test exercises.
     pub code_under_test: Vec<EvidenceRef>,
     pub commit: String,
-    /// Shell command a developer can run locally to reproduce.
     pub reproduce: String,
 }
 
 impl TestEvidence {
-    /// The fixed evidence contract: a failure missing any of these cannot affect the gate.
     pub fn missing_parts(&self) -> Vec<&'static str> {
         let mut missing = Vec::new();
         let mut need = |ok: bool, name: &'static str| {
@@ -102,7 +80,6 @@ pub struct TestResult {
     pub language: String,
     pub verdict: TestVerdict,
     pub evidence: Option<TestEvidence>,
-    /// Why the verdict is what it is (e.g. which evidence parts were missing).
     pub note: String,
 }
 
@@ -110,7 +87,6 @@ pub struct TestResult {
 pub struct RuleViolation {
     pub rule_id: String,
     pub rule_title: String,
-    /// Approved rules may block; inferred ones never do.
     pub approved: bool,
     pub file: String,
     pub line: u32,
@@ -131,10 +107,8 @@ pub enum DesignMismatchKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DesignMismatch {
     pub kind: DesignMismatchKind,
-    /// Figma frame name and node id, e.g. "Checkout / Payment" + "12:345".
     pub frame: String,
     pub node_id: String,
-    /// What the design says (text, component name, variable name and value, variant name).
     pub design_value: String,
     pub file: String,
     pub line: u32,
@@ -142,20 +116,16 @@ pub struct DesignMismatch {
     pub explanation: String,
 }
 
-/// Agent output for one review, after verification.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AgentReport {
     pub brief: Option<TicketBrief>,
     pub tests: Vec<TestResult>,
     pub violations: Vec<RuleViolation>,
     pub design: Vec<DesignMismatch>,
-    /// Agents that were skipped or failed, with the reason (budget, Jira down, no Figma link...).
     pub notes: Vec<String>,
     pub cost_usd: Option<f64>,
 }
 
-/// Downgrades failures without complete evidence, and drops violations / mismatches whose quoted
-/// code is not in the change. Returns the verified report.
 pub fn verify_agent_report(changes: &ChangeSet, mut report: AgentReport) -> AgentReport {
     for test in &mut report.tests {
         if test.verdict != TestVerdict::FailedAssertion {

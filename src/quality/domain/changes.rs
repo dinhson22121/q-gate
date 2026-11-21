@@ -1,22 +1,14 @@
-//! The "introduced by the diff" filter: maps a finding to the lines and dependency entries the change added.
-
 use std::collections::{BTreeMap, HashMap};
 
 use super::finding::{DependencyRef, QualityCategory, QualityFinding};
 
-/// Shortest version string trusted as a needle in a manifest line (`1.2` would match unrelated numbers).
 const MIN_VERSION_NEEDLE: usize = 3;
-/// Manifest file names whose added lines can introduce a Go dependency.
 const GO_MANIFEST: &str = "go.mod";
 
-/// One file touched by the change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
-    /// Repo-relative path.
     pub path: String,
-    /// Added in this change: every line of it is new.
     pub is_new_file: bool,
-    /// Added lines of an existing file by new-file line number.
     pub added: BTreeMap<u32, String>,
 }
 
@@ -26,7 +18,6 @@ impl ChangedFile {
     }
 }
 
-/// Changed files by path.
 #[derive(Debug, Default)]
 pub struct ChangeIndex {
     files: HashMap<String, ChangedFile>,
@@ -46,13 +37,10 @@ impl ChangeIndex {
         self.files.keys().map(String::as_str)
     }
 
-    /// The change added `line` of `path` (every line of a new file counts).
     pub fn is_added(&self, path: &str, line: u32) -> bool {
         self.files.get(path).is_some_and(|f| line > 0 && (f.is_new_file || f.added.contains_key(&line)))
     }
 
-    /// The change added or edited the dependency's entry in its manifest. Without a known manifest, any changed
-    /// `go.mod` counts. A manifest that did not change cannot have introduced it.
     pub fn dependency_is_new(&self, dependency: &DependencyRef) -> bool {
         let candidates: Vec<&ChangedFile> = match &dependency.manifest {
             Some(path) => self.files.get(path).into_iter().collect(),
@@ -62,7 +50,6 @@ impl ChangeIndex {
         candidates.iter().any(|file| file.is_new_file || file.added.values().any(|line| mentions(line, &needles)))
     }
 
-    /// Sets `is_new` from where the finding is and, for dependencies, from the manifest entry.
     pub fn classify(&self, finding: &mut QualityFinding) {
         let at_added_line = self.is_added(&finding.file, finding.line);
         finding.is_new = match finding.category {
@@ -78,8 +65,6 @@ fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Strings that identify the dependency on a manifest line: its name (and artifact id for `group:artifact`) and a
-/// version that is long enough to be specific. `v` prefixes (Go) are dropped from the version.
 fn needles(dependency: &DependencyRef) -> Vec<String> {
     let mut needles = vec![dependency.name.clone()];
     if let Some((_, artifact)) = dependency.name.split_once(':') {

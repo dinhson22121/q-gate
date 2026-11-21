@@ -6,7 +6,7 @@ use super::*;
 fn settings() -> Value {
     json!({
         "agents": {"enabled": true, "budget_usd_per_review": 2.0, "tests": {"on_fail": "block"}},
-        "llm": {"base_url": "https://api.anthropic.com"},
+        "llm": {"claude_bin": "claude", "timeout_secs": 600},
         "notify": {"webhook_url": ""},
         "watch": {"run_repo_checks": true},
         "jira": {"base_url": "https://acme.atlassian.net", "mcp": {"command": ["uvx"]}},
@@ -56,8 +56,8 @@ fn settings_are_allow_listed_typed_and_flagged() {
         settings_changes: vec![
             setting("agents.tests.on_fail", "\"warn\""),
             setting("agents.budget_usd_per_review", "5"),
-            setting("llm.base_url", "\"https://proxy.example\""),
-            setting("secrets.anthropic_api_key", "\"sk\""),
+            setting("llm.claude_bin", "\"/tmp/evil\""),
+            setting("secrets.jira_api_token", "\"sk\""),
             setting("dashboard.bind", "\"0.0.0.0:1\""),
             setting("agents.enabled", "\"yes\""),
             setting("agents.enabled", "true"),
@@ -78,14 +78,14 @@ fn settings_are_allow_listed_typed_and_flagged() {
     assert_eq!(content.settings[2].sensitivity, vec![Sensitivity::Webhook]);
     assert_eq!(content.settings[2].old, Value::Null, "the webhook URL is never echoed");
     let reasons: Vec<(&str, &str)> = content.rejected.iter().map(|r| (r.subject.as_str(), r.reason.as_str())).collect();
-    assert!(reasons.iter().any(|(s, r)| *s == "secrets.anthropic_api_key" && r.contains("credentials")));
+    assert!(reasons.iter().any(|(s, r)| *s == "secrets.jira_api_token" && r.contains("credentials")));
     assert!(reasons.iter().any(|(s, r)| *s == "dashboard.bind" && r.contains("cannot be changed")));
     assert!(reasons.iter().any(|(s, r)| *s == "agents.enabled" && r.contains("expected")));
     assert!(reasons.iter().any(|(s, r)| *s == "output.enabled" && r.contains("JSON")));
     assert!(reasons.iter().any(|(s, r)| *s == "output.missing" && r.contains("unknown")));
     assert!(reasons.iter().any(|(_, r)| r.contains("twice")));
     assert!(reasons.iter().any(|(s, r)| *s == "notify.webhook_url" && r.contains("Settings page")));
-    for admin in ["llm.base_url", "jira.mcp.command"] {
+    for admin in ["llm.claude_bin", "jira.mcp.command"] {
         assert!(reasons.iter().any(|(s, r)| *s == admin && r.starts_with("admin-only")), "{admin}");
     }
     assert_eq!(content.rejected.len(), 9, "unchanged agents.enabled=true is silently dropped");

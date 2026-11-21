@@ -1,9 +1,3 @@
-//! Checks for the mutating routes of the settings, rulebook and policy APIs (GET/HEAD pass through):
-//! - a custom `X-Qgate-Request` header and `Content-Type: application/json`: both force a CORS preflight,
-//!   which this server never answers, so a cross-site page cannot send them (CSRF);
-//! - an `Origin` allow-list as defence in depth;
-//! - the per-instance [`ApiToken`] (401 when missing or wrong), against processes that are not our pages.
-
 use axum::http::header::{CONTENT_TYPE, ORIGIN};
 use axum::http::{HeaderMap, Method, StatusCode};
 
@@ -12,7 +6,6 @@ use super::api_token::{ApiToken, TOKEN_HEADER};
 pub const REQUEST_HEADER: &str = "x-qgate-request";
 const JSON_MIME: &str = "application/json";
 
-/// Why a request was refused; each API renders it in its own error body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rejection {
     pub status: StatusCode,
@@ -27,14 +20,12 @@ impl Rejection {
 
 #[derive(Debug, Clone)]
 pub struct MutationGuard {
-    /// Expected `X-Qgate-Request` value, e.g. `settings`.
     request_value: &'static str,
     allowed_hosts: Vec<String>,
     token: ApiToken,
 }
 
 impl MutationGuard {
-    /// `allowed_hosts`: the dashboard's `dashboard.allowed_hosts`; an `Origin` header must name one of them.
     pub fn new(request_value: &'static str, allowed_hosts: &[String], token: ApiToken) -> Self {
         let allowed_hosts = allowed_hosts.iter().map(|h| normalize_host(h)).filter(|h| !h.is_empty()).collect();
         Self { request_value, allowed_hosts, token }
@@ -72,7 +63,6 @@ impl MutationGuard {
     }
 }
 
-/// Lowercased host without port; IPv6 brackets removed (`[::1]:8080` → `::1`).
 pub fn normalize_host(raw: &str) -> String {
     let raw = raw.trim();
     let host = match raw.strip_prefix('[') {
@@ -83,7 +73,6 @@ pub fn normalize_host(raw: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
 
-/// Host of an `Origin` header (`http://localhost:8080` → `localhost`); `None` for `null` or garbage.
 fn origin_host(origin: &str) -> Option<String> {
     let (_, rest) = origin.split_once("://")?;
     let host = normalize_host(rest.split('/').next().unwrap_or_default());

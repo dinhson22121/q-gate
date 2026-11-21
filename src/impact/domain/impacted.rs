@@ -1,14 +1,9 @@
-//! Package-level impact: changed packages plus everything that transitively imports them.
-
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// One Go package of a snapshot, as reported by `go list`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoPackage {
     pub import_path: String,
-    /// Directory relative to the module root, `/`-separated; empty for the root package.
     pub rel_dir: String,
-    /// Imports of the package and of its in-package and external tests.
     pub imports: Vec<String>,
     pub has_tests: bool,
 }
@@ -16,13 +11,9 @@ pub struct GoPackage {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImpactedSet {
     pub changed: Vec<String>,
-    /// Changed packages first, then dependents by increasing distance.
     pub impacted: Vec<String>,
-    /// Impacted packages that have tests, at most the cap.
     pub selected: Vec<String>,
-    /// Impacted packages with no `_test.go` files.
     pub without_tests: Vec<String>,
-    /// Packages with tests that the cap left out.
     pub dropped_by_cap: Vec<String>,
 }
 
@@ -32,12 +23,8 @@ impl ImpactedSet {
     }
 }
 
-/// Files that change what every package builds against.
 const GLOBAL_FILES: &[&str] = &["go.mod", "go.sum", "go.work", "go.work.sum"];
 
-/// Packages touched by `changed_files` (paths relative to the repo root). A `.go` file belongs to
-/// the package of its directory; a file under `testdata/` to the nearest package above it; a module
-/// file or vendored code to every package. Other files (docs, CI) impact nothing.
 pub fn changed_packages(packages: &[GoPackage], changed_files: &[String]) -> Vec<String> {
     let by_dir: BTreeMap<&str, &str> = packages.iter().map(|p| (p.rel_dir.as_str(), p.import_path.as_str())).collect();
     let mut changed = BTreeSet::new();
@@ -59,8 +46,6 @@ fn testdata_owner<'a>(by_dir: &BTreeMap<&str, &'a str>, dir: &str) -> Option<&'a
     by_dir.get(segments[..at].join("/").as_str()).copied()
 }
 
-/// Reverse-dependency closure of `changed`, then the tested part limited to `cap` packages (closest
-/// to the change first).
 pub fn compute_impacted(packages: &[GoPackage], changed: &[String], cap: usize) -> ImpactedSet {
     let known: BTreeSet<&str> = packages.iter().map(|p| p.import_path.as_str()).collect();
     let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
@@ -114,7 +99,6 @@ mod tests {
         }
     }
 
-    /// m (root) -> m/api -> m/svc -> m/util ; m/other is independent.
     fn graph() -> Vec<GoPackage> {
         vec![
             pkg("m", &["m/api"], true),

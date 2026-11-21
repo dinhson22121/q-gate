@@ -1,16 +1,10 @@
-//! Bounded memory of pushes already handled, so re-pushing the same sha to the same branch (or a
-//! ref returning to a known sha) is ignored.
-
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-/// Default number of remembered pushes.
 pub const DEFAULT_RECENT_CAPACITY: usize = 500;
 
-/// `(repo, branch, sha)`: the same sha on another branch is distinct.
 type Key = (PathBuf, String, String);
 
-/// FIFO-bounded set of handled `(repo, branch, sha)` pushes.
 #[derive(Debug, Clone)]
 pub struct RecentCommits {
     capacity: usize,
@@ -19,13 +13,11 @@ pub struct RecentCommits {
 }
 
 impl RecentCommits {
-    /// `capacity` is clamped to at least 1.
     pub fn new(capacity: usize) -> Self {
         let capacity = capacity.max(1);
         Self { capacity, order: VecDeque::with_capacity(capacity), members: HashSet::new() }
     }
 
-    /// Remembers the push; returns false when it was already known.
     pub fn insert(&mut self, repo: PathBuf, branch: String, sha: String) -> bool {
         let key = (repo, branch, sha);
         if self.members.contains(&key) {

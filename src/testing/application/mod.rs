@@ -1,5 +1,3 @@
-//! Use case "test one scenario" and the tool handler the agent works through.
-
 pub mod agent;
 pub mod caching;
 pub mod handler;

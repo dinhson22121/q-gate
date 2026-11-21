@@ -6,7 +6,6 @@ use futures::future::BoxFuture;
 use super::QualityRequest;
 use crate::quality::domain::{ChangeIndex, Language, QualityFinding, QualityTool};
 
-/// What a check sees.
 pub struct CheckInput<'a> {
     pub request: &'a QualityRequest,
     pub changes: &'a ChangeIndex,
@@ -19,7 +18,6 @@ impl CheckInput<'_> {
     }
 }
 
-/// Findings (not yet graded as new/pre-existing) and human-readable notes (skips, failures).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CheckOutcome {
     pub findings: Vec<QualityFinding>,
@@ -36,11 +34,9 @@ impl CheckOutcome {
     }
 }
 
-/// One external tool. Implementations never fail: a missing tool or a broken run is a note.
 pub trait QualityCheck: Send + Sync {
     fn tool(&self) -> QualityTool;
 
-    /// The check applies when any of these languages is selected; empty means every repository.
     fn languages(&self) -> &'static [Language];
 
     fn run<'a>(&'a self, input: &'a CheckInput<'a>) -> BoxFuture<'a, CheckOutcome>;

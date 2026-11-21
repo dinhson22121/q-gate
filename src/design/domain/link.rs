@@ -1,15 +1,11 @@
-//! Figma frame links as they appear on tickets.
-
 use std::fmt;
 
 const FIGMA_HOSTS: [&str; 2] = ["figma.com", "www.figma.com"];
 const FILE_KINDS: [&str; 4] = ["design", "file", "proto", "board"];
 
-/// A link to one node of one Figma file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FigmaLink {
     pub file_key: String,
-    /// API form ("12:345"); links use "12-345".
     pub node_id: String,
 }
 
@@ -26,8 +22,6 @@ pub enum LinkError {
 }
 
 impl FigmaLink {
-    /// Parses `https://www.figma.com/design/<key>/<name>?node-id=12-345` (also `/file/`, `/proto/` and
-    /// branch links `/design/<key>/branch/<branch_key>/...`, where the branch key is the file to read).
     pub fn parse(raw: &str) -> Result<Self, LinkError> {
         let rest = raw.trim().strip_prefix("https://").ok_or(LinkError::NotFigma)?;
         let (host_and_path, query) = rest.split_once('?').unwrap_or((rest, ""));
@@ -65,12 +59,10 @@ fn file_key(path: &str) -> Result<String, LinkError> {
     if is_valid_file_key(key) { Ok(key.to_string()) } else { Err(LinkError::MissingFileKey) }
 }
 
-/// File keys are alphanumeric; they are interpolated into API paths.
 pub fn is_valid_file_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= 64 && key.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// Node ids are `<digits>:<digits>`, instance sublayers join several with `;` (prefixed by `I`).
 pub fn is_valid_node_id(id: &str) -> bool {
     let body = id.strip_prefix('I').unwrap_or(id);
     !body.is_empty()
@@ -82,7 +74,6 @@ fn is_digits(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }
 
-/// "12-345" / "12%3A345" / "12:345" → "12:345".
 fn api_node_id(raw: &str) -> Result<String, LinkError> {
     let decoded = raw.replace("%3A", ":").replace("%3a", ":").replace("%3B", ";").replace("%3b", ";");
     let id = if decoded.contains(':') { decoded } else { decoded.replace('-', ":") };

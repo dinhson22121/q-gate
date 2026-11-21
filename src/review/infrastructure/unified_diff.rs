@@ -1,5 +1,3 @@
-//! Parser for the unified diff format produced by `git diff`.
-
 use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange, Hunk};
 
 const FILE_HEADER: &str = "diff --git ";
@@ -15,10 +13,8 @@ const NO_NEWLINE_MARKER: char = '\\';
 const DEV_NULL: &str = "/dev/null";
 const OLD_PREFIX: &str = "a/";
 const NEW_PREFIX: &str = "b/";
-/// Line count implied when a hunk range omits it (`@@ -3 +3 @@`).
 const DEFAULT_RANGE_COUNT: u32 = 1;
 
-/// Why a diff could not be parsed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiffParseError {
     #[error("line {line}: malformed hunk header `{text}`")]
@@ -35,7 +31,6 @@ pub enum DiffParseError {
     MissingPath { line: usize },
 }
 
-/// Parses `git diff` output into file changes. `new_content` is left `None` for the caller to fill.
 pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChange>, DiffParseError> {
     let mut lines = input.lines().enumerate().map(|(i, l)| (i + 1, l)).peekable();
     let mut files = Vec::new();
@@ -53,7 +48,7 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChange>, DiffParseError
             if line.starts_with(HUNK_MARKER) {
                 return Err(DiffParseError::HunkOutsideFile { line: number });
             }
-            continue; // preamble before the first file header
+            continue;
         };
         if file.in_binary_patch {
             continue;
@@ -71,7 +66,6 @@ pub fn parse_unified_diff(input: &str) -> Result<Vec<FileChange>, DiffParseError
     Ok(files)
 }
 
-/// Accumulates the extended header lines of one `diff --git` section.
 struct FileBuilder {
     line: usize,
     git_header: String,
@@ -124,7 +118,6 @@ impl FileBuilder {
             self.new_path = side_path(number, path, NEW_PREFIX)?;
             self.is_deleted |= self.new_path.is_none();
         }
-        // Other extended headers (index, mode, similarity) carry nothing we need.
         Ok(())
     }
 
@@ -160,7 +153,6 @@ struct HunkHeader {
     new_count: u32,
 }
 
-/// Parses `@@ -a[,b] +c[,d] @@ [section]`.
 fn parse_hunk_header(number: usize, line: &str) -> Result<HunkHeader, DiffParseError> {
     let malformed = || DiffParseError::MalformedHunkHeader { line: number, text: line.to_string() };
     let ranges = line
@@ -181,8 +173,6 @@ fn parse_range(range: &str) -> Option<(u32, u32)> {
     }
 }
 
-/// Consumes exactly the number of lines the header declares, so body lines that look
-/// like headers (e.g. a removed `-- comment`) are never misread.
 fn read_hunk_body<'a>(
     header_line: usize,
     header: HunkHeader,
@@ -208,7 +198,6 @@ fn read_hunk_body<'a>(
                 body.push(DiffLine::Added { new_line, text });
                 new_line += 1;
             }
-            // Some tools strip the single space of an empty context line.
             Some(' ') | None if old_left > 0 && new_left > 0 => {
                 old_left -= 1;
                 new_left -= 1;
@@ -224,9 +213,7 @@ fn read_hunk_body<'a>(
     Ok(Hunk { header: header.text, new_start: header.new_start, lines: body })
 }
 
-/// Path of a `---`/`+++` line; `None` for `/dev/null`.
 fn side_path(number: usize, raw: &str, prefix: &str) -> Result<Option<String>, DiffParseError> {
-    // Git appends a tab after names containing spaces, for GNU patch compatibility.
     let raw = raw.strip_suffix('\t').unwrap_or(raw);
     if raw == DEV_NULL {
         return Ok(None);
@@ -235,7 +222,6 @@ fn side_path(number: usize, raw: &str, prefix: &str) -> Result<Option<String>, D
     Ok(Some(path.strip_prefix(prefix).map(str::to_string).unwrap_or(path)))
 }
 
-/// Splits the `a/<old> b/<new>` part of a `diff --git` line into its two paths.
 fn split_git_header(number: usize, rest: &str) -> Result<(Option<String>, Option<String>), DiffParseError> {
     let (old, new) = if rest.starts_with('"') {
         let end = closing_quote(rest).ok_or_else(|| invalid_path(number, rest))?;
@@ -254,7 +240,6 @@ fn split_git_header(number: usize, rest: &str) -> Result<(Option<String>, Option
     Ok((Some(strip(old, OLD_PREFIX)), Some(strip(new, NEW_PREFIX))))
 }
 
-/// For `a/X b/X` headers (the common, non-renamed case) returns `X`, even if it contains spaces.
 fn symmetric_header_path(rest: &str) -> Option<&str> {
     let name_len = rest.len().checked_sub(OLD_PREFIX.len() + NEW_PREFIX.len() + 1)? / 2;
     let old = rest.strip_prefix(OLD_PREFIX)?.get(..name_len)?;
@@ -262,7 +247,6 @@ fn symmetric_header_path(rest: &str) -> Option<&str> {
     (old == new).then_some(old)
 }
 
-/// Index of the quote closing a C-style quoted string that starts at index 0.
 fn closing_quote(s: &str) -> Option<usize> {
     let mut escaped = false;
     for (i, c) in s.char_indices().skip(1) {
@@ -276,7 +260,6 @@ fn closing_quote(s: &str) -> Option<usize> {
     None
 }
 
-/// Returns the path as is, or unquotes a git C-style quoted path (`"a/t\303\251st\tx"`).
 fn parse_path(number: usize, raw: &str) -> Result<String, DiffParseError> {
     match raw.strip_prefix('"') {
         Some(quoted) => {
@@ -307,7 +290,7 @@ fn unquote(inner: &str) -> Option<String> {
                 let digits = [digit, input.next()?, input.next()?];
                 u8::from_str_radix(std::str::from_utf8(&digits).ok()?, 8).ok()?
             }
-            other => other, // `\\` and `\"`
+            other => other,
         };
         bytes.push(decoded);
     }

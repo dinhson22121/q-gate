@@ -1,6 +1,3 @@
-//! `ResultCache` backed by SQLite, in qgate's database (`<data_dir>/qgate.db`). Owns the tables
-//! `result_cache_schema_version` and `result_cache`.
-
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,7 +8,6 @@ use crate::cache::application::{CacheError, ContentKey, ResultCache};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ordered schema migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE result_cache (
         fingerprint  TEXT    NOT NULL PRIMARY KEY,
@@ -25,7 +21,6 @@ const MIGRATIONS: &[&str] = &["
     CREATE INDEX idx_result_cache_last_used ON result_cache (last_used_at);
 "];
 
-/// A content-addressed result cache. Cheap to clone (shared connection).
 #[derive(Clone)]
 pub struct SqliteResultCache {
     conn: Arc<Mutex<Connection>>,
@@ -40,7 +35,6 @@ fn now_millis() -> i64 {
 }
 
 impl SqliteResultCache {
-    /// Opens (creating parent directories and the file if needed) and migrates the cache tables.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CacheError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {

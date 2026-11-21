@@ -7,8 +7,6 @@ use crate::quality::application::{CheckInput, CheckOutcome, QualityCheck};
 use crate::quality::domain::parsers::osv;
 use crate::quality::domain::{Language, QualityTool};
 
-/// Dependency manifests and lockfiles of Go and Java (Maven, Gradle) projects. Only a change to one of them can
-/// introduce a vulnerable dependency, so the scan is skipped otherwise.
 const MANIFESTS: [&str; 8] = [
     "go.mod",
     "go.sum",
@@ -19,10 +17,8 @@ const MANIFESTS: [&str; 8] = [
     "buildscript-gradle.lockfile",
     "libs.versions.toml",
 ];
-/// osv-scanner exit codes for "no supported packages / lockfiles found".
 const NO_PACKAGES: [i32; 2] = [127, 128];
 
-/// Known-vulnerable dependencies of the snapshot (OSV database; needs network access to api.osv.dev).
 pub struct OsvScannerCheck {
     runner: ToolRunner,
     binary: Option<PathBuf>,

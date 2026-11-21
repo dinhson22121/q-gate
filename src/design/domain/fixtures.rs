@@ -1,5 +1,3 @@
-//! Test builders for the design domain.
-
 use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange, Hunk};
 
 use super::spec::DesignSpec;
@@ -13,12 +11,10 @@ pub fn spec(texts: &[&str]) -> DesignSpec {
     }
 }
 
-/// A new UI file whose lines are all added, numbered from 1.
 pub fn ui_file(path: &str, lines: &[&str]) -> FileChange {
     file_with(path, &[], lines)
 }
 
-/// A modified file: `context` lines first (unchanged), then `added` lines.
 pub fn file_with(path: &str, context: &[&str], added: &[&str]) -> FileChange {
     let mut diff = Vec::new();
     let mut number = 0;

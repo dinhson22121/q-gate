@@ -76,7 +76,6 @@ impl TestServer {
         format!("http://{}{path}", self.addr)
     }
 
-    /// A same-origin request as the page sends it.
     fn post(&self, path: &str) -> reqwest::RequestBuilder {
         self.custom(path, "application/json", &format!("http://localhost:{}", self.addr.port()))
     }
@@ -201,7 +200,6 @@ async fn rebuild_runs_in_background_for_known_repos_only() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(server.model.draft_calls(), 1);
-    // The fake model returns no rules, so the rebuilt rulebook is empty.
     assert!(server.store.load(REPO).unwrap().unwrap().rules.is_empty());
 
     let unknown = server.post(&format!("/api/rulebook/{}/rebuild", encoded("/etc"))).body("{}").send().await.unwrap();

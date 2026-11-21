@@ -1,37 +1,22 @@
-//! Import boundaries: "files matching these globs must not import these packages". The deterministic form of an
-//! architecture rule; v1 enforces them for Go through depguard.
-
-/// Marker a Rulebook rule (description or lint suggestion) uses to state a boundary mechanically:
-/// `qgate:go-import-deny scope=<glob>[,<glob>...] deny=<import-prefix>[,<import-prefix>...]`.
-/// `{module}` in a prefix stands for the module path in `go.mod`.
 pub const DIRECTIVE: &str = "qgate:go-import-deny";
 const SCOPE_KEY: &str = "scope=";
 const DENY_KEY: &str = "deny=";
 
-/// One enforced boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportBoundary {
-    /// Rule id (`R3`, a team rule id); also the depguard list name, so only `[A-Za-z0-9_-]`.
     pub id: String,
     pub title: String,
-    /// Globs of the files the boundary applies to (repo-relative, e.g. `internal/domain/**`).
     pub scope_globs: Vec<String>,
-    /// Import path prefixes the scoped files must not import.
     pub deny: Vec<String>,
-    /// An approved rule: violations block. Proposed (inferred) rules only warn.
     pub approved: bool,
 }
 
 impl ImportBoundary {
-    /// Imperative one-line rule for the coding agent.
     pub fn rule_text(&self) -> String {
         format!("Code in {} must not import {}", self.scope_globs.join(", "), self.deny.join(", "))
     }
 }
 
-/// Boundaries stated by `qgate:go-import-deny` lines in `texts` (all belong to rule `rule_id`). Malformed
-/// directives (no scope or deny, unsafe characters) are ignored. With several directives the ids become
-/// `<rule_id>-2`, `<rule_id>-3`...
 pub fn parse_boundary_directives(rule_id: &str, title: &str, approved: bool, texts: &[&str]) -> Vec<ImportBoundary> {
     let base = sanitize_id(rule_id);
     let parsed: Vec<(Vec<String>, Vec<String>)> =

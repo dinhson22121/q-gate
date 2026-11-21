@@ -1,5 +1,3 @@
-//! JSON rendering (`qgate.review/v1`) of a [`HandoffDocument`] plus the full report, for tools.
-
 use serde_json::{Value, json};
 
 use super::document::{HandoffDocument, HandoffInput};

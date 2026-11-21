@@ -1,12 +1,9 @@
-//! `RepoInspector` backed by the local `git` executable.
-
 use std::path::Path;
 
 use super::git::{GIT_QUIET_MISS, failure, run_git};
 use crate::watch::application::ports::{RepoInspector, WatchError};
 use crate::watch::domain::freshness::ReflogHead;
 
-/// Field separator in the ref/reflog queries (ASCII unit separator).
 const FIELD_SEP: char = '\u{1f}';
 
 #[derive(Debug, Clone, Default)]
@@ -18,10 +15,8 @@ impl GitRepoInspector {
     }
 }
 
-/// Name of the repository's configuration file, read at a commit.
 const CONFIG_FILE: &str = ".qgate.toml";
 
-/// Only the part of `.qgate.toml` the watcher needs; unknown keys are the review pipeline's business.
 #[derive(Debug, Default, serde::Deserialize)]
 struct RepoWatchSection {
     #[serde(default)]
@@ -34,8 +29,6 @@ struct BaseBranchSection {
     base_branch: String,
 }
 
-/// The repository's `watch.base_branch`, `None` when absent, empty, malformed or not a safe branch name
-/// (no leading '-', whitespace or control characters: it ends up as a git argument).
 fn parse_base_branch(config_toml: &str) -> Option<String> {
     let parsed: RepoWatchSection = toml::from_str(config_toml).ok()?;
     let name = parsed.watch.base_branch.trim();
@@ -43,8 +36,6 @@ fn parse_base_branch(config_toml: &str) -> Option<String> {
     (!name.is_empty() && !unsafe_name).then(|| name.to_owned())
 }
 
-/// Parses one `%(refname)\x1f%(objectname)` line into `(branch, sha)`, stripping the remote prefix
-/// and skipping the symbolic `<remote>/HEAD`.
 fn parse_ref_line<'a>(line: &'a str, prefix: &str) -> Option<(&'a str, &'a str)> {
     let (refname, sha) = line.split_once(FIELD_SEP)?;
     let branch = refname.strip_prefix(prefix)?;
@@ -54,14 +45,12 @@ fn parse_ref_line<'a>(line: &'a str, prefix: &str) -> Option<(&'a str, &'a str)>
     Some((branch, sha))
 }
 
-/// Extracts the reflog entry's unix timestamp from a `%gd` value like `origin/feature@{1700000000}`.
 fn parse_reflog_time(gd: &str) -> Option<i64> {
     let start = gd.rfind("@{")? + 2;
     let end = gd[start..].find('}')? + start;
     gd[start..end].parse().ok()
 }
 
-/// Parses a `%H\x1f%gd\x1f%gs` reflog line.
 fn parse_reflog_line(stdout: &str) -> Option<ReflogHead> {
     let line = stdout.lines().next()?;
     let mut fields = line.splitn(3, FIELD_SEP);
@@ -92,7 +81,6 @@ impl RepoInspector for GitRepoInspector {
         let args = ["log", "-g", "-1", "--date=unix", "--format=%H\u{1f}%gd\u{1f}%gs", ref_name];
         let output = run_git(repo, &args).await?;
         if !output.status.success() {
-            // No reflog for the ref (core.logAllRefUpdates disabled, or an unborn ref).
             return Ok(None);
         }
         Ok(parse_reflog_line(&String::from_utf8_lossy(&output.stdout)))
@@ -209,12 +197,10 @@ mod tests {
         git(dir.path(), &["push", "-q", "origin", "feature"]);
         assert!(move_of(dir.path(), "feature").await.is_push(), "normal push");
 
-        // Force push after rewriting history.
         git(dir.path(), &["commit", "--quiet", "--amend", "--allow-empty", "-m", "amended"]);
         git(dir.path(), &["push", "-qf", "origin", "feature"]);
         assert!(move_of(dir.path(), "feature").await.is_push(), "force push");
 
-        // A plain fetch of an unchanged remote is not a push.
         git(dir.path(), &["fetch", "-q", "origin"]);
         let after_fetch = move_of(dir.path(), "feature").await;
         assert!(after_fetch.is_push() || matches!(after_fetch, RefMove::NotAPush { .. }), "{after_fetch}");
@@ -244,7 +230,6 @@ mod tests {
         init_repo(dir.path());
         commit(dir.path(), "initial");
         let inspector = GitRepoInspector::new();
-        // No remote-tracking ref yet: its reflog is absent.
         assert_eq!(inspector.ref_reflog(dir.path(), "refs/remotes/origin/nope").await.unwrap(), None);
 
         let empty = tempfile::tempdir().unwrap();

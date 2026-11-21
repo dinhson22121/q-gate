@@ -1,5 +1,3 @@
-//! Prevention rules: what the developer's coding agent should follow so a class of finding does not come back.
-
 use super::boundary::ImportBoundary;
 use super::finding::{DependencyRef, QualityRule};
 
@@ -9,7 +7,6 @@ pub fn secret_rule() -> QualityRule {
     QualityRule { text: SECRET_RULE.to_string(), scope: None }
 }
 
-/// Keep the package off vulnerable releases; scoped to the manifest the dependency is declared in.
 pub fn dependency_rule(dependency: &DependencyRef) -> QualityRule {
     let fix = match &dependency.fixed_version {
         Some(fixed) => format!("use {fixed} or newer"),
@@ -25,7 +22,6 @@ pub fn dependency_rule(dependency: &DependencyRef) -> QualityRule {
     }
 }
 
-/// The boundary as a rule; scoped to its glob when it has exactly one.
 pub fn architecture_rule(boundary: &ImportBoundary) -> QualityRule {
     let scope = match boundary.scope_globs.as_slice() {
         [only] => Some(format!("**/{}", only.trim_start_matches("**/").trim_start_matches('/'))),

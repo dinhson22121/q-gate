@@ -1,15 +1,10 @@
-//! Parses the compact `go list -f` listing into [`GoPackage`]s.
-
 use crate::impact::domain::GoPackage;
 
-/// Template giving one `|`-separated line per package: import path, module path, in-package test
-/// file count, external test file count, then comma-joined imports, test imports, external test imports.
 pub const LIST_FORMAT: &str = "{{.ImportPath}}|{{if .Module}}{{.Module.Path}}{{end}}|{{len .TestGoFiles}}|{{len \
      .XTestGoFiles}}|{{join .Imports \",\"}}|{{join .TestImports \",\"}}|{{join .XTestImports \",\"}}";
 
 const FIELDS: usize = 7;
 
-/// Lines that are malformed, or belong to no module (standard library), are skipped.
 pub fn parse_package_lines(output: &str) -> Vec<GoPackage> {
     output.lines().filter_map(parse_line).collect()
 }

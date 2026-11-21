@@ -1,6 +1,3 @@
-//! Runs a command as a child of this process: no shell, cleared environment (allow-list + the
-//! request's variables), own process group killed on exit, timeout and cancellation, bounded output.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
@@ -14,15 +11,10 @@ use crate::sandbox::application::ExecBackend;
 use crate::sandbox::domain::{ExecRequest, ExecResult, FailureKind, INHERITED_ENV_VARS, OutputTail, validate};
 
 const READ_CHUNK_BYTES: usize = 4096;
-/// Output still read after the process exited: a pipe end leaked into an unrelated process (no atomic
-/// close-on-exec on macOS) must not hang the run.
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
-/// Toolchain homes that break tools (e.g. `./gradlew`) when they point at a missing directory.
 const HOMES_DROPPED_WHEN_MISSING: &[&str] = &["JAVA_HOME", "MAVEN_HOME"];
 const SCRATCH_HOME_PREFIX: &str = "qgate-exec-home-";
 
-/// Executes in the current process's environment and namespace. Used by the native CLI and, inside
-/// the runner container, behind the confinement use case.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LocalBackend;
 
@@ -45,7 +37,6 @@ async fn run_unmeasured(request: &ExecRequest) -> ExecResult {
     }
     let (program, args) = request.argv.split_first().expect("validated: argv is not empty");
     let env = child_env(inherited_env(), &request.env);
-    // Kept alive until the run is over, then deleted.
     let scratch_home = match scratch_home_if_missing(&env) {
         Ok(home) => home,
         Err(e) => return ExecResult::failed(FailureKind::SpawnFailed, format!("cannot create a HOME directory: {e}")),
@@ -63,7 +54,6 @@ async fn run_unmeasured(request: &ExecRequest) -> ExecResult {
     if let Some(home) = &scratch_home {
         command.env("HOME", home.path());
     }
-    // Its own process group, so a timeout or cancellation takes down everything it started.
     #[cfg(unix)]
     command.process_group(0);
     let mut child = match command.spawn() {
@@ -74,12 +64,10 @@ async fn run_unmeasured(request: &ExecRequest) -> ExecResult {
             return ExecResult::failed(kind, format!("failed to start '{program}': {e}"));
         }
     };
-    // Declared after `child`: on cancellation the group is killed before the child is reaped.
     let mut group = ProcessGroup::of(&child);
     let mut tail = OutputTail::new(request.max_output_bytes);
     let timeout = Duration::from_millis(request.timeout_ms);
     let waited = tokio::time::timeout(timeout, collect(&mut child, &mut tail)).await;
-    // Also on a normal exit: background processes must not outlive the run.
     group.kill();
     match waited {
         Ok(Ok(status)) => ExecResult { exit_code: status.code(), output_tail: tail.render(), ..ExecResult::default() },
@@ -88,20 +76,16 @@ async fn run_unmeasured(request: &ExecRequest) -> ExecResult {
             ..ExecResult::failed(FailureKind::SpawnFailed, format!("failed to wait for '{program}': {e}"))
         },
         Err(_) => {
-            // Reap the process; kill errors mean it already exited.
             let _ = child.kill().await;
             ExecResult { timed_out: true, output_tail: tail.render(), ..ExecResult::default() }
         }
     }
 }
 
-/// Wrapper scripts (`./mvnw`, `../gradlew`) are resolved against the working directory, because a
-/// relative program path is otherwise looked up from this process's own directory.
 fn program_path(cwd: &Path, program: &str) -> PathBuf {
     if program.starts_with("./") || program.starts_with("../") { cwd.join(program) } else { PathBuf::from(program) }
 }
 
-/// The allow-listed variables of this process, overridden by the request's own variables.
 fn child_env(inherited: Vec<(String, String)>, extra: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut env: BTreeMap<String, String> = inherited
         .into_iter()
@@ -118,8 +102,6 @@ fn inherited_env() -> Vec<(String, String)> {
         .collect()
 }
 
-/// A fresh temporary directory to use as `HOME` when the environment has none, so tools that write
-/// caches or config below `HOME` neither fail nor fall back to a shared location such as `/`.
 fn scratch_home_if_missing(env: &BTreeMap<String, String>) -> std::io::Result<Option<tempfile::TempDir>> {
     if env.contains_key("HOME") {
         return Ok(None);
@@ -127,12 +109,6 @@ fn scratch_home_if_missing(env: &BTreeMap<String, String>) -> std::io::Result<Op
     tempfile::Builder::new().prefix(SCRATCH_HOME_PREFIX).tempdir().map(Some)
 }
 
-/// The process group led by a run (unix); SIGKILLs the whole group when killed or dropped.
-///
-/// The group id is the leader's pid, which cannot be reused while the leader is unreaped or any group
-/// member is alive, so the timeout and cancellation paths are race-free. After a normal exit the
-/// leader is already reaped; an empty group's id could in theory be recycled in the microseconds
-/// before the kill, which needs a full pid wrap-around and is accepted.
 struct ProcessGroup {
     #[cfg(unix)]
     pgid: Option<libc::pid_t>,
@@ -149,7 +125,6 @@ impl ProcessGroup {
         Self {}
     }
 
-    /// Kills the group once; later calls do nothing. Errors (ESRCH: already gone) are irrelevant.
     fn kill(&mut self) {
         #[cfg(unix)]
         if let Some(pgid) = self.pgid.take() {
@@ -165,7 +140,6 @@ impl Drop for ProcessGroup {
     }
 }
 
-/// Reads stdout/stderr until both close, or until the child exited and [`DRAIN_GRACE`] passed.
 async fn collect(child: &mut Child, tail: &mut OutputTail) -> std::io::Result<ExitStatus> {
     let reading = read_streams(child.stdout.take(), child.stderr.take(), tail);
     tokio::pin!(reading);
@@ -178,7 +152,6 @@ async fn collect(child: &mut Child, tail: &mut OutputTail) -> std::io::Result<Ex
     }
 }
 
-/// Reads both streams as they arrive (interleaved).
 async fn read_streams<A: AsyncRead + Unpin, B: AsyncRead + Unpin>(
     mut stdout: Option<A>,
     mut stderr: Option<B>,
@@ -194,7 +167,6 @@ async fn read_streams<A: AsyncRead + Unpin, B: AsyncRead + Unpin>(
     }
 }
 
-/// Reads from the stream, or never completes once the stream is closed.
 async fn read_some<R: AsyncRead + Unpin>(reader: &mut Option<R>, buf: &mut [u8]) -> std::io::Result<usize> {
     match reader {
         Some(reader) => reader.read(buf).await,
@@ -202,7 +174,6 @@ async fn read_some<R: AsyncRead + Unpin>(reader: &mut Option<R>, buf: &mut [u8])
     }
 }
 
-/// Appends a read result; EOF or a read error closes the stream.
 fn consume<R>(tail: &mut OutputTail, read: std::io::Result<usize>, buf: &[u8], stream: &mut Option<R>) {
     match read {
         Ok(n) if n > 0 => tail.push(&buf[..n]),
@@ -228,7 +199,6 @@ mod tests {
         LocalBackend.execute(request).await
     }
 
-    /// Waits until no process of group `pgid` is left (zombies are reaped asynchronously).
     #[cfg(unix)]
     async fn group_is_gone(pgid: libc::pid_t) -> bool {
         for _ in 0..50 {

@@ -1,5 +1,3 @@
-//! Wires the tickets context (Jira REST or MCP) for a review.
-
 use crate::settings::application::{JiraConfig, JiraProvider, Secret};
 use std::sync::Arc;
 
@@ -9,7 +7,6 @@ use crate::tickets::application::{
 use crate::tickets::domain::{MAX_IMPLEMENTED_KEYS, extract_implemented_keys};
 use crate::tickets::infrastructure::{JiraMcpSource, JiraRestConfig, JiraRestSource, Secret as TicketSecret};
 
-/// The configured Jira provider.
 pub enum AnyTicketSource {
     Rest(JiraRestSource),
     Mcp(JiraMcpSource),
@@ -50,8 +47,6 @@ pub fn build_source(jira: &JiraConfig, token: Option<&Secret>) -> Result<AnyTick
     }
 }
 
-/// Tickets the change implements, loaded with their parent Story (cached), or `None` when Jira is
-/// off or no key was found. `notes` explains what was skipped (references, capped keys...).
 pub struct TicketLoad {
     pub loaded: Option<LoadedTickets>,
     pub notes: Vec<String>,

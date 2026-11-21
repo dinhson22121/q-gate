@@ -1,25 +1,15 @@
-//! Atlassian Document Format (Jira Cloud rich text) → plain text that
-//! [`parse_acceptance_criteria`](crate::tickets::domain::parse_acceptance_criteria) understands:
-//! headings become `# `, list items `- `, task items `- [ ]` / `- [x]`.
-
 use serde_json::Value;
 
-/// ADF `taskItem` state meaning "checked".
 const TASK_DONE: &str = "DONE";
-/// Marker for whole-paragraph bold text, so bold lines can act as headings.
 const BOLD: &str = "**";
-/// Highest heading level ADF allows.
 const MAX_HEADING_LEVEL: u64 = 6;
 
-/// Converts an ADF document (or any ADF node) to plain text, one block per line.
 pub fn adf_to_text(node: &Value) -> String {
     let mut lines = Vec::new();
     render_block(node, &mut lines);
     lines.join("\n").trim().to_string()
 }
 
-/// Converts a field that may be an ADF document, a plain string, a list of those, or null.
-/// Returns `None` when there is no content.
 pub fn field_to_text(value: &Value) -> Option<String> {
     let text = match value {
         Value::String(s) => s.trim().to_string(),
@@ -30,8 +20,6 @@ pub fn field_to_text(value: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// Every string inside `value` (text, link hrefs, card URLs...), one per line. Used to find
-/// links that the plain-text rendering drops, such as `link` mark hrefs.
 pub fn all_strings(value: &Value) -> String {
     let mut out = Vec::new();
     collect_strings(value, &mut out);
@@ -80,7 +68,6 @@ fn task_prefix(node: &Value) -> &'static str {
     }
 }
 
-/// The first paragraph of a list item carries the bullet; nested lists and later blocks follow.
 fn render_list_item(node: &Value, prefix: &str, lines: &mut Vec<String>) {
     let mut has_bullet = false;
     for child in children(node) {
@@ -93,7 +80,6 @@ fn render_list_item(node: &Value, prefix: &str, lines: &mut Vec<String>) {
     }
 }
 
-/// Renders a block's inline content as lines (hard breaks split lines); the prefix goes on the first.
 fn push_inline(node: &Value, prefix: &str, lines: &mut Vec<String>) {
     let mut text = inline_text(node);
     if node_type(node) == "paragraph" && is_all_bold(node) {
@@ -129,7 +115,6 @@ fn append_inline(node: &Value, out: &mut String) {
     }
 }
 
-/// Whether every non-blank text node of a paragraph carries the `strong` mark.
 fn is_all_bold(node: &Value) -> bool {
     let texts: Vec<&Value> = children(node)
         .iter()

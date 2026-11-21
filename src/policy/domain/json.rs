@@ -1,6 +1,3 @@
-//! Dotted-path access to a JSON document (`agents.tests.on_fail`). Settings are handled as JSON here so the
-//! policy domain does not depend on the settings types; the settings context re-validates every change.
-
 use serde_json::Value;
 
 fn pointer(path: &str) -> String {
@@ -11,7 +8,6 @@ pub fn get<'a>(document: &'a Value, path: &str) -> Option<&'a Value> {
     document.pointer(&pointer(path))
 }
 
-/// Replaces the value at an existing `path`; returns `false` (and changes nothing) when it does not exist.
 pub fn set(document: &mut Value, path: &str, value: Value) -> bool {
     match document.pointer_mut(&pointer(path)) {
         Some(slot) => {
@@ -22,7 +18,6 @@ pub fn set(document: &mut Value, path: &str, value: Value) -> bool {
     }
 }
 
-/// Dotted paths of every leaf (arrays count as leaves), in document order.
 pub fn leaf_paths(document: &Value) -> Vec<String> {
     let mut out = Vec::new();
     collect(document, String::new(), &mut out);
@@ -41,7 +36,6 @@ fn collect(value: &Value, prefix: String, out: &mut Vec<String>) {
     }
 }
 
-/// Same JSON type (bool, number, string, array, object, null) — a change must not alter a field's shape.
 pub fn same_kind(a: &Value, b: &Value) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }

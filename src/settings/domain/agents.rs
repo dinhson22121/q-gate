@@ -1,6 +1,3 @@
-//! Server-level settings for the multi-agent ticket review: ticket analysis, test agents,
-//! architecture conformance and Figma design checks.
-
 use serde::{Deserialize, Serialize};
 
 use super::validation::{ValidationError, ValidationResult, require_range, require_secure_url};
@@ -14,7 +11,6 @@ const MAX_BUDGET_USD: f64 = 50.0;
 const MAX_REFRESH_DAYS: u32 = 90;
 const MAX_TTL_MINUTES: u32 = 24 * 60;
 
-/// Languages the test agent can write and run tests for. Frontend (JS/TS) comes later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TestLanguage {
@@ -28,13 +24,10 @@ impl TestLanguage {
     pub const ALL: [Self; 4] = [Self::Go, Self::Java, Self::Python, Self::Rust];
 }
 
-/// What a failing generated test does to the gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FailAction {
-    /// Shown on the dashboard with full evidence; the gate is not affected.
     Warn,
-    /// Fails the gate. Only failures that carry complete evidence count; others are inconclusive.
     Block,
 }
 
@@ -54,9 +47,7 @@ pub struct AgentsConfig {
     pub enabled: bool,
     pub model: String,
     pub effort: AgentEffort,
-    /// Sub-agents running at the same time for one review.
     pub max_parallel: usize,
-    /// Hard stop for one review's agent spend; remaining agents are skipped and reported.
     pub budget_usd_per_review: f64,
     pub ticket_analyst: TicketAnalystConfig,
     pub tests: TestAgentConfig,
@@ -82,11 +73,8 @@ impl Default for AgentsConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct TicketAnalystConfig {
     pub enabled: bool,
-    /// Walk Sub-task → Story → Epic and merge their acceptance criteria and design links.
     pub include_parent_story: bool,
-    /// Pass the ticket description to reviewers as context (never gating).
     pub use_description: bool,
-    /// Re-fetch a ticket after this many minutes even if Jira's `updated` is unchanged.
     pub cache_ttl_minutes: u32,
 }
 
@@ -101,9 +89,7 @@ impl Default for TicketAnalystConfig {
 pub struct TestAgentConfig {
     pub enabled: bool,
     pub languages: Vec<TestLanguage>,
-    /// Test scenarios generated per ticket (one agent each).
     pub max_scenarios: u32,
-    /// Times an agent may fix its own test after a compile/setup error.
     pub max_repair_rounds: u32,
     pub timeout_secs: u64,
     pub on_fail: FailAction,
@@ -126,9 +112,7 @@ impl Default for TestAgentConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct ArchitectureConfig {
     pub enabled: bool,
-    /// Rebuild a repository's cached rulebook after this many days even if no rule file changed.
     pub rulebook_refresh_days: u32,
-    /// Inferred (not yet approved) rules are reported but never block.
     pub use_inferred_rules: bool,
     pub on_violation: FailAction,
 }
@@ -139,8 +123,6 @@ impl Default for ArchitectureConfig {
     }
 }
 
-/// How design data is read. Figma's cloud MCP server only accepts OAuth from catalog-listed clients,
-/// so a background service uses the REST API with a personal access token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FigmaProvider {
@@ -148,23 +130,17 @@ pub enum FigmaProvider {
     Mcp,
 }
 
-/// Kinds of design mismatch. See `DesignCheckConfig` for which ones run and which block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DesignCheck {
-    /// Text in the frame missing from the changed code and its i18n files.
     Copy,
-    /// The design uses design-system component X but the code renders something else.
     Component,
-    /// Hard-coded colour/spacing/font where the design binds a variable.
     Token,
-    /// Design variants (loading, empty, error, disabled) the code does not handle.
     States,
 }
 
 impl DesignCheck {
     pub const ALL: [Self; 4] = [Self::Copy, Self::Component, Self::Token, Self::States];
-    /// `States` is judged by the model from code alone, so it can never block.
     pub const BLOCKABLE: [Self; 3] = [Self::Copy, Self::Component, Self::Token];
 }
 
@@ -174,7 +150,6 @@ pub struct FigmaConfig {
     pub enabled: bool,
     pub provider: FigmaProvider,
     pub api_base_url: String,
-    /// Only used with `provider = "mcp"`.
     pub mcp_url: String,
     pub checks: Vec<DesignCheck>,
     pub block_on: Vec<DesignCheck>,

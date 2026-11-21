@@ -1,9 +1,8 @@
-//! Interface layer and composition root: command-line entry points wiring all bounded contexts.
-
 mod agents;
 mod args;
 mod caching;
 mod commands;
+mod commit_snapshots;
 mod doctor;
 mod login;
 mod pipeline;
@@ -15,8 +14,6 @@ mod runner;
 mod serve;
 mod snapshot;
 mod tickets;
-mod tool_checks;
-mod tool_findings;
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -33,7 +30,6 @@ pub async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     if let Command::Init { repo } = &cli.command {
         return commands::init(repo).await;
     }
-    // The runner has no data or config directory and must not open them.
     if let Command::Runner(args) = &cli.command {
         #[cfg(unix)]
         return runner::runner(args).await;

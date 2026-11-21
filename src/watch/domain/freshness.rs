@@ -1,44 +1,26 @@
-//! Decides whether a remote-tracking ref moved because of a local `git push` (which we review)
-//! or for another reason — a `fetch`/`pull` of someone else's work (which we skip).
-
 use std::fmt;
 use std::time::Duration;
 
-/// Default age beyond which a push is not considered recent enough to review.
 pub const DEFAULT_MAX_COMMIT_AGE: Duration = Duration::from_secs(60 * 60);
-/// Reflog subject git writes to a remote-tracking ref for a (fast-forward) local push.
 const PUSH_SUBJECT: &str = "update by push";
-/// Reflog subject git writes when the remote-tracking ref is updated non-fast-forward (force push).
 const FORCED_UPDATE_SUBJECT: &str = "forced-update";
 
-/// The most recent reflog entry of a remote-tracking ref (`<ref>@{0}`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflogHead {
-    /// Commit the ref points to.
     pub sha: String,
-    /// Unix time the reflog entry was written (when the ref was updated), not the commit date:
-    /// a push of an older commit is still "just pushed".
     pub logged_at: i64,
-    /// Reflog subject, e.g. `update by push`, `forced-update`, `fetch`.
     pub subject: String,
 }
 
-/// Why a remote-tracking ref moved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefMove {
-    /// A local push (`forced` for a force-push): review the branch.
     Push { forced: bool },
-    /// The ref moved for another reason (fetch, pull of someone else's work...): skip.
     NotAPush { action: String },
-    /// The push is older than the configured window.
     TooOld { age_secs: i64 },
-    /// The ref has no reflog (`core.logAllRefUpdates` disabled): the caller reviews the forward
-    /// move anyway, noting that the push could not be confirmed.
     NoReflog,
 }
 
 impl RefMove {
-    /// Whether this move should trigger a review directly (a confirmed push within the window).
     pub fn is_push(&self) -> bool {
         matches!(self, Self::Push { .. })
     }
@@ -56,19 +38,14 @@ impl fmt::Display for RefMove {
     }
 }
 
-/// True when the reflog subject was written by a (fast-forward) local push.
 pub fn is_push_subject(subject: &str) -> bool {
     subject.trim() == PUSH_SUBJECT
 }
 
-/// True when the reflog subject was written by a non-fast-forward (force) push.
 pub fn is_forced_update_subject(subject: &str) -> bool {
     subject.trim() == FORCED_UPDATE_SUBJECT
 }
 
-/// Classifies the latest reflog entry of a ref that was observed to move. A push (forced or not)
-/// within `max_age` of `now` is reviewed; anything else is skipped; a missing reflog asks the
-/// caller to fall back to reviewing the forward move.
 pub fn classify_ref_move(entry: Option<&ReflogHead>, now: i64, max_age: Duration) -> RefMove {
     let Some(entry) = entry else { return RefMove::NoReflog };
     let forced = is_forced_update_subject(&entry.subject);

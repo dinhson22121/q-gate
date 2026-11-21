@@ -1,15 +1,11 @@
-//! Builds the notification shown when a commit review finishes.
-
 use super::repo::{CommitEvent, CommitVerdict};
 
-/// Text of a user notification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationText {
     pub title: String,
     pub body: String,
 }
 
-/// Notification for a finished review: passed, failed with blocking issues, or errored.
 pub fn review_notification(event: &CommitEvent, outcome: &Result<CommitVerdict, String>) -> NotificationText {
     let subject = format!("{} {}", event.repo.name, event.short_sha());
     match outcome {

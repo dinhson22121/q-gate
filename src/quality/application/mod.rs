@@ -1,5 +1,3 @@
-//! Use case: run the enabled deterministic checks against a commit snapshot and grade them on the new code.
-
 mod config;
 mod ports;
 mod run_quality_checks;

@@ -1,5 +1,3 @@
-//! Token: hard-coded colours / px spacing in added lines where the design binds a variable.
-
 use crate::review::application::{DesignMismatch, DesignMismatchKind};
 use crate::review::domain::change_set::FileChange;
 
@@ -9,18 +7,14 @@ use super::ui::{added_lines, ignored_lines};
 
 const MAX_TOKEN_MISMATCHES: usize = 30;
 const COLOR_FUNCTIONS: [&str; 4] = ["rgba(", "rgb(", "hsla(", "hsl("];
-/// A px literal only counts as spacing on a line mentioning one of these.
 const SPACING_HINTS: [&str; 10] =
     ["padding", "margin", "gap", "inset", "top", "left", "right", "bottom", "spacing", "space"];
-/// Hairlines and resets are not design tokens.
 const TRIVIAL_PX: [f64; 2] = [0.0, 1.0];
 
-/// One literal found in code.
 #[derive(Debug, PartialEq)]
 struct Literal {
     raw: String,
     kind: TokenKind,
-    /// `#rrggbb` for colours that can be resolved, the number for px.
     value: Option<String>,
 }
 
@@ -82,7 +76,6 @@ fn is_comment_or_variable(code: &str) -> bool {
     ["//", "/*", "*", "<!--"].iter().any(|p| trimmed.starts_with(p)) || code.contains("var(")
 }
 
-/// The token with the same value, else the nearest one (colour distance / px difference).
 fn closest<'a>(literal: &Literal, tokens: &[&'a TokenRef]) -> Option<&'a TokenRef> {
     let first = tokens.first().copied()?;
     let Some(value) = &literal.value else { return Some(first) };
@@ -114,7 +107,6 @@ fn number_distance(a: &str, b: &str) -> f64 {
     }
 }
 
-/// `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` → [r, g, b] (alpha ignored).
 fn rgb_of(hex: &str) -> Option<[u8; 3]> {
     let digits = hex.strip_prefix('#')?;
     let full: String = match digits.len() {

@@ -1,5 +1,3 @@
-//! Reads and writes the TOML config files: `.qgate.toml` (per repository) and `qgate.toml` (server).
-
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -12,13 +10,16 @@ use crate::settings::domain::config::Config;
 use crate::settings::domain::server::ServerConfig;
 use crate::settings::domain::validation::ValidationError;
 
-/// Name of the repository config file, at the repository root.
 pub const CONFIG_FILE_NAME: &str = ".qgate.toml";
 
-/// Keys a repository config must not set: they choose where credentials are sent (or which program
-/// receives them), and `.qgate.toml` is controlled by anyone who can push a commit.
-const SERVER_ONLY_KEYS: [(&str, &str); 5] =
-    [("llm", "base_url"), ("jira", "base_url"), ("jira", "email"), ("jira", "provider"), ("jira", "mcp")];
+const SERVER_ONLY_KEYS: [(&str, &str); 6] = [
+    ("llm", "claude_bin"),
+    ("llm", "timeout_secs"),
+    ("jira", "base_url"),
+    ("jira", "email"),
+    ("jira", "provider"),
+    ("jira", "mcp"),
+];
 const SERVER_ONLY_MESSAGE: &str = "can only be set in the server config (qgate.toml in the config dir) for security: \
      a repository's .qgate.toml must not choose where credentials are sent; remove it from this file";
 
@@ -34,7 +35,6 @@ pub enum ConfigError {
     Write { path: PathBuf, source: io::Error },
 }
 
-/// Loads and validates `<repo_root>/.qgate.toml`; a missing file yields the defaults.
 pub fn load_config(repo_root: &Path) -> Result<Config, ConfigError> {
     let path = repo_root.join(CONFIG_FILE_NAME);
     match read_text(&path)? {
@@ -43,11 +43,6 @@ pub fn load_config(repo_root: &Path) -> Result<Config, ConfigError> {
     }
 }
 
-/// Parses and validates the text of a repository config. `origin` names its source in error messages
-/// (a path, or e.g. `abc1234:.qgate.toml` when read from a commit).
-///
-/// Server-only keys (see [`SERVER_ONLY_KEYS`]) are rejected with an explanation instead of serde's
-/// generic "unknown field".
 pub fn parse_config(text: &str, origin: &str) -> Result<Config, ConfigError> {
     let path = PathBuf::from(origin);
     let table: toml::Table =
@@ -70,13 +65,10 @@ fn find_server_only_key(table: &toml::Table) -> Option<ValidationError> {
         .map(|(section, key)| ValidationError::new(format!("{section}.{key}"), SERVER_ONLY_MESSAGE))
 }
 
-/// Writes [`CONFIG_TEMPLATE`] to `<repo_root>/.qgate.toml`. Returns `false` if the file already exists.
 pub fn write_template(repo_root: &Path) -> Result<bool, ConfigError> {
     write_new(&repo_root.join(CONFIG_FILE_NAME), CONFIG_TEMPLATE)
 }
 
-/// Loads `<config_dir>/qgate.toml` (defaults when missing), applies env overrides, then validates.
-/// Legacy path: `qgate serve` loads settings from the database (`LoadEffectiveSettings`).
 pub fn load_server_config(paths: &AppPaths, env: impl Fn(&str) -> Option<String>) -> Result<ServerConfig, ConfigError> {
     let path = paths.server_config_file();
     let config = read_toml::<ServerConfig>(&path)?.with_env_overrides(env);
@@ -84,8 +76,6 @@ pub fn load_server_config(paths: &AppPaths, env: impl Fn(&str) -> Option<String>
     Ok(config)
 }
 
-/// Writes [`SERVER_CONFIG_TEMPLATE`] to `<config_dir>/qgate.toml`, creating the directory.
-/// Returns `false` if the file already exists.
 pub fn write_server_template(paths: &AppPaths) -> Result<bool, ConfigError> {
     let path = paths.server_config_file();
     std::fs::create_dir_all(&paths.config_dir)
@@ -100,7 +90,6 @@ pub(super) fn read_toml<T: DeserializeOwned + Default>(path: &Path) -> Result<T,
     toml::from_str(&text).map_err(|e| ConfigError::Parse { path: path.to_path_buf(), message: e.to_string() })
 }
 
-/// The file's content, or `None` when it does not exist.
 fn read_text(path: &Path) -> Result<Option<String>, ConfigError> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
@@ -109,7 +98,6 @@ fn read_text(path: &Path) -> Result<Option<String>, ConfigError> {
     }
 }
 
-/// Creates `path` with `content`, atomically refusing to overwrite an existing file.
 fn write_new(path: &Path, content: &str) -> Result<bool, ConfigError> {
     let write_error = |source| ConfigError::Write { path: path.to_path_buf(), source };
     let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
@@ -128,7 +116,6 @@ mod tests {
     use crate::settings::domain::config::Effort;
     use crate::settings::domain::server::ENV_BIND;
 
-    /// Uncomments example lines (`# key = ...`, `# [section]`) so the documented options are parsed too.
     fn uncomment_examples(template: &str) -> String {
         template
             .lines()
@@ -170,7 +157,7 @@ mod tests {
     #[test]
     fn repo_config_cannot_set_server_only_keys() {
         let cases = [
-            ("[llm]\nbase_url = \"https://evil.tld\"\n", "llm.base_url"),
+            ("[llm]\nclaude_bin = \"/tmp/evil\"\n", "llm.claude_bin"),
             ("[jira]\nbase_url = \"https://evil.tld\"\n", "jira.base_url"),
             ("[jira]\nemail = \"x@evil.tld\"\n", "jira.email"),
             ("[jira]\nprovider = \"mcp\"\n", "jira.provider"),
@@ -199,12 +186,14 @@ mod tests {
     }
 
     #[test]
-    fn server_config_accepts_llm_base_url() {
+    fn server_config_accepts_cli_settings() {
         let dir = tempfile::tempdir().unwrap();
         let paths = AppPaths::with_dirs(dir.path(), dir.path());
-        std::fs::write(paths.server_config_file(), "[llm]\nbase_url = \"http://localhost:4000\"\n").unwrap();
-        assert_eq!(load_server_config(&paths, |_| None).unwrap().llm.base_url, "http://localhost:4000");
-        std::fs::write(paths.server_config_file(), "[llm]\nbase_url = \"http://evil.tld\"\n").unwrap();
+        std::fs::write(paths.server_config_file(), "[llm]\nclaude_bin = \"/opt/claude\"\ntimeout_secs = 900\n")
+            .unwrap();
+        let llm = load_server_config(&paths, |_| None).unwrap().llm;
+        assert_eq!((llm.claude_bin.as_str(), llm.timeout_secs), ("/opt/claude", 900));
+        std::fs::write(paths.server_config_file(), "[llm]\ntimeout_secs = 0\n").unwrap();
         assert!(matches!(load_server_config(&paths, |_| None), Err(ConfigError::Invalid { .. })));
     }
 

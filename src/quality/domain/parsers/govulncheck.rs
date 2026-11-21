@@ -1,7 +1,3 @@
-//! govulncheck: `govulncheck -json ./...` prints a stream of `config`, `osv` and `finding` messages. Only
-//! symbol-level findings (the vulnerable function is reachable from the code) are reported: they are the ones
-//! that matter, and osv-scanner already covers the module-level ones with a CVSS score.
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -41,7 +37,6 @@ fn advisory(osv: &Value) -> Option<(String, Advisory)> {
 fn finding(message: &Value, root: &Path, advisories: &HashMap<String, Advisory>) -> Option<QualityFinding> {
     let osv_id = message["osv"].as_str()?;
     let trace = message["trace"].as_array()?;
-    // The first frame is the vulnerable symbol; a finding without a function is only module/package level.
     let vulnerable = trace.first().filter(|frame| frame["function"].is_string())?;
     let module = vulnerable["module"].as_str()?;
     let version = vulnerable["version"].as_str().unwrap_or_default();

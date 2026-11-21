@@ -1,6 +1,3 @@
-//! SQLite cache for parsed tickets and ticket briefs, in qgate's database (`<data_dir>/qgate.db`).
-//! Owns the tables `tickets_schema_version`, `ticket_cache` and `brief_cache`.
-
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,10 +11,8 @@ use crate::tickets::application::{BriefCache, CacheError, CachedTicket, TicketCa
 use crate::tickets::domain::TicketKey;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-/// Briefs older than this are deleted when the cache is opened.
 const BRIEF_RETENTION_DAYS: i64 = 30;
 
-/// Ordered schema migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE ticket_cache (
         key          TEXT    NOT NULL PRIMARY KEY,
@@ -33,7 +28,6 @@ const MIGRATIONS: &[&str] = &["
     CREATE INDEX idx_brief_cache_created_at ON brief_cache (created_at);
 "];
 
-/// Implements [`TicketCache`] and [`BriefCache`]. Cheap to clone (shared connection).
 #[derive(Clone)]
 pub struct SqliteTicketCache {
     conn: Arc<Mutex<Connection>>,
@@ -44,7 +38,6 @@ fn storage(err: impl std::fmt::Display) -> CacheError {
 }
 
 impl SqliteTicketCache {
-    /// Opens (creating parent directories and the file if needed), migrates, and prunes old briefs.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CacheError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -60,7 +53,6 @@ impl SqliteTicketCache {
         Ok(Self { conn: Arc::new(Mutex::new(conn)) })
     }
 
-    /// Runs `work` on the connection in a blocking thread.
     async fn with_conn<T: Send + 'static>(
         &self,
         work: impl FnOnce(&Connection) -> Result<T, CacheError> + Send + 'static,
@@ -113,7 +105,6 @@ impl TicketCache for SqliteTicketCache {
                 .optional()
                 .map_err(storage)?;
             let Some((jira_updated, fetched_at, json)) = row else { return Ok(None) };
-            // An unreadable entry (older format, corruption) is a cache miss, not an error.
             let Ok(ticket) = serde_json::from_str(&json) else { return Ok(None) };
             Ok(Some(CachedTicket { ticket, jira_updated, fetched_at: from_millis(fetched_at)? }))
         }))

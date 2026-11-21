@@ -1,5 +1,3 @@
-//! Minimal runner for the `git` executable (argv only, never a shell).
-
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::Duration;
@@ -9,12 +7,8 @@ use tokio::process::Command;
 use crate::watch::application::ports::WatchError;
 
 const GIT: &str = "git";
-/// A local git query that takes longer than this is considered hung.
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Exit status of `--quiet`/`--verify` queries that found nothing.
 pub(super) const GIT_QUIET_MISS: i32 = 1;
-/// Watched repositories are untrusted (mounted with `safe.directory '*'`): their config must not get to
-/// run programs (fsmonitor, hooks) or open transports.
 const HARDENING_ARGS: &[&str] = &[
     "-c",
     "core.fsmonitor=false",
@@ -25,12 +19,9 @@ const HARDENING_ARGS: &[&str] = &[
     "-c",
     "core.sshCommand=false",
 ];
-/// Read-only polling must never contend for the index lock with the user's git, prompt or page.
-/// `GIT_CONFIG_NOSYSTEM` is deliberately not set: the Docker image relies on the system `safe.directory`.
 const HARDENING_ENV: &[(&str, &str)] =
     &[("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_PAGER", "cat")];
 
-/// Runs `git <args>` in `cwd` and returns the raw output (any exit status).
 pub(super) async fn run_git(cwd: &Path, args: &[&str]) -> Result<Output, WatchError> {
     let mut command = Command::new(GIT);
     command
@@ -54,7 +45,6 @@ pub(super) fn failure(args: &[&str], output: &Output) -> WatchError {
     WatchError::Git(format!("git {} failed: {}", args.join(" "), stderr.trim()))
 }
 
-/// Canonical working-tree root of the repository containing `dir`, if any.
 pub(super) async fn repo_root(dir: &Path) -> Result<Option<PathBuf>, WatchError> {
     let output = run_git(dir, &["rev-parse", "--show-toplevel"]).await?;
     if !output.status.success() {
@@ -84,7 +74,6 @@ mod tests {
         git(dir.path(), &["config", "core.fsmonitor", &format!("touch '{}'", marker.display())]);
         std::fs::write(dir.path().join("a.txt"), "b").unwrap();
 
-        // `status` would consult the fsmonitor; HEAD inspection must not run it either.
         assert!(run_git(dir.path(), &["status", "--porcelain"]).await.unwrap().status.success());
         assert!(run_git(dir.path(), &["rev-parse", "HEAD"]).await.unwrap().status.success());
         assert!(repo_root(dir.path()).await.unwrap().is_some());
@@ -94,7 +83,6 @@ mod tests {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    //! Temporary git repositories isolated from the user's git configuration.
 
     use std::path::Path;
     use std::process::Command;
@@ -120,8 +108,6 @@ pub(crate) mod test_support {
         git(dir, &["init", "--quiet"]);
     }
 
-    /// Creates a bare repository (inside `work`, so it is unique per test) to act as its `origin`,
-    /// and returns its path. It is never committed (commits here are `--allow-empty`, adding no files).
     pub fn bare_remote(work: &Path) -> String {
         let remote = work.join(".origin.git");
         git(work, &["init", "--quiet", "--bare", remote.to_str().expect("utf-8 path")]);

@@ -1,21 +1,14 @@
-//! Value objects describing watched repositories, commit events and review verdicts.
-
 use std::path::PathBuf;
 
-/// Number of hex digits shown for an abbreviated commit id.
 const SHORT_SHA_LEN: usize = 7;
 
-/// A git repository whose commits are reviewed automatically.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WatchedRepo {
-    /// Canonical path of the repository root (working tree top level).
     pub path: PathBuf,
-    /// Human-readable name, the last path component by default.
     pub name: String,
 }
 
 impl WatchedRepo {
-    /// Builds a repo named after the last component of `path`.
     pub fn from_path(path: PathBuf) -> Self {
         let name =
             path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
@@ -23,19 +16,12 @@ impl WatchedRepo {
     }
 }
 
-/// A pushed branch of a watched repository: the range `base..sha` (the branch's own commits since
-/// its base branch) is to be reviewed as one change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitEvent {
     pub repo: WatchedRepo,
-    /// Pushed branch tip.
     pub sha: String,
-    /// Merge base with the base branch; `None` when there is no merge base (orphan/unrelated
-    /// history) and the whole branch is reviewed.
     pub base: Option<String>,
-    /// The pushed branch name; `None` only in legacy fixtures.
     pub branch: Option<String>,
-    /// Caveat to surface with the review (e.g. a missing reflog or merge base); usually `None`.
     pub note: Option<String>,
 }
 
@@ -44,28 +30,20 @@ impl CommitEvent {
         short_sha(&self.sha)
     }
 
-    /// Replaces this queued event with a newer push of the same branch: the newer tip, base and
-    /// note win (the base is the merge base with the base branch, recomputed for the new tip).
     pub fn coalesce(self, newer: CommitEvent) -> CommitEvent {
         newer
     }
 }
 
-/// Abbreviates a commit id (returns it unchanged when already short).
 pub fn short_sha(sha: &str) -> &str {
     sha.get(..SHORT_SHA_LEN).unwrap_or(sha)
 }
 
-/// Outcome of reviewing one commit.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CommitVerdict {
-    /// Whether the quality gate passed.
     pub passed: bool,
-    /// Number of blocking findings (meaningful when `passed` is false).
     pub blocking_issues: usize,
-    /// One-paragraph summary shown in the notification.
     pub summary: String,
-    /// Id of the stored review run, used to link to the dashboard.
     pub run_id: Option<i64>,
 }
 

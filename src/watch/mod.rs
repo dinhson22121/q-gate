@@ -1,5 +1,4 @@
-//! Watch context: background daemon that reviews every new commit in registered repositories.
-
+pub mod api;
 pub mod application;
 pub mod domain;
 pub mod infrastructure;

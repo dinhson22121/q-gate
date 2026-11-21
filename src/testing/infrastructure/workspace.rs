@@ -1,7 +1,3 @@
-//! The review's writable snapshot as seen by the test agent. Paths are normalized lexically, then
-//! canonicalized and required to stay below the canonical snapshot root, so neither `..` nor a
-//! symlink planted in the repository can reach outside it.
-
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,11 +8,9 @@ use crate::testing::application::ports::{SearchHit, Workspace};
 use crate::testing::domain::paths::normalize_relative;
 use crate::testing::domain::profile::ProbeFs;
 
-/// Files above this size are neither read nor searched.
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_HIT_CHARS: usize = 300;
-/// Directories never listed or searched (VCS data, build output, dependencies).
 const SKIPPED_DIRS: &[&str] =
     &[".git", "target", "node_modules", "build", ".gradle", "__pycache__", ".venv", ".mypy_cache", ".pytest_cache"];
 
@@ -26,7 +20,6 @@ pub struct SnapshotWorkspace {
 }
 
 impl SnapshotWorkspace {
-    /// Existing path, canonicalized and checked to be inside the snapshot.
     fn resolve_existing(&self, rel: &str) -> Result<PathBuf, String> {
         let rel = normalize_relative(rel).map_err(|e| e.to_string())?;
         let canonical = self.root.join(&rel).canonicalize().map_err(|e| format!("'{rel}': {e}"))?;
@@ -36,7 +29,6 @@ impl SnapshotWorkspace {
         Ok(canonical)
     }
 
-    /// Creates the missing directories of `rel`'s parent one by one, refusing symlinks and non-directories.
     fn prepare_parent(&self, rel: &str) -> Result<PathBuf, String> {
         let mut dir = self.root.clone();
         let parts: Vec<&str> = rel.split('/').collect();
@@ -63,7 +55,6 @@ impl SnapshotWorkspace {
             if hits.len() >= max {
                 return;
             }
-            // `file_type` does not follow symlinks: symlinks are never searched.
             let Ok(kind) = entry.file_type() else { continue };
             let path = entry.path();
             if kind.is_dir() {
@@ -106,7 +97,6 @@ impl SnapshotWorkspace {
 }
 
 impl ProbeFs for SnapshotWorkspace {
-    /// Anything at that path, including a dangling symlink (so it is never overwritten).
     fn has_path(&self, rel: &str) -> bool {
         normalize_relative(rel).is_ok_and(|rel| fs::symlink_metadata(self.root.join(rel)).is_ok())
     }
@@ -174,7 +164,6 @@ impl Workspace for SnapshotWorkspace {
         let mut options = OpenOptions::new();
         options.write(true);
         if create_new {
-            // O_EXCL: fails on any existing entry, symlinks included.
             options.create_new(true);
         } else {
             match fs::symlink_metadata(&path) {

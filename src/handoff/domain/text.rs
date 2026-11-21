@@ -1,9 +1,5 @@
-//! Markdown text helpers: content from the review (model output, code, test output) is untrusted, so it is
-//! fenced or escaped so it can never break the document structure.
-
 const MIN_FENCE: usize = 3;
 
-/// Longest run of consecutive `ch` in `text`.
 fn longest_run(text: &str, ch: char) -> usize {
     let (mut best, mut current) = (0, 0);
     for c in text.chars() {
@@ -13,7 +9,6 @@ fn longest_run(text: &str, ch: char) -> usize {
     best
 }
 
-/// A fenced code block whose backtick fence is longer than any backtick run inside `content`.
 pub fn fenced(language: &str, content: &str) -> String {
     let fence = "`".repeat(MIN_FENCE.max(longest_run(content, '`') + 1));
     let language: String = language.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-')).collect();
@@ -21,7 +16,6 @@ pub fn fenced(language: &str, content: &str) -> String {
     format!("{fence}{language}\n{body}\n{fence}\n")
 }
 
-/// Inline code that survives backticks inside `text`.
 pub fn code_span(text: &str) -> String {
     let text = one_line(text);
     let delimiter = "`".repeat(longest_run(&text, '`') + 1);
@@ -29,17 +23,14 @@ pub fn code_span(text: &str) -> String {
     format!("{delimiter}{pad}{text}{pad}{delimiter}")
 }
 
-/// Collapses all whitespace (including newlines) to single spaces, for headings, list items and table cells.
 pub fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A table cell: one line, pipes escaped.
 pub fn cell(text: &str) -> String {
     one_line(text).replace('|', "\\|")
 }
 
-/// Multi-line prose: lines that would open a code fence or a heading are escaped with a backslash.
 pub fn prose(text: &str) -> String {
     text.trim()
         .lines()
@@ -56,7 +47,6 @@ pub fn prose(text: &str) -> String {
         .join("\n")
 }
 
-/// Code-block language for a file path, from its extension (empty when unknown).
 pub fn language_of(path: &str) -> &'static str {
     let extension = path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
     match extension.as_str() {

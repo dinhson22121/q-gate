@@ -1,5 +1,3 @@
-//! Copy: text in the frame that appears neither in the changed UI files nor in the i18n resources.
-
 use std::collections::HashSet;
 
 use crate::review::application::{DesignMismatch, DesignMismatchKind};
@@ -10,13 +8,10 @@ use super::spec::DesignSpec;
 use super::text::{is_meaningful_copy, normalize, similarity, text_candidates, words};
 use super::ui::{added_lines, ignored_lines};
 
-/// Word overlap from which a changed literal counts as "the same copy, written differently".
 const SIMILAR_THRESHOLD: f64 = 0.3;
-/// Anchor lines shorter than this would not pass the review's evidence check.
 const MIN_ANCHOR_CHARS: usize = 8;
 const MAX_COPY_MISMATCHES: usize = 25;
 
-/// A string literal (or tag text) on an added, non-ignored line.
 struct Candidate<'a> {
     file: &'a FileChange,
     line: u32,
@@ -84,7 +79,6 @@ fn candidates<'a>(files: &[&'a FileChange]) -> Vec<Candidate<'a>> {
     found
 }
 
-/// First substantial added line of the UI file whose code shares the most words with the frame's copy.
 fn anchor<'a>(spec: &DesignSpec, files: &[&'a FileChange]) -> Option<(&'a FileChange, u32, &'a str)> {
     let design_words: HashSet<String> = spec.texts.iter().flat_map(|t| words(t)).collect();
     let mut best: Option<(usize, (&FileChange, u32, &str))> = None;

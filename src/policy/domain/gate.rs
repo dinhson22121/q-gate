@@ -1,12 +1,8 @@
-//! The repository gate fields (`.qgate.toml` `[gate]`) the assistant may suggest, and loosening detection
-//! for both those fields and the server's agent policies.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::review::application::{Category, Confidence, GatePolicy, Severity};
 
-/// A `[gate]` key in `.qgate.toml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateField {
@@ -54,7 +50,6 @@ fn parse<T: serde::de::DeserializeOwned>(value: &Value, hint: &str) -> Result<T,
     serde_json::from_value(value.clone()).map_err(|_| format!("must be {hint}"))
 }
 
-/// `policy` with `field` set to `value`; an error names the expected values.
 pub fn with_gate_value(policy: &GatePolicy, field: GateField, value: &Value) -> Result<GatePolicy, String> {
     let mut next = policy.clone();
     match field {
@@ -73,7 +68,6 @@ pub fn with_gate_value(policy: &GatePolicy, field: GateField, value: &Value) -> 
     Ok(next)
 }
 
-/// True when `after` blocks fewer commits than `before` on `field`.
 pub fn loosens_gate(field: GateField, before: &GatePolicy, after: &GatePolicy) -> bool {
     match field {
         GateField::FailOn => after.fail_on > before.fail_on,
@@ -85,7 +79,6 @@ pub fn loosens_gate(field: GateField, before: &GatePolicy, after: &GatePolicy) -
 }
 
 const BLOCK: &str = "block";
-/// Switching these off stops a whole family of checks.
 const CHECK_SWITCHES: &[&str] = &[
     "agents.enabled",
     "agents.tests.enabled",
@@ -96,7 +89,6 @@ const CHECK_SWITCHES: &[&str] = &[
     "watch.run_repo_checks",
 ];
 
-/// True when changing server setting `path` from `old` to `new` lets more commits through.
 pub fn loosens_setting(path: &str, old: &Value, new: &Value) -> bool {
     match path {
         "agents.tests.on_fail" | "agents.architecture.on_violation" => old == BLOCK && new != BLOCK,

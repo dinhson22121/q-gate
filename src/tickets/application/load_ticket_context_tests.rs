@@ -20,7 +20,6 @@ fn ticket(raw: &str, issue_type: &str, parent: Option<(&str, &str)>, criteria: &
     ticket
 }
 
-/// Serves canned tickets; records full fetches and freshness probes.
 #[derive(Default)]
 struct FakeSource {
     tickets: Mutex<HashMap<String, Result<Ticket, TicketError>>>,

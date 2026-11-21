@@ -1,6 +1,3 @@
-//! Pure rules of the quality gate: findings, how they are graded, tool-output parsers and the "introduced by the
-//! diff" filter.
-
 mod boundary;
 mod changes;
 pub(crate) mod finding;

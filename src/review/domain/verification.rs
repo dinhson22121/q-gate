@@ -1,5 +1,3 @@
-//! Deterministic checks that every reported finding points at real, changed code.
-
 use std::collections::HashSet;
 
 use serde::Serialize;
@@ -7,11 +5,8 @@ use serde::Serialize;
 use super::change_set::{ChangeSet, FileChange};
 use super::finding::Finding;
 
-/// How far (in lines) a finding may sit from a changed line and still count as "about the change".
 pub const LINE_TOLERANCE: u32 = 3;
-/// How far (in lines) from the reported line the quoted evidence may appear.
 pub const EVIDENCE_WINDOW: u32 = 12;
-/// Minimum non-whitespace characters of a quote; shorter quotes (`}`, `return`) match almost anywhere.
 pub const MIN_EVIDENCE_CHARS: usize = 8;
 const ELLIPSES: [&str; 2] = ["...", "…"];
 
@@ -75,7 +70,6 @@ fn check(changes: &ChangeSet, finding: &Finding) -> Result<(), RejectReason> {
     if quote_near_line(file, finding.line, &finding.evidence) { Ok(()) } else { Err(RejectReason::EvidenceNotFound) }
 }
 
-/// True when `quote` appears in the new version of `path` near `line` and that spot is part of the change.
 pub fn evidence_exists(changes: &ChangeSet, path: &str, line: u32, quote: &str) -> bool {
     changes.find(path).is_some_and(|file| {
         file.is_near_change(line, LINE_TOLERANCE) && is_substantial(quote) && quote_near_line(file, line, quote)
@@ -98,13 +92,11 @@ fn quote_near_line(file: &FileChange, line: u32, quote: &str) -> bool {
         .map(|(_, text)| text)
         .collect();
     let new_code = normalize_whitespace(&window.join("\n"));
-    // Findings about deleted code ("validation was removed") quote the removed lines.
     window = file.removed_lines_near(line, EVIDENCE_WINDOW);
     let removed_code = normalize_whitespace(&window.join("\n"));
     candidates.iter().any(|c| contains_in_order(&new_code, c) || contains_in_order(&removed_code, c))
 }
 
-/// True when every part of `quote` between ellipses ("...", "…") appears in `haystack`, in order.
 fn contains_in_order(haystack: &str, quote: &str) -> bool {
     let mut rest = haystack;
     let mut segments = vec![quote];
@@ -120,7 +112,6 @@ fn contains_in_order(haystack: &str, quote: &str) -> bool {
     true
 }
 
-/// The raw quote plus a variant with line numbers / diff markers stripped, both whitespace-normalized.
 fn evidence_candidates(raw: &str) -> Vec<String> {
     let mut candidates: Vec<String> = [normalize_whitespace(raw), normalize_whitespace(&strip_line_prefixes(raw))]
         .into_iter()
@@ -134,7 +125,6 @@ fn normalize_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Removes prefixes like `  42 | ` or `+` that a model may copy from a numbered listing or a diff.
 fn strip_line_prefixes(raw: &str) -> String {
     raw.lines()
         .map(|line| {
@@ -152,7 +142,6 @@ fn strip_line_prefixes(raw: &str) -> String {
         .join("\n")
 }
 
-/// Keeps one finding per (file, line, category) — the most severe — and orders by severity.
 fn deduplicate(mut findings: Vec<Finding>) -> Vec<Finding> {
     findings.sort_by(|a, b| {
         b.severity.cmp(&a.severity).then_with(|| a.file.cmp(&b.file)).then_with(|| a.line.cmp(&b.line))

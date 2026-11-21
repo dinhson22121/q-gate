@@ -1,7 +1,3 @@
-//! The tools the test agent may call for ONE scenario. Every fact that ends up in the evidence
-//! (test path, source, command, exit code, output, code references) is recorded here, not taken
-//! from the model.
-
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -31,31 +27,24 @@ const MAX_READ_BYTES: usize = 200 * 1024;
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_SEARCH_HITS: usize = 100;
 const MAX_TEST_SOURCE_BYTES: usize = 200 * 1024;
-/// A quoted line may be this many lines away from the reported line.
 const QUOTE_LINE_TOLERANCE: u32 = 3;
-/// `report_result` calls with no verifiable code reference that are bounced back for correction.
 const MAX_REJECTED_REPORTS: u32 = 1;
 
-/// Limits of one scenario.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HandlerLimits {
     pub language: TestLanguage,
     pub timeout: Duration,
-    /// Extra runs after the first one.
     pub max_repair_rounds: u32,
 }
 
-/// The model's final report, after verification of its code references.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Report {
     pub advisory: TestVerdict,
     pub code_under_test: Vec<EvidenceRef>,
-    /// References that did not match the snapshot, with the reason.
     pub rejected: Vec<String>,
     pub explanation: String,
 }
 
-/// What the handler recorded, for the verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandlerFacts {
     pub target: Option<TestTarget>,
@@ -65,7 +54,6 @@ pub struct HandlerFacts {
 
 #[derive(Default)]
 struct State {
-    /// Index into `targets` once a test was written.
     chosen: Option<usize>,
     source: Option<String>,
     runs: Vec<RunRecord>,
@@ -303,7 +291,6 @@ impl<'a, W: Workspace, R: TestRunner> ScenarioToolHandler<'a, W, R> {
         Ok("result recorded".into())
     }
 
-    /// The quote must be on `line` (±3) of a production file in the snapshot.
     fn verify_ref(&self, reference: EvidenceRef, test_file: Option<&str>) -> Result<EvidenceRef, String> {
         let describe = |why: &str| format!("{}:{} {why}", reference.file, reference.line);
         let path = normalize_relative(&reference.file).map_err(|e| describe(&e.to_string()))?;
@@ -340,7 +327,6 @@ fn parse<T: DeserializeOwned>(input: Value) -> Result<T, String> {
     serde_json::from_value(input).map_err(|e| format!("invalid input: {e}"))
 }
 
-/// The tool contracts (strict object schemas).
 pub fn tool_specs() -> Vec<ToolSpec> {
     let spec = |name: &str, description: &str, properties: Value, required: &[&str]| ToolSpec {
         name: name.into(),

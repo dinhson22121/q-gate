@@ -1,13 +1,8 @@
-//! Read model of the ticket-agent part of a stored report (`ReviewReport.agents`, `ReviewReport.ticket`).
-//! Mirrors the review context's `AgentReport` / `TicketContext`; every field defaults so partial or
-//! older reports still load.
-
 use serde::{Deserialize, Serialize};
 
 use super::report_view::EvidenceView;
 use crate::review::application::{DesignMismatchKind, TestVerdict};
 
-/// Ticket material the review used: the keys checked (ticket and parent Story), description, Figma links.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketContextView {
     #[serde(default)]

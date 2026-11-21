@@ -118,7 +118,6 @@ async fn end_to_end_failure_carries_complete_evidence() {
     let dir = go_module();
     let script = ScriptedLoop::new(happy_script("failed_assertion"));
     let runner = FakeRunner::with(vec![failed_run(GO_BUILD_OUTPUT), failed_run(GO_ASSERTION_OUTPUT)]);
-    // First run fails to build; the agent rewrites and runs again (one repair round).
     let mut steps = script.steps.clone();
     steps.insert(4, ("write_test".into(), json!({ "path": "calc/qgate_s1_test.go", "content": FAILING_TEST })));
     steps.insert(5, ("run_test".into(), json!({})));
@@ -219,8 +218,6 @@ async fn prompt_names_the_allowed_path_and_fences_the_scenario() {
     assert!(prompt.contains("<untrusted_scenario>") && prompt.contains("it returns 5"));
 }
 
-/// Real `go test` run: the handler writes a failing test against a buggy `Add`.
-/// Skips (passes vacuously) when `go` is not installed.
 #[tokio::test]
 async fn real_go_run_yields_failed_assertion_with_complete_evidence() {
     if std::process::Command::new("go").arg("version").output().is_err() {

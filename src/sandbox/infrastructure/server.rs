@@ -1,7 +1,3 @@
-//! The runner daemon (`qgate runner`): accepts requests on a Unix socket and runs them through
-//! [`RunConfined`], at most `max_jobs` at a time. A client that disconnects cancels its job (the
-//! process group is killed).
-
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -16,9 +12,7 @@ use tokio::sync::Semaphore;
 use super::wire::{MAX_REQUEST_BYTES, RunnerRequest, RunnerResponse, read_message, write_message};
 use crate::sandbox::application::RunConfined;
 
-/// Time a client has to send its request after connecting.
 const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(10);
-/// Open connections (queued + running) per job slot; further clients wait in the accept backlog.
 const CONNECTIONS_PER_JOB: usize = 8;
 
 pub struct RunnerServer {
@@ -37,7 +31,6 @@ impl RunnerServer {
         }
     }
 
-    /// Serves until `shutdown` completes. Running jobs are cancelled (killed) when the server stops.
     pub async fn serve(&self, listener: UnixListener, shutdown: impl Future<Output = ()>) -> Result<()> {
         tokio::pin!(shutdown);
         let mut connections = tokio::task::JoinSet::new();
@@ -63,7 +56,6 @@ impl RunnerServer {
                 }
                 drop(permit);
             });
-            // Reap finished connection tasks so the set does not grow.
             while connections.try_join_next().is_some() {}
         }
         connections.shutdown().await;
@@ -84,7 +76,6 @@ async fn handle(stream: UnixStream, use_case: &RunConfined, jobs: &Semaphore) ->
         RunnerRequest::Ping => return respond(&mut write_half, &RunnerResponse::Pong).await,
         RunnerRequest::Exec { request } => request,
     };
-    // Anything the client does from now on (closing, writing) ends the job: dropping it kills the group.
     let mut probe = [0u8; 1];
     let job = async {
         let _permit = jobs.acquire().await.ok();
@@ -100,8 +91,6 @@ async fn respond(writer: &mut OwnedWriteHalf, response: &RunnerResponse) -> std:
     write_message(writer, response).await
 }
 
-/// Binds the runner socket: creates the parent directory, replaces a stale socket file (never any
-/// other kind of file) and restricts the socket to the owner.
 pub fn bind_socket(path: &Path) -> Result<UnixListener> {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
@@ -134,7 +123,6 @@ mod tests {
     use crate::sandbox::application::{ExecBackend, ExecRequest, FailureKind};
     use crate::sandbox::infrastructure::{LocalBackend, RemoteBackend};
 
-    /// A runner on a temp socket with `work/` as its root, stopped when dropped.
     struct TestRunner {
         dir: tempfile::TempDir,
         socket: PathBuf,
@@ -144,7 +132,6 @@ mod tests {
 
     impl TestRunner {
         async fn start(max_jobs: usize) -> Self {
-            // Short path: Unix socket paths are limited to ~100 bytes (macOS temp dirs are long).
             let dir = tempfile::Builder::new().prefix("qr").tempdir_in("/tmp").unwrap();
             std::fs::create_dir(dir.path().join("work")).unwrap();
             let socket = dir.path().join("work/.runner/s.sock");

@@ -1,11 +1,3 @@
-//! Login and the session check in front of every dashboard route.
-//!
-//! - `GET /login?token=<secret>` (the link printed at startup) or `POST /login` (form field `token`):
-//!   sets the `qgate_session` cookie and redirects to `/`, which also drops the token from the address bar.
-//! - Every other route (pages, `/api/*`, unknown paths) needs that cookie: pages redirect to `/login`, the
-//!   JSON API answers 401.
-//! - `GET /healthz` is open and returns only `ok` (container health check).
-
 mod page;
 
 use axum::extract::{Query, Request, State};
@@ -24,7 +16,6 @@ use page::LoginPage;
 pub const SESSION_COOKIE: &str = "qgate_session";
 pub const LOGIN_PATH: &str = "/login";
 pub const HEALTH_PATH: &str = "/healthz";
-/// The session lasts 30 days; the browser then needs the login link again.
 pub const SESSION_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 const API_PREFIX: &str = "/api/";
 const LOGIN_REQUIRED: &str =
@@ -43,8 +34,6 @@ impl AccessState {
     }
 }
 
-/// `app` with the session check on all its routes and fallback, plus the open `/login` and `/healthz`.
-/// `app` must not define those two paths.
 pub fn protect(app: Router, state: AccessState) -> Router {
     let open = Router::new()
         .route(LOGIN_PATH, get(login_link).post(login_form))
@@ -75,7 +64,6 @@ async fn login_link(
 ) -> Response {
     match params.token {
         Some(token) => login(&state, &token),
-        // Already logged in (e.g. a bookmarked /login): nothing to do.
         None if has_session(&headers, &state.session) => Redirect::to("/").into_response(),
         None => LoginPage::Required.into_response(),
     }
@@ -98,8 +86,6 @@ fn login(state: &AccessState, token: &str) -> Response {
     response
 }
 
-/// HttpOnly (no script can read it), SameSite=Strict (never sent on cross-site requests), whole site.
-/// No `Secure`: the dashboard is plain http on localhost.
 fn session_cookie(session: &SessionKey) -> HeaderValue {
     let cookie = format!(
         "{SESSION_COOKIE}={}; Max-Age={SESSION_MAX_AGE_SECS}; Path=/; HttpOnly; SameSite=Strict",

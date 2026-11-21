@@ -1,9 +1,6 @@
-//! Combines a preferred store with a fallback (e.g. keychain unavailable over SSH or in CI).
-
 use crate::settings::application::credentials::{CredentialError, CredentialStore};
 use crate::settings::domain::credentials::{CredentialName, Secret};
 
-/// Reads from `primary`, then `fallback`; writes to `primary`, or `fallback` when `primary` fails.
 #[derive(Debug, Clone)]
 pub struct FallbackStore<P, F> {
     primary: P,
@@ -21,7 +18,6 @@ impl<P: CredentialStore, F: CredentialStore> CredentialStore for FallbackStore<P
         match self.primary.get(name) {
             Ok(Some(secret)) => Ok(Some(secret)),
             Ok(None) => self.fallback.get(name),
-            // Report the primary failure only when the fallback has nothing either.
             Err(primary_error) => self.fallback.get(name)?.map_or(Err(primary_error), |s| Ok(Some(s))),
         }
     }
@@ -30,7 +26,6 @@ impl<P: CredentialStore, F: CredentialStore> CredentialStore for FallbackStore<P
         self.primary.set(name, secret).or_else(|_| self.fallback.set(name, secret))
     }
 
-    /// Deletes from both so a stale copy cannot resurface; the first failure is returned.
     fn delete(&self, name: CredentialName) -> Result<(), CredentialError> {
         let primary = self.primary.delete(name);
         let fallback = self.fallback.delete(name);
@@ -43,7 +38,7 @@ mod tests {
     use super::*;
     use crate::settings::application::credentials::fakes::MemoryStore;
 
-    const KEY: CredentialName = CredentialName::AnthropicApiKey;
+    const KEY: CredentialName = CredentialName::FigmaToken;
 
     fn secret(v: &str) -> Secret {
         Secret::new(v)

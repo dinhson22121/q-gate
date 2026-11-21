@@ -1,12 +1,9 @@
-//! Parses `go test -json` event streams into per-test results.
-
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
 use crate::impact::domain::{PACKAGE_LEVEL, TestOutcome, TestResult, TestRun};
 
-/// Output kept per test; a failing test's last lines are what matter.
 const MAX_TEST_OUTPUT_BYTES: usize = 8 * 1024;
 
 #[derive(Deserialize)]
@@ -23,8 +20,6 @@ struct Event {
     output: Option<String>,
 }
 
-/// Lines that are not JSON events (go's own diagnostics) are ignored. A package that fails to build
-/// is recorded as a failed `PACKAGE_LEVEL` result carrying the compiler output.
 pub fn parse_test_json(text: &str) -> TestRun {
     let mut run = TestRun::default();
     let mut outputs: BTreeMap<(String, String), String> = BTreeMap::new();
@@ -37,7 +32,6 @@ pub fn parse_test_json(text: &str) -> TestRun {
 fn apply(run: &mut TestRun, outputs: &mut BTreeMap<(String, String), String>, event: Event) {
     let test = event.test.clone().unwrap_or_default();
     if event.action == "build-output" {
-        // Build events are keyed by import path ("pkg [pkg.test]") and carry no Package.
         let package = event.import_path.as_deref().and_then(|p| p.split(' ').next()).unwrap_or_default();
         push_output(outputs, package, PACKAGE_LEVEL, event.output.as_deref());
         return;

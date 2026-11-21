@@ -16,29 +16,22 @@ use crate::settings::application::{OutputConfig, OutputFormat};
 const MD: &str = "md";
 const JSON: &str = "json";
 const HTML: &str = "html";
-/// The rule book stays far below this (at most 1000 compact rules); anything bigger is not ours.
 const MAX_RULE_STATE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Serialises read-merge-write of rules files: the watcher reviews several commits at once.
 static RULES_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipReason {
-    /// `output.enabled = false`.
     Disabled,
 }
 
-/// What an export did. Errors never fail the review: the caller logs them.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ExportOutcome {
-    /// Relative paths written, in write order.
     pub written: Vec<String>,
-    /// Relative paths of old generated files deleted by `keep_last`.
     pub deleted: Vec<String>,
     pub skipped: Option<SkipReason>,
     pub errors: Vec<String>,
-    /// Relative path of the per-repo rules file, when this review's rules were merged into it.
     pub rules_file: Option<String>,
 }
 
@@ -47,13 +40,11 @@ impl ExportOutcome {
         self.errors.is_empty()
     }
 
-    /// Paths of the per-commit Markdown file (if written), for a log line or the CLI.
     pub fn markdown_path(&self) -> Option<&str> {
         self.written.iter().map(String::as_str).find(|p| p.ends_with(".md") && Some(*p) != self.rules_file.as_deref())
     }
 }
 
-/// Writes the hand-off files for one review. Cheap to build: create one per run from the live settings.
 pub struct ExportReview {
     sink: Arc<dyn ReviewFileSink>,
     config: OutputConfig,
@@ -61,7 +52,6 @@ pub struct ExportReview {
 }
 
 impl ExportReview {
-    /// Fails only when the path template is invalid (settings validation normally prevents that).
     pub fn new(sink: Arc<dyn ReviewFileSink>, config: &OutputConfig) -> Result<Self, TemplateError> {
         let template = PathTemplate::parse(&config.path_template)?;
         Ok(Self { sink, config: config.clone(), template })
@@ -106,9 +96,6 @@ impl ExportReview {
         outcome
     }
 
-    /// Merges the review's rules into `{repo}/<rules_file>` (JSON state first, then Markdown). On success the
-    /// document lists only the rules that are new to the file. A state file that cannot be read is never
-    /// overwritten.
     fn learn_rules(
         &self,
         outcome: &mut ExportOutcome,
@@ -172,7 +159,6 @@ impl ExportReview {
         }
     }
 
-    /// Writes `latest.*` and removes a `latest.*` of a format that is no longer enabled, so it never goes stale.
     fn write_latest(&self, outcome: &mut ExportOutcome, dir: &str, files: &[(&'static str, Vec<u8>)]) {
         for (extension, bytes) in files {
             self.write(outcome, &join(dir, &format!("{LATEST_STEM}.{extension}")), bytes);
@@ -185,8 +171,6 @@ impl ExportReview {
         }
     }
 
-    /// Keeps the newest `keep_last` generated runs in `dir` (the current one always) and deletes older ones.
-    /// Only files whose name matches the template for this repo/branch are considered.
     fn prune(&self, outcome: &mut ExportOutcome, dir: &str, current: &str, matcher: &StemMatcher) {
         let listed = match self.sink.list(dir) {
             Ok(files) => files,
@@ -195,7 +179,6 @@ impl ExportReview {
                 return;
             }
         };
-        // Each format is pruned on its own, so enabling or disabling one never costs another its history.
         let mut by_format: BTreeMap<&str, BTreeMap<&str, (SystemTime, Vec<&str>)>> = BTreeMap::new();
         let rules = RulesPaths::new("", &self.config.rules_file);
         for StoredFile { name, modified } in listed.iter().filter(|f| !rules.file_names().contains(&f.name.as_str())) {
@@ -210,7 +193,6 @@ impl ExportReview {
             let mut ordered: Vec<(&str, SystemTime, Vec<&str>)> =
                 runs.into_iter().map(|(stem, (modified, names))| (stem, modified, names)).collect();
             ordered.sort_by_key(|(stem, modified, _)| (*stem != current, Reverse(*modified), Reverse(*stem)));
-            // The current run takes one slot even when this format was not written for it.
             let keep = self.config.keep_last as usize - usize::from(ordered.iter().all(|(stem, ..)| *stem != current));
             for (_, _, names) in ordered.into_iter().skip(keep) {
                 self.delete_all(outcome, dir, &names);

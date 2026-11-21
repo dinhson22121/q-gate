@@ -1,6 +1,3 @@
-//! Renders a proposal as a diff: server settings before/after, rulebook additions and edits, and the
-//! `.qgate.toml` patch the developer commits themselves (qgate never writes to repositories).
-
 use serde::Serialize;
 use serde_json::Value;
 
@@ -98,7 +95,6 @@ fn toml_value(value: &Value) -> String {
     toml::Value::try_from(value).map(|v| v.to_string()).unwrap_or_else(|_| value.to_string())
 }
 
-/// The `.qgate.toml` edits as diff text, or `None` when there is nothing to change in the repository.
 pub fn repo_patch(gate: &[GateChange], checks: &[CheckSuggestion]) -> Option<String> {
     if gate.is_empty() && checks.is_empty() {
         return None;

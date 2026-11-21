@@ -199,7 +199,6 @@ async fn stale_proposals_are_refused_and_can_be_re_previewed() {
 #[tokio::test]
 async fn expired_proposals_and_rejections() {
     let h = harness_with(FakeModel::returning(draft()), FakeHistory::default(), known_rulebooks(), later);
-    // Created "now" by a clock that already says two days later: still valid for 24 hours.
     let id = h.service.propose("x", Some(REPO.into())).await.unwrap().proposal.id;
     let mut stored = h.store.get(id).unwrap().unwrap();
     stored.expires_at = fixed_now();

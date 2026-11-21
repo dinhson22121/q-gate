@@ -1,5 +1,3 @@
-//! [`ContentIds`] over the local git executable, so results can be keyed on git object ids.
-
 use futures::future::BoxFuture;
 
 use super::local_git::LocalGit;

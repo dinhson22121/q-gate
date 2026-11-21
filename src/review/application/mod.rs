@@ -1,11 +1,12 @@
-//! Review use cases and the ports they need. Other contexts use the review context only through here.
-
 pub mod agent_ports;
 pub mod batching;
 pub mod caching_reviewer;
 pub mod ports;
+pub mod preflight;
 pub mod review_changes;
 pub mod run_agents;
+pub mod supplementary_checks;
+pub mod supplementary_ports;
 
 pub use crate::review::domain::agent_results::{
     AgentReport, DesignMismatch, DesignMismatchKind, RuleViolation, TestEvidence, TestResult, TestScenario,
@@ -19,5 +20,11 @@ pub use crate::review::domain::requirements::{
     AcceptanceCriterion, CriterionStatus, EvidenceRef, Requirements, RequirementsReport,
 };
 pub use caching_reviewer::CachingCodeReviewer;
+pub use preflight::{AgentPlan, ModelPreflight, ProbeFailure, ReviewPreflight};
 pub use review_changes::{NoProgress, ReviewChanges, ReviewError, ReviewProgress, ReviewSettings};
 pub use run_agents::{AgentRun, AgentSuite};
+pub use supplementary_checks::{RunSupplementaryChecks, SupplementarySettings};
+pub use supplementary_ports::{
+    CommitChange, CommitChanges, ExportedSnapshot, QualityChecks, QualityRequest, RegressionChecks, RegressionRequest,
+    SnapshotExporter, ToolOutcome,
+};

@@ -6,6 +6,9 @@
 #   QGATE_UID / QGATE_GID   uid/gid of the runtime user (default 1000:1000); keep equal to compose `user:`
 #   QGATE_PREINSTALL        comma list of toolchains to bake in at build time (CI / offline), e.g. go,java
 #   QGATE_APT_PACKAGES      extra Debian packages, e.g. "build-essential" for Rust/C-extension builds
+#   QGATE_CLAUDE_VERSION    pinned Claude Code CLI release baked into the `qgate` target (not the runner)
+#
+# Targets: `qgate` (default) = `runner` + the `claude` CLI. The runner image has no `claude` and no token.
 
 ############################
 # Builder
@@ -32,9 +35,9 @@ RUN touch src/main.rs src/lib.rs \
     && install -D -m 0755 target/release/qgate /out/qgate
 
 ############################
-# Runtime
+# Runner (no Claude CLI) - also the base of the qgate image
 ############################
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runner
 
 ARG QGATE_UID=1000
 ARG QGATE_GID=1000
@@ -110,3 +113,30 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15m --start-interval=5s -
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/qgate/entrypoint.sh"]
 CMD ["qgate", "serve"]
+
+############################
+# qgate: the runner image plus the Claude Code CLI (default target)
+############################
+FROM runner AS qgate
+
+ARG QGATE_UID=1000
+ARG QGATE_GID=1000
+# Pinned release of the native Claude Code binary; the download is verified against the release manifest's
+# SHA-256. Bump it deliberately (and re-run the tests): the CLI's flags and output are an interface of qgate.
+ARG QGATE_CLAUDE_VERSION=2.1.330
+
+USER root
+# hadolint ignore=DL4006
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) platform=linux-x64 ;; \
+        arm64) platform=linux-arm64 ;; \
+        *) echo "unsupported architecture for the Claude CLI" >&2; exit 1 ;; \
+    esac; \
+    base="https://downloads.claude.ai/claude-code-releases/${QGATE_CLAUDE_VERSION}"; \
+    sum="$(curl -fsSL "${base}/manifest.json" | jq -r ".platforms[\"${platform}\"].checksum")"; \
+    curl -fsSL -o /usr/local/bin/claude "${base}/${platform}/claude"; \
+    echo "${sum}  /usr/local/bin/claude" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/claude; \
+    claude --version | grep -q "${QGATE_CLAUDE_VERSION}"
+USER ${QGATE_UID}:${QGATE_GID}

@@ -1,15 +1,9 @@
-//! Which repository files define rules, the directory layout, and the fingerprint over both.
-
 use super::sha256::sha256_hex;
 
-/// Bytes read from one rule source.
 pub const RULE_SOURCE_CAP: usize = 20 * 1024;
-/// Rule sources considered (shallowest first), so a repo with hundreds of nested docs stays bounded.
 pub const MAX_RULE_SOURCES: usize = 40;
-/// Directory depth recorded in the layout.
 pub const LAYOUT_DEPTH: usize = 3;
 
-/// Directories never read: dependencies, build output, VCS metadata.
 const IGNORED_DIRS: [&str; 14] = [
     ".git",
     "node_modules",
@@ -27,7 +21,6 @@ const IGNORED_DIRS: [&str; 14] = [
     "coverage",
 ];
 
-/// Rule-defining files matched by file name anywhere in the tree.
 const RULE_FILE_NAMES: [&str; 16] = [
     "CLAUDE.md",
     "AGENTS.md",
@@ -47,7 +40,6 @@ const RULE_FILE_NAMES: [&str; 16] = [
     "eslint.config.js",
 ];
 
-/// One rule source as read from the repository (already capped / reduced to the relevant part).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceFile {
     pub path: String,
@@ -62,7 +54,6 @@ fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Whether `path` (repo-relative, `/`-separated) holds documented rules or lint configuration.
 pub fn is_rule_source(path: &str) -> bool {
     if is_ignored_path(path) {
         return false;
@@ -76,15 +67,12 @@ pub fn is_rule_source(path: &str) -> bool {
         || path.starts_with("doc/adr/")
 }
 
-/// Rule sources to read, shallowest first, bounded by [`MAX_RULE_SOURCES`].
 pub fn rule_source_paths(paths: &[String]) -> Vec<String> {
     let mut sources: Vec<&String> = paths.iter().filter(|p| is_rule_source(p)).collect();
     sources.sort_by_key(|p| (p.matches('/').count(), p.as_str()));
     sources.into_iter().take(MAX_RULE_SOURCES).cloned().collect()
 }
 
-/// Reduces a raw file to the part that defines rules. `None` when nothing relevant is left
-/// (a `pyproject.toml` without `[tool.ruff]`).
 pub fn relevant_content(path: &str, raw: &str) -> Option<String> {
     if file_name(path) == "pyproject.toml" {
         return ruff_sections(raw);
@@ -92,7 +80,6 @@ pub fn relevant_content(path: &str, raw: &str) -> Option<String> {
     Some(raw.to_string())
 }
 
-/// The `[tool.ruff]` and `[tool.ruff.*]` tables of a pyproject.toml.
 fn ruff_sections(raw: &str) -> Option<String> {
     let mut keep = false;
     let mut out = String::new();
@@ -110,7 +97,6 @@ fn ruff_sections(raw: &str) -> Option<String> {
     (!out.is_empty()).then_some(out)
 }
 
-/// Directories up to [`LAYOUT_DEPTH`] levels deep (names only), sorted, ignored dirs excluded.
 pub fn layout(paths: &[String]) -> Vec<String> {
     let mut dirs = std::collections::BTreeSet::new();
     for path in paths.iter().filter(|p| !is_ignored_path(p)) {
@@ -123,7 +109,6 @@ pub fn layout(paths: &[String]) -> Vec<String> {
     dirs.into_iter().collect()
 }
 
-/// sha256 over the rule sources (path + content, sorted by path) and the layout.
 pub fn fingerprint(sources: &[SourceFile], layout: &[String]) -> String {
     let mut sorted: Vec<&SourceFile> = sources.iter().collect();
     sorted.sort_by(|a, b| a.path.cmp(&b.path));

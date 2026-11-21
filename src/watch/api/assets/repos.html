@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
+<title>qgate repositories</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #0b5cad; --focus: #0b5cad;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --selected: #e6f0fb;
+  --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #6cb2ff; --focus: #6cb2ff;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6;
+    --code-bg: #10141a; --selected: #1b2a3d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; }
+select, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1000px; margin: 0 auto; }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+.rule { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.rule-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.rule-head .title { font-weight: 600; flex: 1 1 240px; }
+.rule-actions { display: flex; gap: 6px; }
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+pre.quote { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 2px 0 6px; white-space: pre-wrap; }
+.label { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 6px; }
+.banner { padding: 8px 12px; border-radius: var(--radius); margin: 0; }
+.empty { color: var(--muted); font-style: italic; }
+p { margin: 4px 0; }
+@media (max-width: 480px) { header.top, main { padding-left: 12px; padding-right: 12px; } }
+ul.list { list-style: none; margin: 0; padding: 0; }
+ul.list li { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--border); }
+ul.list li:first-child { border-top: 0; }
+ul.list .name { flex: 1 1 auto; min-width: 0; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0 0 8px; }
+.crumbs button { padding: 2px 8px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate repositories</h1><a href="/">Dashboard</a><a href="/settings">Settings</a><a href="/rulebook">Rulebook</a><a href="/policy">Policy assistant</a></div>
+</header>
+<main>
+  <p class="banner info">qgate reviews the repository you import from the folder below. Importing a repository replaces the current one.</p>
+  <div id="error" class="banner bad" role="alert" hidden></div>
+  <section class="panel">
+    <h2>Imported repositories</h2>
+    <div id="imported"><p class="empty">Loading…</p></div>
+  </section>
+  <section class="panel">
+    <h2>Browse <span class="muted mono" id="base"></span></h2>
+    <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+    <div id="folders"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+<script>
+"use strict";
+(() => {
+  const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
+  const RELOAD_HINT = "qgate restarted or the page is stale: reload the page.";
+  const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "repos", "X-Qgate-Token": TOKEN, Accept: "application/json" };
+  // TODO(multi-repo): the server reports max_repos; to allow several repos raise MAX_IMPORTED_REPOS in
+  // watch::application::manage_repos and reword the banner/"replaces" label here. The list already renders N rows.
+  const state = { path: "", imported: [] };
+  const $ = (id) => document.getElementById(id);
+
+  // Builds DOM nodes; strings always become text nodes, never parsed as HTML.
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+  const replace = (node, ...children) => { node.replaceChildren(); node.append(...children.flat()); };
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+
+  function showError(message) {
+    $("error").hidden = !message;
+    $("error").textContent = message || "";
+  }
+
+  async function call(method, path, body) {
+    const options = { method, credentials: "same-origin", headers: method === "GET" ? { Accept: "application/json" } : HEADERS };
+    if (method !== "GET") options.body = JSON.stringify(body || {});
+    const response = await fetch(path, options);
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) throw new Error(RELOAD_HINT);
+    if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    return data;
+  }
+
+  const guarded = (fn) => async () => {
+    try { showError(""); await fn(); } catch (err) { showError(err.message); }
+  };
+
+  function renderImported() {
+    const rows = state.imported.map((repo) => el("li", {},
+      el("span", { class: "name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, repo.path)),
+      !repo.exists && chip("missing on disk", "warn"),
+      el("button", { type: "button", onclick: guarded(async () => {
+        await call("DELETE", "/api/repos", { path: repo.path });
+        await loadImported();
+      }) }, "Remove")));
+    replace($("imported"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No repository imported yet."));
+  }
+
+  function renderListing(listing) {
+    state.path = listing.path;
+    $("base").textContent = listing.base;
+    replace($("crumbs"), listing.crumbs.map((crumb, i) => [
+      i > 0 && el("span", { class: "muted" }, "/"),
+      el("button", { type: "button", onclick: guarded(() => browse(crumb.path)) }, crumb.name),
+    ]));
+    const rows = [];
+    if (listing.parent) {
+      rows.push(el("li", {}, el("button", { type: "button", onclick: guarded(() => browse(listing.parent)) }, ".. (up)")));
+    }
+    if (listing.is_git_root) rows.push(el("li", {}, el("span", { class: "name muted" }, "This folder is a git repository."), importButton(listing.path)));
+    for (const entry of listing.entries) {
+      rows.push(el("li", {},
+        el("button", { type: "button", class: "name", onclick: guarded(() => browse(entry.path)) }, entry.name + "/"),
+        entry.is_git_root && chip("git", "info"),
+        entry.is_git_root && importButton(entry.path)));
+    }
+    if (listing.truncated) rows.push(el("li", {}, el("span", { class: "muted" }, "More folders exist than are shown.")));
+    replace($("folders"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No subfolders."));
+  }
+
+  function importButton(path) {
+    return el("button", { type: "button", class: "primary", onclick: guarded(async () => {
+      await call("POST", "/api/repos/import", { path });
+      await loadImported();
+    }) }, state.imported.length ? "Import (replaces)" : "Import");
+  }
+
+  async function browse(path) {
+    renderListing(await call("GET", "/api/repos/browse?path=" + encodeURIComponent(path || "")));
+  }
+
+  async function loadImported() {
+    const { repos } = await call("GET", "/api/repos");
+    state.imported = repos;
+    renderImported();
+    if (state.path) await browse(state.path);
+  }
+
+  guarded(async () => { await loadImported(); if (!state.path) await browse(""); })();
+})();
+</script>
+</body>
+</html>

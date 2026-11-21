@@ -7,10 +7,8 @@ use crate::quality::application::{CheckInput, CheckOutcome, QualityCheck};
 use crate::quality::domain::parsers::gitleaks;
 use crate::quality::domain::{Language, QualityTool};
 
-/// Repository files that change what gitleaks reports (its config and ignore list).
 const CONFIG_FILES: [&str; 2] = [".gitleaks.toml", ".gitleaksignore"];
 
-/// Secret scan of the snapshot. Matched values are redacted by the tool itself (`--redact`).
 pub struct GitleaksCheck {
     runner: ToolRunner,
     binary: Option<PathBuf>,

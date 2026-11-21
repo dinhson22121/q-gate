@@ -1,5 +1,3 @@
-//! `RepoRegistry` persisted as `<config_dir>/qgate/repos.toml`.
-
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
@@ -29,7 +27,6 @@ impl From<RepoEntry> for WatchedRepo {
     }
 }
 
-/// Repositories registered explicitly with `qgate watch add`.
 #[derive(Debug, Clone)]
 pub struct TomlRepoRegistry {
     file: PathBuf,
@@ -40,7 +37,6 @@ impl TomlRepoRegistry {
         Self { file }
     }
 
-    /// `<config_dir>/qgate/repos.toml`, when the platform has a config directory.
     pub fn default_path() -> Option<PathBuf> {
         dirs::config_dir().map(|dir| dir.join(APP_DIR).join(FILE_NAME))
     }
@@ -64,7 +60,6 @@ impl TomlRepoRegistry {
         toml::from_str(&text).map_err(|e| WatchError::Registry(format!("{}: {e}", self.file.display())))
     }
 
-    /// Writes to a sibling temporary file then renames it, so readers never see a partial file.
     async fn save(&self, file: &RepoFile) -> Result<(), WatchError> {
         let text = toml::to_string(file).map_err(|e| WatchError::Registry(e.to_string()))?;
         if let Some(dir) = self.file.parent() {
@@ -80,7 +75,6 @@ impl TomlRepoRegistry {
     }
 }
 
-/// Canonical path of `path` after checking it is the root of a git working tree.
 async fn validated_root(path: &Path) -> Result<PathBuf, WatchError> {
     let invalid = |why: &str| WatchError::InvalidRepo(format!("{}: {why}", path.display()));
     let canonical = tokio::fs::canonicalize(path).await.map_err(|e| invalid(&e.to_string()))?;
@@ -114,7 +108,6 @@ impl RepoRegistry for TomlRepoRegistry {
     }
 
     async fn remove(&self, path: &Path) -> Result<bool, WatchError> {
-        // The directory may already be gone: fall back to the path as given.
         let canonical = tokio::fs::canonicalize(path).await.unwrap_or_else(|_| path.to_path_buf());
         let mut file = self.load().await?;
         let before = file.repos.len();

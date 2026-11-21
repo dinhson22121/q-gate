@@ -1,5 +1,3 @@
-//! Tickets domain: ticket keys, tickets, acceptance-criteria and design-link parsing. Pure, no I/O.
-
 pub mod acceptance;
 pub mod commit_keys;
 pub mod design_links;

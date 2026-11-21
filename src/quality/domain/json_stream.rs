@@ -1,9 +1,5 @@
-//! Tools print their JSON next to log noise (the sandbox interleaves stdout and stderr), and some print a
-//! stream of documents. Finds every JSON object/array that starts at the beginning of a line.
-
 use serde_json::{Deserializer, Value};
 
-/// Every JSON document that begins a line, in order. Lines that do not start a valid document are skipped.
 pub fn json_documents(text: &str) -> Vec<Value> {
     let mut documents = Vec::new();
     let mut offset = 0;

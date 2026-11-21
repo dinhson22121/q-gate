@@ -1,34 +1,26 @@
-//! Maps Figma REST JSON (`/v1/files/{key}/nodes`, `/variables/local`) to a `DesignSpec`.
-
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
 use crate::design::application::{ComponentRef, DesignError, DesignSpec, TokenKind, TokenRef};
 
-/// Nodes visited per frame; huge frames are truncated rather than read whole.
 const MAX_NODES: usize = 20_000;
 const MAX_ALIAS_DEPTH: usize = 5;
-/// Frame / layer names that describe a UI state.
 const STATE_WORDS: [&str; 10] =
     ["loading", "empty", "error", "disabled", "skeleton", "success", "hover", "focus", "pressed", "offline"];
 const COLOR_PROPERTIES: [&str; 4] = ["fills", "strokes", "color", "fill"];
 const SPACING_PROPERTIES: [&str; 6] =
     ["itemSpacing", "counterAxisSpacing", "paddingLeft", "paddingRight", "paddingTop", "paddingBottom"];
 
-/// A property bound to a variable, before the variable is resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundVariable {
     pub id: String,
     pub kind: TokenKind,
-    /// The node's resolved value for that property (used when variables cannot be read).
     pub fallback: Option<String>,
 }
 
-/// Variable id → (name, resolved default-mode value).
 pub type Variables = HashMap<String, (String, Option<String>)>;
 
-/// Spec without variable names, plus the variable bindings found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedNodes {
     pub spec: DesignSpec,
@@ -72,7 +64,6 @@ pub fn parse_nodes(body: &Value, node_id: &str) -> Result<ParsedNodes, DesignErr
     Ok(ParsedNodes { spec: walker.spec, version: version_of(body), bound: walker.bound, truncated })
 }
 
-/// `version` of a files/nodes response (string, sometimes a number).
 pub fn version_of(body: &Value) -> String {
     match body.get("version") {
         Some(Value::String(s)) => s.clone(),
@@ -156,7 +147,6 @@ impl Walker<'_> {
         }
     }
 
-    /// Fill / stroke styles count as colour tokens (plans without variables use styles).
     fn styles_of(&mut self, node: &Value) {
         let Some(styles) = node.get("styles").and_then(Value::as_object) else { return };
         for (property, style_id) in styles {
@@ -171,7 +161,6 @@ impl Walker<'_> {
     }
 }
 
-/// Adds the variable names and values to the spec; without `variables` the node's own values are used.
 pub fn resolve_tokens(parsed: &mut ParsedNodes, variables: Option<&Variables>) {
     for binding in &parsed.bound {
         let known = variables.and_then(|v| v.get(&binding.id));
@@ -186,7 +175,6 @@ pub fn resolve_tokens(parsed: &mut ParsedNodes, variables: Option<&Variables>) {
     }
 }
 
-/// `/v1/files/{key}/variables/local` → id → (name, default-mode value).
 pub fn parse_variables(body: &Value) -> Variables {
     let empty = Map::new();
     let meta = body.get("meta");
@@ -235,7 +223,6 @@ fn property_kind(property: &str) -> TokenKind {
     }
 }
 
-/// `{"type":"VARIABLE_ALIAS","id":...}` or an array of them.
 fn alias_ids(value: &Value) -> Vec<String> {
     match value {
         Value::Array(items) => items.iter().flat_map(alias_ids).collect(),
@@ -245,7 +232,6 @@ fn alias_ids(value: &Value) -> Vec<String> {
     }
 }
 
-/// First visible SOLID paint of `fills` / `strokes` as `#rrggbb`.
 fn solid_color(node: &Value, property: &str) -> Option<String> {
     let paints = if property.starts_with("stroke") { "strokes" } else { "fills" };
     node.get(paints)?
@@ -255,7 +241,6 @@ fn solid_color(node: &Value, property: &str) -> Option<String> {
         .find_map(|p| p.get("color").and_then(hex_color))
 }
 
-/// `{"r":0.2,"g":0.4,"b":1,"a":1}` → `#3366ff`.
 fn hex_color(color: &Value) -> Option<String> {
     let channel = |key: &str| color.get(key).and_then(Value::as_f64).map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
     Some(format!("#{:02x}{:02x}{:02x}", channel("r")?, channel("g")?, channel("b")?))

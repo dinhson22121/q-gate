@@ -1,5 +1,3 @@
-//! Credential store backed by a TOML file readable only by the user (Linux default, keyring fallback).
-
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -15,10 +13,6 @@ const DIR_MODE: u32 = 0o700;
 
 type Entries = BTreeMap<String, String>;
 
-/// Stores secrets as `name = "value"` lines in a single file, rewritten atomically.
-///
-/// Not safe against two processes writing at the same moment (last writer wins);
-/// writes only happen on explicit user commands.
 #[derive(Debug, Clone)]
 pub struct FileStore {
     path: PathBuf,
@@ -39,7 +33,6 @@ impl FileStore {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Entries::new()),
             Err(e) => return Err(self.io_error("read", &e)),
         };
-        // The TOML error message quotes the offending line, which may contain a secret.
         toml::from_str(&text)
             .map_err(|_| CredentialError::Store(format!("credentials file {} is malformed", self.path.display())))
     }
@@ -52,7 +45,6 @@ impl FileStore {
         let temp = self.temp_path();
         let result = write_private(&temp, text.as_bytes()).and_then(|()| fs::rename(&temp, &self.path));
         if let Err(e) = result {
-            // Best effort: do not leave a partial secret file behind.
             let _ = fs::remove_file(&temp);
             return Err(self.io_error("write", &e));
         }
@@ -89,9 +81,8 @@ impl CredentialStore for FileStore {
     }
 }
 
-/// Creates a new file that only the owner can read (on unix), failing if it exists.
 fn write_private(path: &Path, content: &[u8]) -> io::Result<()> {
-    let _ = fs::remove_file(path); // stale temp file from a crashed run of the same pid
+    let _ = fs::remove_file(path);
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -119,7 +110,7 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    const KEY: CredentialName = CredentialName::AnthropicApiKey;
+    const KEY: CredentialName = CredentialName::FigmaToken;
     const TOKEN: CredentialName = CredentialName::JiraApiToken;
 
     fn store() -> (tempfile::TempDir, FileStore) {
@@ -174,7 +165,7 @@ mod tests {
     fn malformed_file_error_does_not_leak_content() {
         let (_dir, store) = store();
         fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(store.path(), "anthropic_api_key = sk-ant-secret-unquoted\n").unwrap();
+        fs::write(store.path(), "jira_api_token = sk-ant-secret-unquoted\n").unwrap();
         let message = store.get(KEY).unwrap_err().to_string();
         assert!(message.contains("malformed"));
         assert!(!message.contains("sk-ant-secret"), "{message}");

@@ -1,8 +1,8 @@
-//! Adapters implementing the review ports.
-
-pub mod anthropic;
 pub mod check_runner;
+pub mod claude;
+pub mod claude_preflight;
 pub mod guidelines;
 pub mod local_git;
 pub mod local_git_ids;
+pub mod tool_checks;
 pub mod unified_diff;

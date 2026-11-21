@@ -1,6 +1,3 @@
-//! Dashboard login wiring: the secret in effect and the login link (`qgate serve` prints it at startup,
-//! `qgate login-url` on demand). The link is the only place the secret is ever printed.
-
 use std::net::{IpAddr, SocketAddr};
 use std::process::ExitCode;
 
@@ -13,34 +10,27 @@ use crate::access::application::{ENV_DASHBOARD_TOKEN, ResolveDashboardSecret};
 use crate::access::domain::DashboardSecret;
 use crate::access::infrastructure::FileSecretStore;
 
-/// Host port of the dashboard in Docker (`127.0.0.1:${QGATE_DASHBOARD_PORT}:8080`).
 const ENV_DASHBOARD_PORT: &str = "QGATE_DASHBOARD_PORT";
 const LOOPBACK_HOST: &str = "localhost";
 
-/// `QGATE_DASHBOARD_TOKEN`, else `<data_dir>/dashboard-token` (created on first use).
 pub fn dashboard_secret(context: &AppContext) -> Result<DashboardSecret> {
     let store = FileSecretStore::in_data_dir(&context.paths.data_dir);
     let env_value = (context.env)(ENV_DASHBOARD_TOKEN);
     ResolveDashboardSecret::new(&store).execute(env_value.as_deref()).context("cannot set up dashboard login")
 }
 
-/// `http://<host>:<port>/login?token=<secret>` for the configured `dashboard.bind`.
 pub fn login_url(context: &AppContext, secret: &DashboardSecret) -> Result<String> {
     let bind = context.server().dashboard.bind_addr()?;
     let authority = public_authority(bind, (context.env)(ENV_DASHBOARD_PORT).as_deref());
     Ok(format!("http://{authority}{LOGIN_PATH}?token={}", secret.expose()))
 }
 
-/// `qgate login-url`.
 pub fn print_login_url(context: &AppContext) -> Result<ExitCode> {
     let secret = dashboard_secret(context)?;
     println!("{}", login_url(context, &secret)?);
     Ok(ExitCode::from(EXIT_OK))
 }
 
-/// Where a browser on this machine reaches the dashboard: `localhost` for wildcard/loopback binds (the
-/// default host the dashboard accepts), else the bound IP; the published port when known (Docker maps
-/// it), else the bound one.
 fn public_authority(bind: SocketAddr, published_port: Option<&str>) -> String {
     let port = published_port.and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p != 0).unwrap_or(bind.port());
     let ip = bind.ip();
@@ -70,6 +60,7 @@ mod tests {
             store: Arc::new(FileStore::new(dir.join("config/credentials.toml"))),
             settings_store: Arc::new(SqliteServerConfigStore::open(dir.join("data/qgate.db")).unwrap()),
             env: Arc::new(move |name: &str| vars.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string())),
+            model_override: None,
         }
     }
 

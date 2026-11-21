@@ -1,5 +1,3 @@
-//! Component: the design uses design-system component X, the change renders a raw element instead.
-
 use std::collections::HashSet;
 
 use crate::review::application::{DesignMismatch, DesignMismatchKind};
@@ -10,7 +8,6 @@ use super::spec::DesignSpec;
 use super::ui::{added_lines, ignored_lines};
 
 const MAX_COMPONENT_MISMATCHES: usize = 20;
-/// Name fragments (lowercase) → raw HTML elements that fill the same role. First match wins.
 const ROLES: [(&[&str], &[&str]); 8] = [
     (&["checkbox", "radio", "switch", "toggle"], &["input"]),
     (&["button"], &["button"]),
@@ -52,7 +49,6 @@ pub(super) fn check(spec: &DesignSpec, files: &[&FileChange]) -> Vec<DesignMisma
     found
 }
 
-/// "Button/Primary" → "Button", "🔘 text field / large" → "TextField".
 fn component_identifier(name: &str) -> String {
     let base = name.split('/').next().unwrap_or_default();
     base.split(|c: char| !c.is_ascii_alphanumeric())
@@ -72,7 +68,6 @@ fn raw_elements(identifier: &str) -> Option<&'static [&'static str]> {
     ROLES.iter().find(|(fragments, _)| fragments.iter().any(|f| lower.contains(f))).map(|(_, elements)| *elements)
 }
 
-/// True when the file mentions `identifier` as a whole word (import, JSX tag, styled wrapper...).
 fn uses_identifier(file: &FileChange, identifier: &str) -> bool {
     file.new_lines().iter().any(|(_, text)| {
         text.match_indices(identifier).any(|(i, _)| {

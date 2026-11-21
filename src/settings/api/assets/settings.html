@@ -102,7 +102,7 @@ p { margin: 4px 0; }
 </head>
 <body>
 <header class="top">
-  <div class="brand"><h1>qgate settings</h1><a href="/">Dashboard</a></div>
+  <div class="brand"><h1>qgate settings</h1><a href="/">Dashboard</a><a href="/repos">Repositories</a></div>
   <nav class="toc" aria-label="Sections" id="toc"></nav>
 </header>
 <main id="main">
@@ -184,8 +184,8 @@ p { margin: 4px 0; }
 
   const SECTIONS = [
     { id: "claude", title: "Claude", blocks: [
-      secret("anthropic_api_key", "Anthropic API key"),
-      f("llm.base_url", "API endpoint (llm.base_url)", "text", { hint: "Must be https, except localhost or 127.0.0.1 (local proxy). It receives the API key and the reviewed code." }),
+      f("llm.claude_bin", "Claude CLI binary (llm.claude_bin)", "text", { hint: "Path of the `claude` executable (Claude Code, on your subscription). Admin-only: set QGATE_CLAUDE_BIN. Log in with `claude login` or CLAUDE_CODE_OAUTH_TOKEN." }),
+      f("llm.timeout_secs", "CLI timeout (llm.timeout_secs)", "int", { hint: "Seconds one `claude -p` run may take. Admin-only: set QGATE_CLI_TIMEOUT_SECS." }),
     ] },
     { id: "jira", title: "Jira", blocks: [
       f("jira.enabled", "Check commits against the Jira ticket's acceptance criteria", "bool"),

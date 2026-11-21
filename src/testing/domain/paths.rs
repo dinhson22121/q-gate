@@ -1,6 +1,3 @@
-//! Lexical policy for paths the model sends: relative, inside the snapshot, no tricks.
-//! Symlinks are checked by the workspace adapter after canonicalization.
-
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,10 +9,6 @@ impl fmt::Display for PathError {
     }
 }
 
-/// Normalizes a snapshot-relative path to `a/b/c` ("" is the snapshot root).
-///
-/// Rejects absolute paths, drive prefixes, backslashes, NUL bytes and any `..` component;
-/// `.` and empty components are dropped.
 pub fn normalize_relative(path: &str) -> Result<String, PathError> {
     let reject = |why: &str| Err(PathError(format!("invalid path '{}': {why}", path.escape_debug())));
     if path.contains('\0') {
@@ -38,12 +31,10 @@ pub fn normalize_relative(path: &str) -> Result<String, PathError> {
     Ok(parts.join("/"))
 }
 
-/// Directory part of a normalized path ("" at the root).
 pub fn parent_dir(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
-/// Joins normalized paths, treating "" as the root.
 pub fn join(dir: &str, rest: &str) -> String {
     match (dir.is_empty(), rest.is_empty()) {
         (true, _) => rest.to_string(),
@@ -52,7 +43,6 @@ pub fn join(dir: &str, rest: &str) -> String {
     }
 }
 
-/// `path` relative to `base` when `path` is `base` or below it.
 pub fn strip_dir<'a>(path: &'a str, base: &str) -> Option<&'a str> {
     if base.is_empty() {
         return Some(path);

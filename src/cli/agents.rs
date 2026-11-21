@@ -1,5 +1,3 @@
-//! Builds the ticket agents for one review from the live server settings.
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,33 +16,32 @@ use crate::design::application::DesignCheckKind;
 use crate::design::infrastructure::{
     FigmaDesignReviewer, FigmaRestConfig, FigmaRestSource, FigmaToken, SqliteDesignCache,
 };
-use crate::llm::{Budget, ClaudeClient, ClaudeConfig};
+use crate::llm::{CliConfig, MeteredModel, StructuredModel, UsageMeter};
 use crate::review::application::{AgentSuite, Category, DesignMismatchKind, GatePolicy};
 use crate::sandbox::application::ExecBackend;
 use crate::settings::application::{
-    AgentEffort, CredentialName, CredentialStore, DesignCheck, FailAction, FigmaProvider, Secret, ServerConfig,
+    AgentEffort, CredentialName, CredentialStore, DesignCheck, FailAction, FigmaProvider, ServerConfig,
     TestLanguage as SettingsLanguage,
 };
 use crate::settings::infrastructure::resolve_credential;
 use crate::testing::application::ports::ScenarioSnapshots;
+use crate::testing::infrastructure::CliToolLoop;
 use crate::testing::{ClaudeTestAgent, TestAgentSettings, TestLanguage};
 use crate::tickets::infrastructure::{ClaudeTicketAnalyst, SqliteTicketCache};
 
-/// Requests one test agent may send to Claude for its scenario.
 const TEST_AGENT_MAX_TURNS: u32 = 30;
+const TEST_AGENT_MODEL_TIME: Duration = Duration::from_secs(600);
 
-/// The agents, their shared spend tracker, and notes about agents that could not be enabled.
 pub struct Agents {
     pub suite: AgentSuite,
-    pub budget: Budget,
+    pub meter: UsageMeter,
     pub notes: Vec<String>,
 }
 
-/// `None` when agents are disabled. Unavailable agents (missing token, cache error) become notes.
-/// Test agents run their tests through `exec`, each in its own snapshot from `snapshots`.
 pub fn build_agents(
     server: &ServerConfig,
-    api_key: &Secret,
+    model: Arc<dyn StructuredModel>,
+    cli: &CliConfig,
     db: &Path,
     store: &dyn CredentialStore,
     exec: Arc<dyn ExecBackend>,
@@ -54,11 +51,8 @@ pub fn build_agents(
     if !config.enabled {
         return Ok(None);
     }
-    let budget = Budget::new(config.budget_usd_per_review);
-    let client = Arc::new(
-        ClaudeClient::new(api_key.expose().to_string(), claude_config(server), budget.clone())
-            .context("cannot create the Claude client for agents")?,
-    );
+    let meter = UsageMeter::default();
+    let model: Arc<dyn StructuredModel> = Arc::new(MeteredModel::new(model, meter.clone()));
     let mut notes = Vec::new();
     let mut suite = AgentSuite {
         max_parallel: config.max_parallel,
@@ -69,7 +63,7 @@ pub fn build_agents(
         match SqliteTicketCache::open(db) {
             Ok(cache) => {
                 suite.analyst = Some(Arc::new(ClaudeTicketAnalyst::new(
-                    client.clone(),
+                    model.clone(),
                     Arc::new(cache),
                     config.tests.max_scenarios as usize,
                 )));
@@ -78,13 +72,20 @@ pub fn build_agents(
         }
     }
     if config.tests.enabled {
-        suite.tests = Some(Arc::new(ClaudeTestAgent::new(client.clone(), test_settings(server), exec, snapshots)));
+        let settings = test_settings(server);
+        let session = test_session_timeout(&settings);
+        match CliToolLoop::new(CliConfig { timeout: session, ..cli.clone() }) {
+            Ok(driver) => {
+                suite.tests = Some(Arc::new(ClaudeTestAgent::new(Arc::new(driver), settings, exec, snapshots)));
+            }
+            Err(e) => notes.push(format!("test agent disabled: {e}")),
+        }
     }
     if config.architecture.enabled {
         match SqliteRulebookStore::open(db) {
             Ok(store) => {
                 let service = Arc::new(RulebookService::new(
-                    Arc::new(ClaudeRuleModel::new(client.clone())),
+                    Arc::new(ClaudeRuleModel::new(model.clone())),
                     Arc::new(FsRepoReader),
                     Arc::new(store),
                 ));
@@ -98,23 +99,20 @@ pub fn build_agents(
         }
     }
     if server.figma.enabled {
-        match design_reviewer(server, db, store, client.clone()) {
+        match design_reviewer(server, db, store, model.clone()) {
             Ok(reviewer) => suite.design = Some(reviewer),
             Err(e) => notes.push(format!("design review disabled: {e:#}")),
         }
     }
-    Ok(Some(Agents { suite, budget, notes }))
+    Ok(Some(Agents { suite, meter, notes }))
 }
 
-/// Rulebook service for the `/rulebook` page. The API key and model are resolved at each call, so the
-/// page works before a key is configured and picks up a key set later on the Settings page.
 pub fn rulebook_service(context: Arc<AppContext>) -> Result<Arc<RulebookService>> {
     let db = context.paths.data_dir.join(HISTORY_DB_FILE);
     let store = SqliteRulebookStore::open(&db).with_context(|| format!("cannot open rulebooks in {}", db.display()))?;
     Ok(Arc::new(RulebookService::new(Arc::new(LiveRuleModel { context }), Arc::new(FsRepoReader), Arc::new(store))))
 }
 
-/// `RuleModel` that builds a Claude client from the live settings for every call.
 struct LiveRuleModel {
     context: Arc<AppContext>,
 }
@@ -122,13 +120,11 @@ struct LiveRuleModel {
 impl LiveRuleModel {
     fn model(&self) -> Result<ClaudeRuleModel, ConventionsError> {
         let server = self.context.server();
-        let key = resolve_credential(CredentialName::AnthropicApiKey, self.context.store.as_ref())
-            .map_err(|e| ConventionsError::Model(e.to_string()))?
-            .ok_or_else(|| ConventionsError::Model("no Anthropic API key configured".into()))?;
-        let budget = Budget::new(server.agents.budget_usd_per_review);
-        let client = ClaudeClient::new(key.expose().to_string(), claude_config(&server), budget)
+        let model = self
+            .context
+            .structured_model(&server.agents.model, effort_name(&server))
             .map_err(|e| ConventionsError::Model(e.to_string()))?;
-        Ok(ClaudeRuleModel::new(Arc::new(client)))
+        Ok(ClaudeRuleModel::new(model))
     }
 }
 
@@ -145,9 +141,7 @@ impl RuleModel for LiveRuleModel {
     }
 }
 
-/// The server's agent policies on top of the repository's gate policy.
 pub fn apply_agent_policy(mut policy: GatePolicy, server: &ServerConfig) -> GatePolicy {
-    // Tool findings (import boundaries) are graded by the tools; an older repo config must not mute them.
     if !policy.categories.contains(&Category::Architecture) {
         policy.categories.push(Category::Architecture);
     }
@@ -166,7 +160,7 @@ fn design_reviewer(
     server: &ServerConfig,
     db: &Path,
     store: &dyn CredentialStore,
-    client: Arc<ClaudeClient>,
+    model: Arc<dyn StructuredModel>,
 ) -> Result<Arc<FigmaDesignReviewer>> {
     anyhow::ensure!(
         server.figma.provider == FigmaProvider::Rest,
@@ -180,23 +174,17 @@ fn design_reviewer(
     })?;
     let cache = SqliteDesignCache::open(db)?;
     let checks: Vec<DesignCheckKind> = server.figma.checks.iter().map(|c| check_kind(*c)).collect();
-    let states_llm = server.figma.checks.contains(&DesignCheck::States).then_some(client);
+    let states_llm = server.figma.checks.contains(&DesignCheck::States).then_some(model);
     Ok(Arc::new(FigmaDesignReviewer::new(Arc::new(source), Arc::new(cache), states_llm, checks)))
 }
 
-pub(super) fn claude_config(server: &ServerConfig) -> ClaudeConfig {
-    let effort = match server.agents.effort {
+pub(super) fn effort_name(server: &ServerConfig) -> &'static str {
+    match server.agents.effort {
         AgentEffort::Low => "low",
         AgentEffort::Medium => "medium",
         AgentEffort::High => "high",
         AgentEffort::Xhigh => "xhigh",
         AgentEffort::Max => "max",
-    };
-    ClaudeConfig {
-        base_url: server.llm.base_url.clone(),
-        model: server.agents.model.clone(),
-        effort: effort.into(),
-        ..ClaudeConfig::default()
     }
 }
 
@@ -208,6 +196,10 @@ fn test_settings(server: &ServerConfig) -> TestAgentSettings {
         timeout: Duration::from_secs(tests.timeout_secs),
         max_turns: TEST_AGENT_MAX_TURNS,
     }
+}
+
+fn test_session_timeout(settings: &TestAgentSettings) -> Duration {
+    settings.timeout * (settings.max_repair_rounds + 1) + TEST_AGENT_MODEL_TIME
 }
 
 fn language(language: SettingsLanguage) -> TestLanguage {
@@ -228,7 +220,6 @@ fn check_kind(check: DesignCheck) -> DesignCheckKind {
     }
 }
 
-/// `States` is judged by the model alone and never blocks.
 fn mismatch_kind(check: DesignCheck) -> Option<DesignMismatchKind> {
     match check {
         DesignCheck::Copy => Some(DesignMismatchKind::Copy),
@@ -242,13 +233,15 @@ fn mismatch_kind(check: DesignCheck) -> Option<DesignMismatchKind> {
 mod tests {
     use super::*;
     use crate::cli::snapshot::GitScenarioSnapshots;
+    use crate::llm::FakeModel;
     use crate::sandbox::infrastructure::LocalBackend;
     use crate::settings::infrastructure::FileStore;
 
     fn build(server: &ServerConfig, dir: &Path, store: &FileStore) -> Option<Agents> {
         let snapshots = Arc::new(GitScenarioSnapshots::new(dir.join("work")));
-        build_agents(server, &Secret::new("sk-ant-test"), &dir.join("q.db"), store, Arc::new(LocalBackend), snapshots)
-            .unwrap()
+        let model = Arc::new(FakeModel::new(vec![]));
+        let cli = CliConfig::default();
+        build_agents(server, model, &cli, &dir.join("q.db"), store, Arc::new(LocalBackend), snapshots).unwrap()
     }
 
     #[test]
@@ -279,9 +272,68 @@ mod tests {
         let built = build(&server, dir.path(), &store).expect("agents on by default");
         assert!(built.suite.analyst.is_some() && built.suite.tests.is_some() && built.suite.architecture.is_some());
         assert!(built.suite.design.is_none());
-        // FIGMA_TOKEN may exist in a developer's env; only assert the note when it does not.
         if std::env::var("FIGMA_TOKEN").is_err() && std::env::var("FIGMA_TOKEN_FILE").is_err() {
             assert!(built.notes.iter().any(|n| n.contains("Figma token")));
+        }
+    }
+
+    #[test]
+    fn no_agent_needs_an_api_key_the_test_agent_included() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut server = ServerConfig::default();
+        server.figma.enabled = true;
+        server.figma.checks = vec![DesignCheck::States];
+        let store = FileStore::new(dir.path().join("c.toml"));
+
+        let built = build(&server, dir.path(), &store).expect("agents on by default");
+
+        assert!(built.suite.analyst.is_some() && built.suite.architecture.is_some());
+        assert!(built.suite.tests.is_some(), "the test agent runs on the Claude CLI");
+        assert!(!built.notes.iter().any(|n| n.starts_with("test agent disabled")));
+        assert!(!built.notes.iter().any(|n| n.starts_with("design state check disabled")));
+    }
+
+    #[test]
+    fn an_invalid_cli_setting_disables_the_test_agent_with_a_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileStore::new(dir.path().join("c.toml"));
+        let snapshots = Arc::new(GitScenarioSnapshots::new(dir.path().join("work")));
+        let model = Arc::new(FakeModel::new(vec![]));
+        let cli = CliConfig { effort: "huge".into(), ..CliConfig::default() };
+
+        let built = build_agents(
+            &ServerConfig::default(),
+            model,
+            &cli,
+            &dir.path().join("q.db"),
+            &store,
+            Arc::new(LocalBackend),
+            snapshots,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(built.suite.tests.is_none());
+        assert!(built.notes.iter().any(|n| n.starts_with("test agent disabled") && n.contains("effort")));
+    }
+
+    #[test]
+    fn a_test_session_may_run_every_allowed_test_plus_model_time() {
+        let settings = TestAgentSettings {
+            languages: vec![],
+            max_repair_rounds: 2,
+            timeout: Duration::from_secs(100),
+            max_turns: 30,
+        };
+        assert_eq!(test_session_timeout(&settings), Duration::from_secs(300) + TEST_AGENT_MODEL_TIME);
+    }
+
+    #[test]
+    fn effort_names_follow_the_setting() {
+        let mut server = ServerConfig::default();
+        for (effort, name) in [(AgentEffort::Low, "low"), (AgentEffort::Xhigh, "xhigh"), (AgentEffort::Max, "max")] {
+            server.agents.effort = effort;
+            assert_eq!(effort_name(&server), name);
         }
     }
 

@@ -1,5 +1,3 @@
-//! Thin command handlers: parse input, call one use case / pipeline, present the result.
-
 use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::process::ExitCode;
@@ -21,7 +19,6 @@ use crate::settings::infrastructure::write_template;
 use crate::watch::application::ports::{RepoRegistry, RepoSource};
 use crate::watch::infrastructure::toml_registry::TomlRepoRegistry;
 
-/// Prints progress to stderr (keeps stdout clean for JSON).
 struct StderrProgress {
     enabled: bool,
 }
@@ -123,7 +120,6 @@ pub fn auth(context: &AppContext, action: AuthAction) -> Result<ExitCode> {
 
 fn credential(kind: SecretKind) -> CredentialName {
     match kind {
-        SecretKind::Anthropic => CredentialName::AnthropicApiKey,
         SecretKind::Jira => CredentialName::JiraApiToken,
     }
 }
@@ -131,7 +127,6 @@ fn credential(kind: SecretKind) -> CredentialName {
 fn read_secret(kind: SecretKind) -> Result<String> {
     if std::io::stdin().is_terminal() {
         let prompt = match kind {
-            SecretKind::Anthropic => "Anthropic API key: ",
             SecretKind::Jira => "Jira API token: ",
         };
         return rpassword::prompt_password(prompt).context("could not read the secret");
@@ -150,7 +145,6 @@ mod tests {
 
     #[test]
     fn secret_kinds_map_to_credentials() {
-        assert_eq!(credential(SecretKind::Anthropic), CredentialName::AnthropicApiKey);
         assert_eq!(credential(SecretKind::Jira), CredentialName::JiraApiToken);
     }
 

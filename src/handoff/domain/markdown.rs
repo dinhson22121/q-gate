@@ -1,5 +1,3 @@
-//! Markdown rendering of a [`HandoffDocument`], for a coding agent and a human reader alike.
-
 use std::fmt::Write as _;
 
 use super::document::{CriterionRow, HandoffDocument, Task};

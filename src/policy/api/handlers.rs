@@ -1,5 +1,3 @@
-//! Thin handlers: parse, call one use case, map the result.
-
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
@@ -13,13 +11,13 @@ use crate::policy::application::PolicyError;
 use crate::policy::domain::{ApprovalRequest, RuleApproval};
 
 const POLICY_HTML: &str = include_str!("assets/policy.html");
-const SETTINGS_HINT: &str = " Set the Anthropic API key on the Settings page (/settings).";
+const SETTINGS_HINT: &str =
+    " Check that the Claude CLI is installed and logged in (README, \"Claude authentication\").";
 
 pub(super) fn error_response(status: StatusCode, message: &str) -> Response<Body> {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
-/// Boxed: a `Response` is large and this is the `Err` side of every handler.
 pub(super) struct ApiError(Box<Response<Body>>);
 
 impl ApiError {
@@ -71,7 +69,6 @@ fn parse_id(raw: &str) -> Result<i64, ApiError> {
     raw.parse().map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "invalid proposal id"))
 }
 
-/// The page with this instance's API token in its `qgate-token` meta tag (served `Cache-Control: no-store`).
 pub(super) async fn page(State(state): State<PolicyApiState>) -> Html<String> {
     Html(state.guard.token().inject(POLICY_HTML))
 }

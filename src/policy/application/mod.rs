@@ -1,5 +1,3 @@
-//! Policy use cases and the ports they need. Other contexts use the policy context only through here.
-
 pub mod ports;
 pub mod service;
 

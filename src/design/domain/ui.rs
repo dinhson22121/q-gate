@@ -1,16 +1,11 @@
-//! Which changed files are UI code, and which lines the checks may look at.
-
 use std::collections::HashSet;
 
 use crate::review::domain::change_set::{DiffLine, FileChange};
 
-/// Markup / component files: every check runs on them.
 const UI_EXTENSIONS: [&str; 7] = ["tsx", "jsx", "ts", "js", "vue", "svelte", "html"];
-/// Stylesheets: only the token check runs on them.
 const STYLE_EXTENSIONS: [&str; 4] = ["css", "scss", "sass", "less"];
 const I18N_DIRS: [&str; 4] = ["locales", "i18n", "lang", "translations"];
 const I18N_EXTENSIONS: [&str; 3] = ["json", "yaml", "yml"];
-/// Marker that suppresses design mismatches on its own line and the line below.
 pub const IGNORE_MARKER: &str = "qgate-design-ignore";
 
 fn extension(path: &str) -> String {
@@ -25,7 +20,6 @@ pub fn is_style_file(path: &str) -> bool {
     STYLE_EXTENSIONS.contains(&extension(path).as_str())
 }
 
-/// Test, story and type-declaration files render nothing a user sees.
 fn is_test_or_story(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let name = lower.rsplit('/').next().unwrap_or_default();
@@ -33,14 +27,12 @@ fn is_test_or_story(path: &str) -> bool {
         || lower.split('/').any(|dir| dir == "__tests__")
 }
 
-/// json/yaml files below a `locales`, `i18n`, `lang` or `translations` directory.
 pub fn is_i18n_resource(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let mut dirs = lower.split('/').rev().skip(1);
     I18N_EXTENSIONS.contains(&extension(&lower).as_str()) && dirs.any(|d| I18N_DIRS.contains(&d))
 }
 
-/// Changed, non-binary, non-deleted files with content changes.
 pub fn reviewable(file: &FileChange) -> bool {
     !file.is_binary && file.has_content_change()
 }
@@ -49,7 +41,6 @@ pub fn changed_ui_files(files: &[FileChange]) -> Vec<&FileChange> {
     files.iter().filter(|f| reviewable(f) && is_ui_file(&f.path)).collect()
 }
 
-/// Lines added by the change, with new-file numbers.
 pub fn added_lines(file: &FileChange) -> Vec<(u32, &str)> {
     file.hunks
         .iter()
@@ -61,7 +52,6 @@ pub fn added_lines(file: &FileChange) -> Vec<(u32, &str)> {
         .collect()
 }
 
-/// Line numbers suppressed by `qgate-design-ignore` (the marker line and the one after it).
 pub fn ignored_lines(file: &FileChange) -> HashSet<u32> {
     file.new_lines()
         .into_iter()

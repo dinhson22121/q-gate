@@ -1,15 +1,10 @@
-//! Classifies one run of the generated test from facts only (exit code, timeout, output).
-
 use super::language::TestLanguage;
 
-/// What the process runner observed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RawRun {
     pub exit_code: Option<i32>,
-    /// Interleaved stdout/stderr tail.
     pub output: String,
     pub timed_out: bool,
-    /// The program could not be started; `true` in `not_found` when it does not exist.
     pub spawn_error: Option<String>,
     pub not_found: bool,
 }
@@ -17,19 +12,14 @@ pub struct RawRun {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunClass {
     Passed,
-    /// The test ran and an assertion failed.
     FailedAssertion,
-    /// Compile or setup error, or a failure without an assertion: the test must be fixed.
     NeedsRepair,
     TimedOut,
-    /// The language toolchain (or test runner) is not installed.
     ToolchainMissing,
-    /// The command could not be started for another reason (e.g. wrapper not executable).
     SetupFailed,
 }
 
 impl RunClass {
-    /// Further runs cannot change the outcome.
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::ToolchainMissing | Self::SetupFailed)
     }
@@ -67,8 +57,6 @@ pub fn classify(language: TestLanguage, run: &RawRun) -> RunClass {
     if TOOLCHAIN_MARKERS.iter().any(|m| output.contains(m)) {
         return RunClass::ToolchainMissing;
     }
-    // Assertion markers are specific enough that no compile/setup failure produces them; anything
-    // else (compile error, import error, panic without assertion, no test found) needs repair.
     if has_assertion_failure(language, output) { RunClass::FailedAssertion } else { RunClass::NeedsRepair }
 }
 
@@ -83,7 +71,6 @@ fn has_assertion_failure(language: TestLanguage, output: &str) -> bool {
     }
 }
 
-/// `    qgate_s1_test.go:12: message` as printed by `t.Errorf` / `t.Fatalf`.
 fn is_go_test_log_line(line: &str) -> bool {
     line.split_once("_test.go:").is_some_and(|(_, rest)| {
         let digits = rest.chars().take_while(char::is_ascii_digit).count();
@@ -91,7 +78,6 @@ fn is_go_test_log_line(line: &str) -> bool {
     })
 }
 
-/// `E       assert 2 == 3` as printed by pytest's assertion rewriting.
 fn is_pytest_assert_line(line: &str) -> bool {
     line.strip_prefix('E')
         .is_some_and(|rest| rest.starts_with(char::is_whitespace) && rest.trim_start().starts_with("assert "))

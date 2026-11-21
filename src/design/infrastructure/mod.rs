@@ -1,7 +1,3 @@
-//! Adapters of the design context: Figma REST source, SQLite cache, i18n file reader, Claude states judge
-//! and the review context's `DesignReviewer`.
-
-mod base64;
 mod claude_states;
 pub(crate) mod figma_parse;
 mod figma_rest;

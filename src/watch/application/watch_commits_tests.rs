@@ -1,5 +1,3 @@
-//! `WatchCommits` driven through fake ports, in the push-triggered model.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,10 +14,8 @@ use super::ports::{
 use super::watch_commits::{WatchCommits, WatchConfig, WatchReport};
 
 const POLL: Duration = Duration::from_millis(10);
-/// Long enough for several poll cycles.
 const SETTLE: Duration = Duration::from_millis(80);
 const WAIT_LIMIT: Duration = Duration::from_secs(5);
-/// Sha of the seeded `main` branch, used as the base of every reviewed feature branch.
 const MAIN_SHA: &str = "main0";
 
 fn unix_now() -> i64 {
@@ -33,7 +29,6 @@ struct InspectorState {
     merge_bases: HashMap<(PathBuf, String, String), Option<String>>,
     fail_refs: HashSet<PathBuf>,
     fail_reflog: HashSet<PathBuf>,
-    /// `.qgate.toml` `watch.base_branch` per `(repo, commit)` it is read at.
     repo_bases: HashMap<(PathBuf, String), String>,
 }
 
@@ -50,7 +45,6 @@ fn base_key(repo: &Path, a: &str, b: &str) -> (PathBuf, String, String) {
 }
 
 impl FakeInspector {
-    /// Records a push of `sha` to `branch` (reflog subject `update by push`, just now).
     fn push(&self, repo: &str, branch: &str, sha: &str) {
         self.push_with(repo, branch, sha, "update by push", 0);
     }
@@ -65,7 +59,6 @@ impl FakeInspector {
         );
     }
 
-    /// Sets a ref with no reflog entry (as if `core.logAllRefUpdates` were off).
     fn set_ref_no_reflog(&self, repo: &str, branch: &str, sha: &str) {
         let mut state = self.0.lock().unwrap();
         let path = PathBuf::from(repo);
@@ -73,7 +66,6 @@ impl FakeInspector {
         state.reflog.remove(&(path, branch.to_owned()));
     }
 
-    /// Pushes `sha` to `branch` and records its merge base with `main` as `base`.
     fn push_feature(&self, repo: &str, branch: &str, sha: &str, base: &str) {
         self.push(repo, branch, sha);
         self.set_merge_base(repo, MAIN_SHA, sha, Some(base));
@@ -177,7 +169,6 @@ impl FakeReviewer {
         self.calls.lock().unwrap().clone()
     }
 
-    /// `(branch, base, sha)` of every reviewed push.
     fn reviews(&self) -> Vec<(Option<String>, Option<String>, String)> {
         self.calls.lock().unwrap().iter().map(|e| (e.branch.clone(), e.base.clone(), e.sha.clone())).collect()
     }
@@ -299,8 +290,6 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// Each repo starts with a `main` branch already pushed, so it is a known repo whose base
-    /// branch resolves to `main`.
     fn new(reviewer: FakeReviewer, repos: &[&str]) -> Self {
         let inspector = FakeInspector::default();
         for repo in repos {
@@ -313,7 +302,6 @@ impl Fixture {
         start(&self.inspector, &self.reviewer, &self.notifier, &self.source, config)
     }
 
-    /// Starts the watcher and waits for the initial baseline poll to settle.
     async fn started(&self) -> Running {
         let running = self.start(config());
         settle().await;
@@ -353,7 +341,6 @@ async fn a_fetch_does_not_trigger_a_review() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     let running = fx.started().await;
 
-    // A remote-tracking ref that moved because of a fetch, not a push.
     fx.inspector.push_with("/a", "feature", "c1", "fetch", 0);
     fx.inspector.set_merge_base("/a", MAIN_SHA, "c1", Some("base1"));
     settle().await;
@@ -378,7 +365,6 @@ async fn pushing_several_branches_at_once_reviews_one_per_branch() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     let running = fx.started().await;
 
-    // `git push --all`: two refs move in one poll.
     fx.inspector.push_feature("/a", "feat-1", "c1", "base1");
     fx.inspector.push_feature("/a", "feat-2", "c2", "base2");
     wait_until("both reviews", || fx.notifier.titles().len() == 2).await;
@@ -411,7 +397,6 @@ async fn re_pushing_the_same_sha_is_deduplicated() {
 
     fx.inspector.push_feature("/a", "feature", "c1", "base1");
     wait_until("first review", || fx.notifier.titles().len() == 1).await;
-    // Delete and re-push the very same sha: the ref reappears but the push is already known.
     fx.inspector.remove_branch("/a", "feature");
     settle().await;
     fx.inspector.push_feature("/a", "feature", "c1", "base1");
@@ -443,7 +428,6 @@ async fn no_merge_base_reviews_the_whole_branch_with_a_note() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     let running = fx.started().await;
 
-    // Push with no configured merge base (orphan/unrelated history).
     fx.inspector.push("/a", "feature", "c1");
     wait_until("review", || fx.notifier.titles().len() == 1).await;
 
@@ -458,12 +442,10 @@ async fn an_empty_branch_after_rebase_is_a_no_op() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     let running = fx.started().await;
 
-    // Branch tip equals its merge base with main: nothing new to review.
     fx.inspector.push_feature("/a", "feature", "c1", "c1");
     settle().await;
     assert!(fx.reviewer.calls().is_empty());
 
-    // A later real push of the branch is still reviewed.
     fx.inspector.push_feature("/a", "feature", "c2", "base1");
     wait_until("review", || fx.notifier.titles().len() == 1).await;
     assert_eq!(fx.reviewer.reviews(), vec![review("feature", Some("base1"), "c2")]);
@@ -519,7 +501,6 @@ async fn a_configured_base_branch_is_skipped_and_used_as_base() {
 async fn a_repo_base_branch_wins_over_the_server_setting_and_the_default() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     fx.inspector.push("/a", "develop", "dev1");
-    // Declared in the repo's config at the tip of the server-configured base ("release"), not at the push.
     fx.inspector.push("/a", "release", "rel1");
     fx.inspector.0.lock().unwrap().repo_bases.insert((PathBuf::from("/a"), "rel1".into()), "develop".into());
     let running = fx.start(WatchConfig { base_branch: "release".into(), ..config() });
@@ -551,7 +532,6 @@ async fn without_a_repo_base_branch_the_server_setting_then_the_default_apply() 
 async fn a_pushed_commit_cannot_choose_its_own_base_branch() {
     let fx = Fixture::new(FakeReviewer::new(), &["/a"]);
     let running = fx.started().await;
-    // The override is only visible at the pushed commit "c1": it must not be consulted.
     fx.inspector.0.lock().unwrap().repo_bases.insert((PathBuf::from("/a"), "c1".into()), "feature".into());
     fx.inspector.push("/a", "feature", "c1");
     fx.inspector.set_merge_base("/a", MAIN_SHA, "c1", Some("mainbase"));
@@ -570,7 +550,6 @@ async fn an_old_push_is_skipped() {
     settle().await;
     assert!(fx.reviewer.calls().is_empty(), "push older than max_commit_age");
 
-    // The skip is definitive: a newer push is still reviewed.
     fx.inspector.push_feature("/a", "feature", "c1", "base1");
     wait_until("review", || fx.notifier.titles().len() == 1).await;
     assert_eq!(fx.reviewer.calls(), vec!["c1"]);

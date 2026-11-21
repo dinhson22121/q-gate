@@ -1,34 +1,16 @@
-//! Which tickets a range of commits implements, as declared by its commit messages.
-//!
-//! A message *implements* the keys at the start of its subject line (`SHOP-7 SHOP-9: …`,
-//! `[SHOP-7][SHOP-9] …`, `feat(SHOP-7): …`) and the keys of its `Jira:` / `Implements:` trailers.
-//! A message that declares none implements the branch's key. Any other uppercase key in the message
-//! (body mentions, `Refs:` trailers) is only a *reference*.
-
 use super::ticket_key::{TicketKey, branch_key, exact_key, find_keys};
 
-/// At most this many tickets are checked for one review.
 pub const MAX_IMPLEMENTED_KEYS: usize = 5;
-/// Trailer names (lowercase) whose keys are implemented by the commit.
 const IMPLEMENTS_TRAILERS: &[&str] = &["jira", "implements"];
-/// Characters allowed between leading keys of a subject line.
 const LEADING_SEPARATORS: &[char] = &[' ', '\t', ',', ';', ':', '|', '&', '+', '/'];
 
-/// Keys found in the commit messages of a reviewed range.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ImplementedKeys {
-    /// Tickets whose acceptance criteria the change must satisfy, deduplicated, at most
-    /// [`MAX_IMPLEMENTED_KEYS`], in order of first appearance.
     pub implements: Vec<TicketKey>,
-    /// Tickets only mentioned (informational), excluding implemented ones.
     pub references: Vec<TicketKey>,
-    /// Whether more than [`MAX_IMPLEMENTED_KEYS`] implemented keys were found.
     pub capped: bool,
 }
 
-/// Collects implemented and referenced keys over all `messages` of a range (in the given order).
-/// `allowed_projects` restricts the projects as in
-/// [`extract_ticket_key`](super::ticket_key::extract_ticket_key).
 pub fn extract_implemented_keys(
     branch: Option<&str>,
     messages: &[String],
@@ -54,7 +36,6 @@ pub fn extract_implemented_keys(
     ImplementedKeys { implements, references, capped }
 }
 
-/// Keys the message declares: leading subject keys, then `Jira:` / `Implements:` trailer keys.
 fn declared_keys(message: &str, allowed_projects: &[String]) -> Vec<TicketKey> {
     let mut lines = message.lines().skip_while(|line| line.trim().is_empty());
     let subject = lines.next().unwrap_or_default();
@@ -68,8 +49,6 @@ fn declared_keys(message: &str, allowed_projects: &[String]) -> Vec<TicketKey> {
     keys
 }
 
-/// Keys at the very start of a subject line, after an optional conventional-commit type whose
-/// scope may itself hold keys (`feat(SHOP-7): …`). Bracketed tags that are not keys (`[WIP]`) are skipped.
 fn leading_keys(subject: &str, allowed_projects: &[String]) -> Vec<TicketKey> {
     let (mut keys, mut rest) = match conventional_prefix(subject) {
         Some((scope, rest)) => (find_keys(scope, false, allowed_projects), rest),
@@ -93,7 +72,6 @@ fn leading_keys(subject: &str, allowed_projects: &[String]) -> Vec<TicketKey> {
     }
 }
 
-/// `type(scope)!: rest` → (`scope`, `rest`); `type: rest` → ("", `rest`).
 fn conventional_prefix(subject: &str) -> Option<(&str, &str)> {
     let type_end = subject.find(|c: char| !c.is_ascii_alphabetic()).filter(|&end| end > 0)?;
     let after_type = &subject[type_end..];
@@ -105,7 +83,6 @@ fn conventional_prefix(subject: &str) -> Option<(&str, &str)> {
     Some((scope, rest))
 }
 
-/// `[inner] rest` or `(inner) rest`.
 fn bracketed(text: &str) -> Option<(&str, &str)> {
     let close = match text.chars().next()? {
         '[' => ']',

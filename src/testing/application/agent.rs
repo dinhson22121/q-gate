@@ -1,5 +1,3 @@
-//! Use case: test one scenario in the review's writable snapshot and decide the verdict.
-
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,19 +16,14 @@ use super::handler::{HandlerLimits, ScenarioToolHandler, tool_specs};
 use super::ports::{ScenarioSnapshots, TestRunner, ToolLoop, Workspace};
 use super::prompt::{SYSTEM_PROMPT, user_prompt};
 
-/// Settings of the test agent (mapped by the coordinator from the server's `TestAgentConfig`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestAgentSettings {
     pub languages: Vec<TestLanguage>,
-    /// Times the agent may fix its own test after a compile/setup error.
     pub max_repair_rounds: u32,
-    /// Timeout of one test run.
     pub timeout: Duration,
-    /// Requests sent to Claude per scenario.
     pub max_turns: u32,
 }
 
-/// [`TestAgent`] over ports: `L` drives the model, `R` runs the test, `W` is the snapshot.
 pub struct ScenarioTestAgent<L, R, W> {
     driver: Arc<L>,
     runner: R,
@@ -49,7 +42,6 @@ impl<L: ToolLoop, R: TestRunner, W: Workspace> ScenarioTestAgent<L, R, W> {
         Self { driver, runner, snapshots, settings, workspace: PhantomData }
     }
 
-    /// Never fails: every problem becomes an `Inconclusive` result with the reason.
     pub async fn run_scenario(&self, input: &AgentInput<'_>, scenario: &TestScenario) -> TestResult {
         let id = scenario.id.as_str();
         if input.snapshot_root.is_none() {
@@ -61,7 +53,6 @@ impl<L: ToolLoop, R: TestRunner, W: Workspace> ScenarioTestAgent<L, R, W> {
             Err(e) => return inconclusive(id, "", e.to_string()),
         };
         let language = choice.language;
-        // Kept until the verdict is decided, then deleted.
         let snapshot = match self.snapshots.create(input.repo_root, input.commit).await {
             Ok(snapshot) => snapshot,
             Err(e) => {
@@ -72,7 +63,6 @@ impl<L: ToolLoop, R: TestRunner, W: Workspace> ScenarioTestAgent<L, R, W> {
             Ok(workspace) => workspace,
             Err(e) => return inconclusive(id, language.as_str(), format!("cannot open the snapshot: {e}")),
         };
-        // Deleted files are not in the snapshot.
         let files: Vec<String> = choice.files.into_iter().filter(|f| workspace.has_path(f)).collect();
         let targets = test_targets(language, &files, &ScenarioName::from_id(id), &workspace);
         if targets.is_empty() {

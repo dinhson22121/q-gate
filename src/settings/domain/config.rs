@@ -1,17 +1,12 @@
-//! Repository configuration (`.qgate.toml`): model, gate policy, review scope, checks, Jira, watch.
-
 use serde::{Deserialize, Serialize};
 
 use super::jira::{JiraConfig, JiraOverride, require_command};
+use super::legacy::LegacyField;
 use super::server::require_ref_token;
 use super::validation::{ValidationError, ValidationResult, require_non_empty, require_range};
 use crate::review::application::{Category, CheckSpec, Confidence, GatePolicy, Severity};
 
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
-const DEFAULT_MAX_TOKENS: u32 = 16_000;
-const MIN_MAX_TOKENS: u32 = 1024;
-/// Upper bound accepted for `max_tokens`; prevents typos like an extra zero burning budget.
-const MAX_MAX_TOKENS: u32 = 1_000_000;
 const DEFAULT_CONCURRENCY: usize = 4;
 const MIN_CONCURRENCY: usize = 1;
 const MAX_CONCURRENCY: usize = 16;
@@ -22,7 +17,6 @@ const DEFAULT_CHECK_TIMEOUT_SECS: u64 = 600;
 const MAX_CHECK_TIMEOUT_SECS: u64 = 6 * 60 * 60;
 const DEFAULT_GUIDELINE_FILES: [&str; 4] = ["CLAUDE.md", "AGENTS.md", "CONTRIBUTING.md", ".qgate/guidelines.md"];
 
-/// Paths never worth reviewing: lockfiles, vendored and build output, minified and generated code.
 pub const BUILTIN_IGNORE_PATTERNS: &[&str] = &[
     "**/package-lock.json",
     "**/npm-shrinkwrap.json",
@@ -59,7 +53,6 @@ pub const BUILTIN_IGNORE_PATTERNS: &[&str] = &[
     "**/*.snap",
 ];
 
-/// Reasoning effort requested from the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
@@ -83,18 +76,16 @@ impl Effort {
     }
 }
 
-/// Repository-level `[llm]` section. The endpoint (`base_url`) is deliberately absent: it decides where
-/// the API key and the code are sent, so only the server config may set it (see `ServerLlmConfig`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmConfig {
     pub model: String,
     pub effort: Effort,
-    pub max_tokens: u32,
-    /// Retry with fallback models when the primary one is overloaded.
-    pub fallbacks: bool,
-    /// Parallel review requests.
     pub concurrency: usize,
+    #[serde(default, skip_serializing, rename = "max_tokens")]
+    legacy_max_tokens: LegacyField,
+    #[serde(default, skip_serializing, rename = "fallbacks")]
+    legacy_fallbacks: LegacyField,
 }
 
 impl Default for LlmConfig {
@@ -102,9 +93,9 @@ impl Default for LlmConfig {
         Self {
             model: DEFAULT_MODEL.into(),
             effort: Effort::default(),
-            max_tokens: DEFAULT_MAX_TOKENS,
-            fallbacks: true,
             concurrency: DEFAULT_CONCURRENCY,
+            legacy_max_tokens: LegacyField,
+            legacy_fallbacks: LegacyField,
         }
     }
 }
@@ -112,12 +103,10 @@ impl Default for LlmConfig {
 impl LlmConfig {
     fn validate(&self) -> ValidationResult {
         require_non_empty("llm.model", &self.model)?;
-        require_range("llm.max_tokens", self.max_tokens, MIN_MAX_TOKENS, MAX_MAX_TOKENS)?;
         require_range("llm.concurrency", self.concurrency, MIN_CONCURRENCY, MAX_CONCURRENCY)
     }
 }
 
-/// What blocks the gate (mirrors [`GatePolicy`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GateConfig {
@@ -125,7 +114,6 @@ pub struct GateConfig {
     pub categories: Vec<Category>,
     pub min_confidence: Confidence,
     pub fail_on_unmet_criteria: bool,
-    /// Fail when some files could not be reviewed (e.g. Claude unavailable or refusing).
     pub fail_on_incomplete: bool,
 }
 
@@ -142,7 +130,6 @@ impl Default for GateConfig {
     }
 }
 
-/// What is shown in reports (non-blocking findings included).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReportConfig {
@@ -159,13 +146,9 @@ impl Default for ReportConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReviewConfig {
-    /// Extra glob patterns to skip, added to [`BUILTIN_IGNORE_PATTERNS`].
     pub ignore: Vec<String>,
-    /// Inline guidelines appended to the guideline files.
     pub guidelines: String,
-    /// Repository files whose content is passed to the reviewer as guidelines.
     pub guideline_files: Vec<String>,
-    /// Files larger than this are skipped.
     pub max_file_kb: u64,
 }
 
@@ -190,7 +173,6 @@ impl ReviewConfig {
     }
 }
 
-/// A deterministic check (`[[checks]]`), executed without a shell.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CheckConfig {
@@ -228,13 +210,8 @@ impl CheckConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct WatchConfig {
     pub enabled: bool,
-    /// Review this branch when it is pushed. The old key `review_on_commit` is still accepted
-    /// (the trigger is now a push, not a local commit).
     #[serde(alias = "review_on_commit")]
     pub review_on_push: bool,
-    /// Branch this repository's pushes are compared against (merge-base); overrides the server's
-    /// `watch.base_branch`. Empty = use the server setting. The watcher reads it from the repository's trusted
-    /// base branch, never from the pushed commit, so a branch cannot choose its own base.
     pub base_branch: String,
 }
 
@@ -250,7 +227,6 @@ impl WatchConfig {
     }
 }
 
-/// Contents of a repository's `.qgate.toml`. Every section is optional.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -259,13 +235,11 @@ pub struct Config {
     pub report: ReportConfig,
     pub review: ReviewConfig,
     pub checks: Vec<CheckConfig>,
-    /// Per-repository Jira settings; unset fields fall back to the server defaults.
     pub jira: JiraOverride,
     pub watch: WatchConfig,
 }
 
 impl Config {
-    /// Rejects out-of-range or malformed values with the offending field's path.
     pub fn validate(&self) -> ValidationResult {
         self.llm.validate()?;
         self.review.validate()?;
@@ -296,7 +270,6 @@ impl Config {
             min_confidence: self.gate.min_confidence,
             fail_on_unmet_criteria: self.gate.fail_on_unmet_criteria,
             fail_on_incomplete: self.gate.fail_on_incomplete,
-            // Agent policies are server-level; the CLI fills them from `ServerConfig`.
             ..GatePolicy::default()
         }
     }
@@ -305,7 +278,6 @@ impl Config {
         self.checks.iter().map(CheckConfig::to_spec).collect()
     }
 
-    /// Built-in ignore patterns followed by the repository's own, without duplicates.
     pub fn ignore_patterns(&self) -> Vec<String> {
         let mut patterns: Vec<String> = BUILTIN_IGNORE_PATTERNS.iter().map(|p| p.to_string()).collect();
         for pattern in &self.review.ignore {
@@ -320,7 +292,6 @@ impl Config {
         usize::try_from(self.review.max_file_kb.saturating_mul(BYTES_PER_KB)).unwrap_or(usize::MAX)
     }
 
-    /// Effective Jira settings: this repository's overrides on top of `defaults` (the server config).
     pub fn jira(&self, defaults: &JiraConfig) -> JiraConfig {
         self.jira.apply_to(defaults)
     }
@@ -340,7 +311,6 @@ mod tests {
         assert!(config.validate().is_ok());
         assert_eq!(config.llm.model, "claude-opus-5-5");
         assert_eq!(config.llm.effort, Effort::High);
-        assert_eq!(config.llm.max_tokens, 16_000);
         assert_eq!(config.report.min_severity, Severity::Minor);
         assert_eq!(config.review.guideline_files.len(), 4);
         assert!(config.watch.enabled && config.watch.review_on_push);
@@ -348,10 +318,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_api_client_fields_are_tolerated_and_not_written_back() {
+        let config: Config = toml::from_str("[llm]\nmax_tokens = 16000\nfallbacks = true\n").unwrap();
+        assert_eq!(config.llm.model, LlmConfig::default().model);
+        let written = toml::to_string(&config).unwrap();
+        assert!(!written.contains("max_tokens") && !written.contains("fallbacks"), "{written}");
+    }
+
+    #[test]
     fn llm_values_are_range_checked() {
         let cases = [
             (LlmConfig { model: " ".into(), ..LlmConfig::default() }, "llm.model"),
-            (LlmConfig { max_tokens: 1023, ..LlmConfig::default() }, "llm.max_tokens"),
             (LlmConfig { concurrency: 0, ..LlmConfig::default() }, "llm.concurrency"),
             (LlmConfig { concurrency: 17, ..LlmConfig::default() }, "llm.concurrency"),
         ];

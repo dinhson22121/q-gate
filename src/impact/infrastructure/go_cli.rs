@@ -1,5 +1,3 @@
-//! The [`GoToolchain`] adapter: every `go` invocation goes through the sandbox [`ExecBackend`].
-
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -12,17 +10,14 @@ use crate::impact::application::{GoToolchain, ImpactError, TestSelection};
 use crate::impact::domain::{GoPackage, TestRun};
 use crate::sandbox::application::{ExecBackend, ExecRequest, ExecResult, FailureKind, MAX_OUTPUT_BYTES};
 
-/// Share of the output cap above which the tail is assumed to have lost earlier events.
 const TRUNCATION_PERCENT: usize = 98;
 const ERROR_SNIPPET_CHARS: usize = 400;
 
 #[derive(Debug, Clone, Copy)]
 pub struct GoLimits {
     pub list_timeout_ms: u64,
-    /// Per `go test` command (one batch of packages).
     pub test_timeout_ms: u64,
     pub max_output_bytes: usize,
-    /// Packages per `go test` command, so one command's output stays under the cap.
     pub batch_size: usize,
 }
 
@@ -135,7 +130,6 @@ impl GoToolchain for GoCli {
     }
 }
 
-/// `^(TestA|TestB)$`, with names regex-escaped (Go test names are identifiers, but stay safe).
 fn run_pattern(tests: &[String]) -> String {
     let names: Vec<String> = tests.iter().map(|t| regex_escape(t)).collect();
     format!("^({})$", names.join("|"))
@@ -162,7 +156,6 @@ mod tests {
     use super::*;
     use crate::impact::domain::TestOutcome;
 
-    /// Replays results in order and records the requests.
     struct Scripted {
         results: Mutex<Vec<ExecResult>>,
         requests: Mutex<Vec<ExecRequest>>,
@@ -237,7 +230,6 @@ mod tests {
         let selections =
             [selection("a", &[]), selection("b", &[]), selection("c", &[]), selection("d", &["TestX", "TestY"])];
         let run = go.run_tests(Path::new("/s"), &selections).await.unwrap();
-        // `a` and `b` share a batch, `c` is alone, `d` is filtered.
         let requests = backend.requests.lock().unwrap();
         assert_eq!(requests[0].argv[1..], ["test", "-json", "-count=1", "a", "b"]);
         assert_eq!(requests[1].argv[4..], ["c"]);
@@ -277,7 +269,6 @@ mod tests {
     }
 }
 
-/// End to end with the real `go` through the local backend; skipped when `go` is not installed.
 #[cfg(test)]
 mod real_go_tests {
     use super::*;

@@ -26,19 +26,16 @@ impl DiffLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
     pub header: String,
-    /// First line number of this hunk in the new file version.
     pub new_start: u32,
     pub lines: Vec<DiffLine>,
 }
 
-/// One file touched by a change, as seen after the change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChange {
     pub path: String,
     pub status: ChangeStatus,
     pub is_binary: bool,
     pub hunks: Vec<Hunk>,
-    /// Full content of the new file version, when it could be read.
     pub new_content: Option<String>,
 }
 
@@ -51,7 +48,6 @@ impl FileChange {
         self.hunks.iter().any(|h| !h.lines.is_empty())
     }
 
-    /// New-file line numbers where code was added, plus the positions where code was removed.
     pub fn changed_positions(&self) -> Vec<u32> {
         let mut positions = Vec::new();
         for hunk in &self.hunks {
@@ -72,7 +68,6 @@ impl FileChange {
         positions
     }
 
-    /// Removed lines whose removal point (in new-file numbering) is within `window` of `line`.
     pub fn removed_lines_near(&self, line: u32, window: u32) -> Vec<&str> {
         let mut removed = Vec::new();
         for hunk in &self.hunks {
@@ -92,8 +87,6 @@ impl FileChange {
         self.changed_positions().iter().any(|p| p.abs_diff(line) <= tolerance)
     }
 
-    /// Lines of the new file version with 1-based numbers.
-    /// Falls back to the diff's added and context lines when full content is unavailable.
     pub fn new_lines(&self) -> Vec<(u32, &str)> {
         match &self.new_content {
             Some(content) => (1u32..).zip(content.lines()).collect(),
@@ -111,7 +104,6 @@ impl FileChange {
         }
     }
 
-    /// Rough size in bytes of what a reviewer has to read for this file.
     pub fn review_weight(&self) -> usize {
         let diff: usize = self.hunks.iter().flat_map(|h| &h.lines).map(|l| l.text().len() + 1).sum();
         diff + self.new_content.as_ref().map_or(0, String::len)

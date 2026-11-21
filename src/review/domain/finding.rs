@@ -35,7 +35,6 @@ pub enum Category {
     ErrorHandling,
     Maintainability,
     Testing,
-    /// Deterministic architecture-rule violations (import boundaries); never asked of the model.
     Architecture,
 }
 
@@ -52,7 +51,6 @@ impl Category {
         Self::Architecture,
     ];
 
-    /// Categories the model may assign; `Architecture` belongs to the deterministic tools.
     pub const LLM: [Self; 8] = [
         Self::Security,
         Self::Correctness,
@@ -120,19 +118,13 @@ pub enum FindingSource {
 const MAX_RULE_CHARS: usize = 300;
 const MAX_SCOPE_CHARS: usize = 120;
 
-/// A general, project-level rule that would have prevented a finding's class of defect; the developer's coding
-/// agent follows it from then on. Not specific to the reported line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreventionRule {
-    /// Imperative, one line, e.g. "Always close sql.Rows with defer rows.Close() right after Query succeeds".
     pub text: String,
-    /// Glob of the files the rule applies to (e.g. `**/*.go`); `None` for every file.
     pub scope: Option<String>,
 }
 
 impl PreventionRule {
-    /// Normalises model output: one line, capped length; `None` when there is no rule. A scope that is not a
-    /// plain glob is dropped (the rule then applies everywhere) rather than trusted.
     pub fn new(text: &str, scope: &str) -> Option<Self> {
         let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_RULE_CHARS).collect();
         if text.is_empty() {
@@ -146,7 +138,6 @@ impl PreventionRule {
     }
 }
 
-/// A problem reported against a specific line of the new code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
     pub file: String,
@@ -156,10 +147,8 @@ pub struct Finding {
     pub confidence: Confidence,
     pub title: String,
     pub explanation: String,
-    /// Verbatim code the finding is about; used to verify the finding against the real file.
     pub evidence: String,
     pub suggestion: Option<String>,
-    /// Rule for the developer's coding agent; only model findings carry one.
     pub prevention_rule: Option<PreventionRule>,
     pub source: FindingSource,
 }

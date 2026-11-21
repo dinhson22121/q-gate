@@ -8,12 +8,9 @@ use crate::quality::domain::parsers::golangci;
 use crate::quality::domain::{ImportBoundary, Language, QualityTool};
 
 const GO_MOD: &str = "go.mod";
-/// Written into the snapshot (a throw-away copy) and removed after the run; the repository's own golangci config
-/// is deliberately not used, so a change cannot weaken the boundaries.
 const CONFIG_FILE: &str = ".qgate-depguard.yml";
 const MODULE_PLACEHOLDER: &str = "{module}";
 
-/// Go import boundaries (layer rules) through golangci-lint's depguard linter, and only that linter.
 pub struct DepguardCheck {
     runner: ToolRunner,
     binary: Option<PathBuf>,
@@ -85,7 +82,6 @@ impl QualityCheck for DepguardCheck {
     }
 }
 
-/// `module <path>` of a go.mod.
 fn module_path(go_mod: &str) -> Option<String> {
     go_mod.lines().find_map(|line| {
         let rest = line.trim().strip_prefix("module")?;
@@ -94,8 +90,6 @@ fn module_path(go_mod: &str) -> Option<String> {
     })
 }
 
-/// golangci-lint v2 config with depguard as the only linter. Every string is emitted as a JSON string, which is a
-/// valid YAML scalar, so rule text cannot break out of its value.
 fn render_config(boundaries: &[ImportBoundary], module: Option<&str>) -> String {
     let quote = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string());
     let mut yaml = String::from(
@@ -123,12 +117,10 @@ fn render_config(boundaries: &[ImportBoundary], module: Option<&str>) -> String 
     yaml
 }
 
-/// depguard matches `files` against absolute paths.
 fn absolute_glob(glob: &str) -> String {
     if glob.starts_with("**") || glob.starts_with('/') { glob.to_string() } else { format!("**/{glob}") }
 }
 
-/// `{module}` becomes the module path; `None` when it is needed but unknown.
 fn resolve(pkg: &str, module: Option<&str>) -> Option<String> {
     if !pkg.contains(MODULE_PLACEHOLDER) {
         return Some(pkg.to_string());

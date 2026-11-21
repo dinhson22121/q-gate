@@ -1,6 +1,3 @@
-//! The review hand-off document: what a coding agent (or a developer) needs to continue after a scan.
-//! Built from the review report; deterministic for the same input.
-
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -12,24 +9,17 @@ const SHORT_SHA_LEN: usize = 7;
 const DATE_FORMAT: &str = "%Y-%m-%d %H:%M:%S UTC";
 const DESCRIPTION_SUMMARY_CHARS: usize = 400;
 
-/// Facts about the run that are not in the report itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunMeta {
-    /// Repository name, e.g. "shop-api".
     pub repo: String,
-    /// `None` for a detached HEAD.
     pub branch: Option<String>,
-    /// Full commit sha.
     pub commit: String,
     pub ticket_keys: Vec<String>,
     pub reviewed_at: DateTime<Utc>,
-    /// History id of the run, when it has been stored.
     pub run_id: Option<i64>,
-    /// Dashboard base URL, e.g. "http://localhost:8080".
     pub dashboard_url: Option<String>,
 }
 
-/// Which non-finding results block, mirroring the gate policy the review used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockingRules {
     pub unmet_criteria: bool,
@@ -55,11 +45,9 @@ impl Default for BlockingRules {
     }
 }
 
-/// Everything the document is built from.
 #[derive(Debug, Clone)]
 pub struct HandoffInput<'a> {
     pub meta: RunMeta,
-    /// The review report, including the ticket-agent results and ticket context when present.
     pub report: &'a ReviewReport,
     pub rules: BlockingRules,
 }
@@ -79,11 +67,8 @@ pub struct DocumentMeta {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Verdict {
     pub passed: bool,
-    /// "PASSED" or "FAILED".
     pub label: &'static str,
-    /// Some files could not be reviewed.
     pub incomplete: bool,
-    /// Why the gate failed (empty when it passed).
     pub reasons: Vec<String>,
 }
 
@@ -114,12 +99,10 @@ pub struct CodeBlock {
     pub content: String,
 }
 
-/// One self-contained thing to fix.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Task {
     pub kind: TaskKind,
     pub title: String,
-    /// `path:line`, when the task points at code.
     pub location: Option<String>,
     pub problem: String,
     pub facts: Vec<Fact>,
@@ -134,7 +117,6 @@ pub struct CriterionRow {
     pub text: String,
     pub status: CriterionStatus,
     pub explanation: String,
-    /// `path:line` of the verified evidence.
     pub evidence: Vec<String>,
 }
 
@@ -148,14 +130,10 @@ pub struct TicketInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct HandoffContext {
     pub tickets: Vec<TicketInfo>,
-    /// Suggested by the ticket analyst; never required.
     pub implicit_requirements: Vec<String>,
     pub design_links: Vec<String>,
-    /// Start of the ticket description (whitespace collapsed, truncated).
     pub description: Option<String>,
-    /// Agents that were skipped or failed, with the reason.
     pub notes: Vec<String>,
-    /// Files that were not reviewed, with the reason.
     pub skipped_files: Vec<String>,
 }
 
@@ -167,10 +145,7 @@ pub struct HandoffDocument {
     pub warnings: Vec<Task>,
     pub criteria: Vec<CriterionRow>,
     pub context: HandoffContext,
-    /// Prevention rules of this review that the repository's rules file did not have yet (all of this review's
-    /// rules until the export has merged them).
     pub rules_to_add: Vec<RuleCandidate>,
-    /// Path of the per-repo rules file the rules were merged into, when that succeeded.
     pub rules_file: Option<String>,
 }
 
@@ -189,7 +164,6 @@ impl HandoffDocument {
         }
     }
 
-    /// The ticket key to reference when committing (first known key).
     pub fn primary_ticket(&self) -> Option<&str> {
         self.context.tickets.first().map(|t| t.key.as_str())
     }
@@ -292,7 +266,6 @@ fn context(input: &HandoffInput<'_>) -> HandoffContext {
     }
 }
 
-/// First characters of a description on one line, with an ellipsis when cut.
 fn summary(description: &str) -> Option<String> {
     let line = description.split_whitespace().collect::<Vec<_>>().join(" ");
     if line.is_empty() {

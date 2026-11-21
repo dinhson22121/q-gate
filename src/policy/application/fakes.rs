@@ -1,5 +1,3 @@
-//! In-memory test doubles for the policy ports.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -46,17 +44,15 @@ pub fn default_settings() -> Value {
             "tests": {"enabled": true, "on_fail": "warn"},
             "architecture": {"on_violation": "warn"}
         },
-        "llm": {"base_url": "https://api.anthropic.com"},
+        "llm": {"claude_bin": "claude", "timeout_secs": 600},
         "notify": {"webhook_url": ""},
         "watch": {"run_repo_checks": true},
         "dashboard": {"bind": "127.0.0.1:8080"}
     })
 }
 
-/// One `apply` call: the changes and `changed_by`.
 pub type AppliedChanges = (Vec<(String, Value)>, String);
 
-/// Settings with a version counter; validation mimics two real rules (budget cap, tests enabled to block).
 pub struct FakeSettings {
     pub snapshot: Mutex<SettingsSnapshot>,
     pub applied: Mutex<Vec<AppliedChanges>>,
@@ -172,7 +168,6 @@ impl RunHistory for FakeHistory {
     }
 }
 
-/// Repository gates by path (defaults otherwise); the server part follows `agents.tests.on_fail`.
 #[derive(Default)]
 pub struct FakeGates {
     pub gates: HashMap<String, RepoGate>,

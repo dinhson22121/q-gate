@@ -1,6 +1,3 @@
-//! Local web dashboard: thin axum handlers over the history use cases plus one
-//! self-contained HTML page.
-
 mod handlers;
 mod security;
 
@@ -15,9 +12,7 @@ use tokio::net::TcpListener;
 
 use crate::history::application::RunRepository;
 
-/// Native default: loopback only. Containers pass `0.0.0.0:8080` explicitly.
 pub const DEFAULT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
-/// Host names (port-insensitive) the dashboard answers to by default.
 pub const DEFAULT_ALLOWED_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 
 #[derive(Clone)]
@@ -27,14 +22,10 @@ pub struct DashboardState {
 }
 
 impl DashboardState {
-    /// Uses [`DEFAULT_ALLOWED_HOSTS`].
     pub fn new(repository: Arc<dyn RunRepository>) -> Self {
         Self::with_allowed_hosts(repository, DEFAULT_ALLOWED_HOSTS.map(String::from).to_vec())
     }
 
-    /// `allowed_hosts`: host names without port, e.g. `["localhost", "127.0.0.1", "qgate.local"]`.
-    /// Matching is case-insensitive and ignores the port. Requests with any
-    /// other `Host` are rejected (DNS-rebinding protection).
     pub fn with_allowed_hosts(repository: Arc<dyn RunRepository>, allowed_hosts: Vec<String>) -> Self {
         let allowed_hosts =
             allowed_hosts.iter().map(|h| security::normalize_host(h)).filter(|h| !h.is_empty()).collect();
@@ -46,14 +37,10 @@ pub fn router(state: DashboardState) -> Router {
     router_with(state, Router::new())
 }
 
-/// The dashboard plus `extra` routes (e.g. the settings page), which get the same Host check and
-/// security headers. `extra` must not define a fallback or reuse a dashboard path.
 pub fn router_with(state: DashboardState, extra: Router) -> Router {
     router_guarded(state, extra, |app| app)
 }
 
-/// [`router_with`], with `guard` wrapped around every route and the fallback, inside the Host check and
-/// security headers (the service passes the access context's session check here).
 pub fn router_guarded(state: DashboardState, extra: Router, guard: impl FnOnce(Router) -> Router) -> Router {
     let app = Router::new()
         .route("/", get(handlers::index))
@@ -70,8 +57,6 @@ pub fn router_guarded(state: DashboardState, extra: Router, guard: impl FnOnce(R
         .layer(middleware::map_response(security::security_headers))
 }
 
-/// Binds `addr` (caller decides: [`DEFAULT_ADDR`] natively, `0.0.0.0:<port>` in a container)
-/// and serves until `shutdown` resolves.
 pub async fn serve(
     addr: SocketAddr,
     state: DashboardState,
@@ -80,7 +65,6 @@ pub async fn serve(
     serve_on(TcpListener::bind(addr).await?, state, shutdown).await
 }
 
-/// Same as [`serve`] on an already bound listener (lets callers bind port 0 and read the address).
 pub async fn serve_on(
     listener: TcpListener,
     state: DashboardState,
@@ -89,7 +73,6 @@ pub async fn serve_on(
     serve_on_with(listener, state, Router::new(), shutdown).await
 }
 
-/// Same as [`serve_on`] with `extra` routes merged in (see [`router_with`]).
 pub async fn serve_on_with(
     listener: TcpListener,
     state: DashboardState,
@@ -99,7 +82,6 @@ pub async fn serve_on_with(
     serve_router(listener, router_with(state, extra), shutdown).await
 }
 
-/// Serves a router built by [`router_with`] / [`router_guarded`] until `shutdown` resolves.
 pub async fn serve_router(
     listener: TcpListener,
     router: Router,

@@ -1,5 +1,3 @@
-//! `RepoSource` that discovers repositories under mounted root directories.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -8,14 +6,9 @@ use std::time::{Duration, Instant};
 use crate::watch::application::ports::{RepoSource, WatchError, WatchedRepo};
 
 pub const DEFAULT_MAX_DEPTH: usize = 3;
-/// How long a scan result is reused; polling runs far more often than repos appear.
 pub const DEFAULT_RESCAN_INTERVAL: Duration = Duration::from_secs(30);
-/// Directories that never contain repositories worth watching and are expensive to walk.
 const SKIPPED_DIRS: &[&str] = &["node_modules", "target", "vendor"];
 
-/// Finds directories containing `.git` (directory, or file for worktrees/submodules) up to
-/// `max_depth` levels below each root (the root itself is depth 0). Does not follow symlinks,
-/// skips hidden directories and does not descend into repositories.
 #[derive(Debug)]
 pub struct ScanRepoRegistry {
     roots: Vec<PathBuf>,
@@ -33,7 +26,6 @@ impl ScanRepoRegistry {
         Self { max_depth, ..self }
     }
 
-    /// `Duration::ZERO` rescans on every call.
     pub fn with_rescan_interval(self, rescan_interval: Duration) -> Self {
         Self { rescan_interval, ..self }
     }
@@ -59,7 +51,6 @@ impl RepoSource for ScanRepoRegistry {
     }
 }
 
-/// Repositories under `roots`, sorted by path. Missing or unreadable roots are skipped.
 fn scan(roots: &[PathBuf], max_depth: usize) -> Vec<WatchedRepo> {
     let mut found = Vec::new();
     for root in roots {
@@ -82,7 +73,6 @@ fn walk(dir: &Path, depth: usize, max_depth: usize, found: &mut Vec<PathBuf>) {
     }
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
-        // `DirEntry::file_type` does not follow symlinks: a symlinked directory is skipped.
         if entry.file_type().is_ok_and(|t| t.is_dir()) && !is_skipped(&entry.file_name()) {
             walk(&entry.path(), depth + 1, max_depth, found);
         }

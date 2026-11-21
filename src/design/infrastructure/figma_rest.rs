@@ -1,9 +1,3 @@
-//! Figma REST adapter (personal access token in `X-Figma-Token`).
-//!
-//! Figma's cloud MCP server only accepts OAuth from catalog-listed clients, so a background service
-//! reads the REST API: `/v1/files/{key}/nodes`, `/variables/local` (Enterprise only; 403 → node values)
-//! and `/v1/images/{key}` (PNG render URL, downloaded only from Figma's own hosts).
-
 use std::fmt;
 use std::time::Duration;
 
@@ -16,16 +10,13 @@ use crate::design::application::{DesignError, FetchedDesign, FigmaLink, FigmaSou
 use crate::design::domain::link::{is_valid_file_key, is_valid_node_id};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-/// Retries after HTTP 429 (each honours `Retry-After`).
 const MAX_RETRIES: u32 = 2;
-/// Longest `Retry-After` we wait for; longer ones fail the call instead of stalling the review.
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(60);
 const DEFAULT_RETRY_WAIT: Duration = Duration::from_secs(2);
 pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
 const PNG_MAGIC: [u8; 4] = [0x89, b'P', b'N', b'G'];
 const LOCAL_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 
-/// Figma personal access token. `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FigmaToken(String);
 
@@ -43,12 +34,10 @@ impl fmt::Debug for FigmaToken {
 
 #[derive(Debug, Clone)]
 pub struct FigmaRestConfig {
-    /// e.g. `https://api.figma.com` (https required; http only for localhost).
     pub api_base_url: String,
     pub token: FigmaToken,
 }
 
-/// Reads frames from the Figma REST API. Not `Debug`-printable with the token.
 pub struct FigmaRestSource {
     api: reqwest::Client,
     images: reqwest::Client,
@@ -71,8 +60,6 @@ impl FigmaRestSource {
         let build = || {
             reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
-                // Never follow redirects: the token must only reach the configured API host, and images
-                // are only downloaded from the allow-listed host Figma returned.
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| DesignError::Config(format!("cannot build HTTP client: {e}")))
@@ -88,7 +75,6 @@ impl FigmaRestSource {
         Ok(url)
     }
 
-    /// GET with the token; honours `Retry-After` on 429 up to `MAX_RETRIES` times.
     async fn get(&self, url: Url) -> Result<Response, DesignError> {
         let mut retries = 0;
         loop {
@@ -121,7 +107,6 @@ impl FigmaRestSource {
         response.json().await.map_err(|e| DesignError::Invalid(format!("{what} JSON: {}", self.redact(&e))))
     }
 
-    /// Local variables; `None` when the plan does not allow the endpoint (403) or it is missing.
     async fn variables(&self, file_key: &str) -> Result<Option<Value>, DesignError> {
         let response = self.get(self.url(&format!("v1/files/{file_key}/variables/local"), &[])?).await?;
         match response.status() {
@@ -156,7 +141,6 @@ impl FigmaRestSource {
         self.download(url).await.map(Some)
     }
 
-    /// Only Figma's own hosts over https (or the API's own origin for local test servers).
     fn is_allowed_image_host(&self, url: &Url) -> bool {
         let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
         let figma = host == "figma.com" || host.ends_with(".figma.com");
@@ -165,7 +149,6 @@ impl FigmaRestSource {
         (url.scheme() == "https" && (figma || s3)) || same_local_origin
     }
 
-    /// Downloads without the token, capped at `MAX_IMAGE_BYTES`, and checks it is a PNG.
     async fn download(&self, url: Url) -> Result<Vec<u8>, DesignError> {
         let mut response = self.images.get(url).send().await.map_err(|e| self.transport_error(&e))?;
         check_status(response.status(), "image download")?;
@@ -244,7 +227,6 @@ impl FigmaSource for FigmaRestSource {
     }
 }
 
-/// Error text without URL and without the token (in case a server echoes it).
 fn error_text(token: &FigmaToken, error: &reqwest::Error) -> String {
     let mut text = format!("{error}");
     if let Some(url) = error.url() {
@@ -265,7 +247,6 @@ fn is_local(url: &Url) -> bool {
     url.scheme() == "http" && LOCAL_HOSTS.contains(&url.host_str().unwrap_or_default())
 }
 
-/// Requires https (http only for localhost); the result ends with `/` so `join` keeps any path prefix.
 fn validate_base_url(raw: &str) -> Result<Url, DesignError> {
     let url = Url::parse(raw.trim()).map_err(|e| DesignError::Config(format!("invalid Figma API URL: {e}")))?;
     if url.scheme() != "https" && !is_local(&url) {

@@ -1,6 +1,3 @@
-//! The generated dashboard secret in `<data_dir>/dashboard-token`, readable by the owner only. In Docker
-//! the data directory is the qgate-data volume, which the runner container does not mount.
-
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -21,7 +18,6 @@ impl FileSecretStore {
         Self { path: path.into() }
     }
 
-    /// `<data_dir>/dashboard-token`.
     pub fn in_data_dir(data_dir: &Path) -> Self {
         Self::new(data_dir.join(TOKEN_FILE_NAME))
     }
@@ -67,7 +63,6 @@ impl SecretStore for FileSecretStore {
         }
         match self.create() {
             Ok(secret) => Ok(secret),
-            // Another process created it first: use theirs.
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 self.read().map_err(|e| self.storage_error(format!("unreadable: {e}")))?
             }
@@ -76,7 +71,6 @@ impl SecretStore for FileSecretStore {
     }
 }
 
-/// Re-applies 0600 in case the file was copied in or its mode loosened.
 fn restrict_permissions(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -140,10 +134,8 @@ mod tests {
     #[test]
     fn unreadable_or_uncreatable_paths_are_storage_errors() {
         let dir = tempfile::tempdir().unwrap();
-        // A directory where the file should be: reading fails with something other than NotFound.
         let as_dir = FileSecretStore::new(dir.path());
         assert!(matches!(as_dir.load_or_create(), Err(AccessError::Storage(m)) if m.contains("unreadable")));
-        // A regular file where the parent directory should be: creation fails.
         let blocker = dir.path().join("file");
         fs::write(&blocker, "x").unwrap();
         let below_file = FileSecretStore::new(blocker.join(TOKEN_FILE_NAME));
@@ -154,7 +146,6 @@ mod tests {
     fn a_racing_creator_wins_and_its_secret_is_used() {
         let (_dir, store) = store();
         let theirs = store.load_or_create().unwrap();
-        // Simulate losing the create race: create() sees AlreadyExists, load_or_create falls back to read.
         let err = store.create().unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(store.load_or_create().unwrap(), theirs);

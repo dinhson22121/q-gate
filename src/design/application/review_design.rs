@@ -1,5 +1,3 @@
-//! `ReviewDesign`: compares the changed UI code with the Figma frames linked from the ticket.
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -11,20 +9,16 @@ use crate::review::domain::change_set::FileChange;
 
 use super::ports::{DesignCache, DesignError, FetchedDesign, FigmaSource, I18nSource, StatesJudge, StatesRequest};
 
-/// Frames read per review; more links are reported and skipped.
 pub const MAX_LINKS: usize = 5;
 pub const NO_LINKS_NOTE: &str = "design check skipped: no Figma frame link on the ticket or its parent Story";
 
 pub struct DesignRequest<'a> {
     pub files: &'a [FileChange],
-    /// Raw links from the ticket context.
     pub links: &'a [String],
     pub repo_root: &'a Path,
-    /// Ticket brief context for the states judge.
     pub context: Option<&'a str>,
 }
 
-/// Mismatches plus human-readable notes about what was skipped or failed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DesignOutcome {
     pub mismatches: Vec<DesignMismatch>,
@@ -39,7 +33,6 @@ pub struct ReviewDesign {
     checks: Vec<DesignCheckKind>,
 }
 
-/// A frame ready to check.
 struct Frame {
     spec: DesignSpec,
     png: Option<Vec<u8>>,
@@ -64,7 +57,6 @@ impl ReviewDesign {
         self.wants(DesignCheckKind::States) && self.states.is_some()
     }
 
-    /// Never fails: everything that goes wrong becomes a note.
     pub async fn execute(&self, request: DesignRequest<'_>) -> DesignOutcome {
         let mut outcome = DesignOutcome::default();
         let ui_files = changed_ui_files(request.files);
@@ -113,7 +105,6 @@ impl ReviewDesign {
         }
     }
 
-    /// Cached frame when the file version is unchanged, otherwise a fresh read (stored in the cache).
     async fn frame(
         &self,
         link: &FigmaLink,

@@ -1,13 +1,8 @@
-//! Detects pushed branches by comparing two snapshots of a repository's remote-tracking refs.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Identifies one watched branch: the repository root and the (short) branch name under the remote.
 pub type RefId = (PathBuf, String);
 
-/// A remote-tracking ref whose target changed, or that appeared, since `previous`: the new sha and
-/// the sha it moved from (`None` for a newly observed ref). Sorted for deterministic handling.
 pub fn detect_ref_moves(
     previous: &HashMap<RefId, String>,
     current: &HashMap<RefId, String>,
@@ -24,10 +19,6 @@ pub fn detect_ref_moves(
     moves
 }
 
-/// The branch a pushed branch is compared against: the configured one when set, otherwise `main`
-/// then `master` if either exists among `branches`. `None` when none applies (merge-base is then
-/// skipped and the whole branch reviewed). A configured base is returned even if absent from
-/// `branches`, so a push to it is still recognised and skipped.
 pub fn resolve_base_branch(branches: &[String], configured: &str) -> Option<String> {
     let configured = configured.trim();
     if !configured.is_empty() {
@@ -72,7 +63,6 @@ mod tests {
 
     #[test]
     fn a_deleted_ref_is_ignored() {
-        // Present in previous, absent from current: no event (detection only walks current).
         assert!(detect_ref_moves(&map(&[("/a", "feature", "1")]), &map(&[])).is_empty());
     }
 
@@ -91,7 +81,6 @@ mod tests {
         assert_eq!(resolve_base_branch(&branches(&["main", "master"]), ""), Some("main".into()));
         assert_eq!(resolve_base_branch(&branches(&["master", "feature"]), ""), Some("master".into()));
         assert_eq!(resolve_base_branch(&branches(&["feature"]), ""), None);
-        // A configured base is honoured even when it is not among the known refs.
         assert_eq!(resolve_base_branch(&branches(&["feature"]), "release"), Some("release".into()));
     }
 }

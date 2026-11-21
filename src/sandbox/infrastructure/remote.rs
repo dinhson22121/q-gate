@@ -1,6 +1,3 @@
-//! Client of the isolated runner: sends each command over the runner's Unix socket. Never falls back
-//! to local execution; an unreachable runner is an `Unavailable` failure.
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,7 +10,6 @@ use crate::sandbox::application::ExecBackend;
 use crate::sandbox::domain::{ExecRequest, ExecResult, FailureKind};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Waiting time on top of the command's own timeout (queueing behind other jobs, process teardown).
 const RESPONSE_GRACE: Duration = Duration::from_secs(120);
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -38,7 +34,6 @@ impl RemoteBackend {
             .map_err(|e| e.to_string())?;
         let (read_half, mut write_half) = stream.into_split();
         write_message(&mut write_half, request).await.map_err(|e| format!("cannot send the request: {e}"))?;
-        // The write half stays open: the runner treats a closed connection as cancellation.
         let mut reader = BufReader::new(read_half);
         let response = tokio::time::timeout(wait, read_message(&mut reader, MAX_RESPONSE_BYTES))
             .await
@@ -48,7 +43,6 @@ impl RemoteBackend {
         response.ok_or_else(|| "the runner closed the connection without an answer".to_string())
     }
 
-    /// Health check used by `qgate runner --check` and `qgate doctor`.
     pub async fn ping(&self) -> Result<(), String> {
         match self.call(&RunnerRequest::Ping, PING_TIMEOUT).await {
             Ok(RunnerResponse::Pong) => Ok(()),
@@ -92,7 +86,6 @@ mod tests {
 
     use super::*;
 
-    /// A fake runner that reads one line and answers with `answer` (or closes when `None`).
     async fn fake_runner(answer: Option<&'static str>) -> (tempfile::TempDir, RemoteBackend) {
         let dir = tempfile::Builder::new().prefix("qr").tempdir_in("/tmp").unwrap();
         let socket = dir.path().join("s.sock");

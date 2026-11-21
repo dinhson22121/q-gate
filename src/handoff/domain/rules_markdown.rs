@@ -1,5 +1,3 @@
-//! Markdown of the per-repo rule book, loaded into a coding agent's context: compact, grouped by scope.
-
 use std::fmt::Write as _;
 
 use super::rules::{LearnedRule, RuleBook, RuleCandidate, RuleExample, RulesPaths};
@@ -7,10 +5,8 @@ use super::text::{code_span, one_line};
 
 const DATE_FORMAT: &str = "%Y-%m-%d";
 const ALL_FILES: &str = "All files";
-/// Characters that would start emphasis, links, code or HTML inside the bold rule text.
 const MARKDOWN_SPECIAL: [char; 8] = ['\\', '*', '_', '`', '[', ']', '<', '>'];
 
-/// `repo` is the repository name; `paths` are relative to the review-files folder.
 pub fn render_rules_markdown(book: &RuleBook, repo: &str, paths: &RulesPaths) -> String {
     let repo = one_line(repo);
     let mut out = format!("# qgate rules: {repo}\n\n");
@@ -48,7 +44,6 @@ pub fn render_rules_markdown(book: &RuleBook, repo: &str, paths: &RulesPaths) ->
     out
 }
 
-/// One rule of this review, for the per-commit review file.
 pub fn candidate_line(rule: &RuleCandidate) -> String {
     let mut line = format!("**[{}] {}**", rule.severity, inline(&rule.text));
     if let Some(scope) = &rule.scope {
@@ -84,7 +79,6 @@ fn example_text(example: &RuleExample) -> String {
     }
 }
 
-/// Rules grouped by scope; groups in order of their highest-ranked rule, rule order kept inside a group.
 fn groups(rules: &[LearnedRule]) -> Vec<(Option<&str>, Vec<&LearnedRule>)> {
     let mut groups: Vec<(Option<&str>, Vec<&LearnedRule>)> = Vec::new();
     for rule in rules {
@@ -97,7 +91,6 @@ fn groups(rules: &[LearnedRule]) -> Vec<(Option<&str>, Vec<&LearnedRule>)> {
     groups
 }
 
-/// One line with Markdown control characters escaped, so untrusted text cannot break out of the bold span.
 fn inline(text: &str) -> String {
     let mut out = String::new();
     for c in one_line(text).chars() {

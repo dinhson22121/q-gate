@@ -1,5 +1,3 @@
-//! `RulebookGateway` on the conventions context's `RulebookService`.
-
 use std::sync::Arc;
 
 use futures::future::BoxFuture;

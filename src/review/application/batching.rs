@@ -2,8 +2,6 @@ use std::ops::Range;
 
 use crate::review::domain::change_set::FileChange;
 
-/// Splits files into contiguous batches bounded by total review weight and file count.
-/// A single file heavier than `max_weight` gets a batch of its own.
 pub fn plan_batches(files: &[FileChange], max_weight: usize, max_files: usize) -> Vec<Range<usize>> {
     let max_files = max_files.max(1);
     let mut batches = Vec::new();

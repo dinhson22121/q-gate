@@ -132,7 +132,6 @@ async fn decisions_survive_a_rebuild() {
     h.service.current(&h.root, 7).await.unwrap();
     h.service.decide(&key, "R2", RuleStatus::Approved).await.unwrap();
     h.service.decide(&key, "R1", RuleStatus::Rejected).await.unwrap();
-    // The model returns the rules in another order with a differently formatted title.
     let mut drafts = standard_drafts();
     drafts.swap(0, 1);
     drafts[0].title = "errors use THISERROR.".into();
@@ -197,7 +196,6 @@ async fn decide_rejects_unknown_rules_and_repos() {
 async fn concurrent_reviews_share_one_build() {
     let model = FakeModel { delay: Some(Duration::from_millis(100)), ..FakeModel::drafting(standard_drafts()) };
     let h = harness("concurrency", model);
-    // A second service instance (e.g. the dashboard's) shares the same per-repo lock.
     let other = Arc::new(RulebookService::new(h.model.clone(), h.repo.clone(), h.store.clone()));
     let calls = (0..6).map(|i| {
         let service = if i % 2 == 0 { h.service.clone() } else { other.clone() };
@@ -231,8 +229,6 @@ async fn background_rebuild_only_for_known_repos_and_records_failures() {
     assert_eq!(h.model.draft_calls(), 2);
     assert!(h.service.build_state(&key).last_error.is_some());
 }
-
-// ---------- reviewer ----------
 
 fn change() -> FileChange {
     file(

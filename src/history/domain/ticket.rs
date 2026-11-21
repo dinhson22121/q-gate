@@ -1,6 +1,3 @@
-//! Ticket view: which runs concern a Jira ticket, and how each of its acceptance criteria
-//! progressed over those runs. Pure.
-
 use std::collections::HashMap;
 use std::fmt;
 
@@ -14,7 +11,6 @@ use crate::review::application::CriterionStatus;
 const MAX_PROJECT_LEN: usize = 10;
 const MAX_NUMBER_LEN: usize = 12;
 
-/// A validated Jira issue key: `^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,11}$`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TicketKey(String);
 
@@ -38,8 +34,6 @@ impl TicketKey {
         &self.0
     }
 
-    /// True when a criterion id belongs to this ticket. Ids are `KEY/AC-n`; legacy ids without a
-    /// `/` belong to the report's requirements key (`owner`).
     fn owns_criterion(&self, criterion_id: &str, owner: &str) -> bool {
         match criterion_id.split_once('/') {
             Some((prefix, _)) => prefix == self.0,
@@ -54,8 +48,6 @@ impl fmt::Display for TicketKey {
     }
 }
 
-/// True when the run concerns `key`: its ticket, the requirements key, the ticket context keys
-/// (Sub-task + parent Story), or a criterion id prefixed with the key.
 pub fn mentions_ticket(run: &StoredRun, key: &TicketKey) -> bool {
     let key_str = key.as_str();
     if run.ticket_key.as_deref() == Some(key_str) {
@@ -70,7 +62,6 @@ pub fn mentions_ticket(run: &StoredRun, key: &TicketKey) -> bool {
         })
 }
 
-/// One assessment of a criterion in one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CriterionPoint {
     pub run_id: i64,
@@ -82,24 +73,18 @@ pub struct CriterionPoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CriterionProgress {
     pub id: String,
-    /// Text from the newest run that listed the criterion.
     pub text: String,
-    /// Status in the newest run that assessed the criterion.
     pub latest: CriterionPoint,
-    /// Every assessment, newest first.
     pub history: Vec<CriterionPoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TicketProgress {
     pub key: String,
-    /// Runs concerning the ticket, newest first.
     pub runs: Vec<RunListItem>,
-    /// The ticket's criteria in first-seen order (newest run first).
     pub criteria: Vec<CriterionProgress>,
 }
 
-/// Builds the ticket view from runs that concern `key` (any order; they are sorted newest first).
 pub fn ticket_progress(key: &TicketKey, runs: &[StoredRun]) -> TicketProgress {
     let mut ordered: Vec<&StoredRun> = runs.iter().collect();
     ordered.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
@@ -138,7 +123,6 @@ pub fn ticket_progress(key: &TicketKey, runs: &[StoredRun]) -> TicketProgress {
     }
 }
 
-/// `(criterion id, text, status)` for each assessment in `report` that belongs to `key`.
 fn ticket_assessments<'a>(key: &TicketKey, report: &'a ReportView) -> Vec<(&'a str, &'a str, CriterionStatus)> {
     let Some(req) = &report.requirements else { return Vec::new() };
     let owner = req.requirements.key.as_str();

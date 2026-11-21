@@ -1,48 +1,30 @@
-//! Per-instance API token required on every mutating dashboard route.
-//!
-//! Why: the `X-Qgate-Request` header and `Origin` check stop browsers (cross-site pages), but not a local
-//! process, which can send any header. The token is random per server start and only handed out inside
-//! our own HTML pages. A cross-origin page cannot read those pages (same-origin policy), so it cannot
-//! learn the token. A local process that can reach the dashboard CAN fetch a page and scrape the token:
-//! the token raises the bar (no blind `curl`, a restart invalidates it) but is not a boundary against
-//! local code by itself. Pages (and so the token) are only served to logged-in sessions (see `crate::access`),
-//! which keeps out code that can reach the port without the login token. Also, the settings that matter most
-//! (endpoints, commands, webhook, turning repository checks on) are not editable over HTTP at all; see `settings::domain::ADMIN_ONLY_FIELDS`.
-
 use std::fmt;
 use std::sync::Arc;
 
 use crate::access::domain::constant_time_eq;
 
-/// Header the pages send the token in.
 pub const TOKEN_HEADER: &str = "x-qgate-token";
-/// Replaced in the page HTML with the token (`<meta name="qgate-token" content="__QGATE_TOKEN__">`).
 pub const TOKEN_PLACEHOLDER: &str = "__QGATE_TOKEN__";
 const TOKEN_BYTES: usize = 32;
 
-/// Hex token, generated once per process and kept only in memory. `Debug` never shows it.
 #[derive(Clone)]
 pub struct ApiToken(Arc<str>);
 
 impl ApiToken {
-    /// 32 bytes from the OS CSPRNG, hex-encoded.
     pub fn generate() -> Result<Self, getrandom::Error> {
         let mut bytes = [0u8; TOKEN_BYTES];
         getrandom::fill(&mut bytes)?;
         Ok(Self(hex(&bytes).into()))
     }
 
-    /// Constant-time comparison with the presented header value; `None` (no header) never matches.
     pub fn verify(&self, presented: Option<&str>) -> bool {
         presented.is_some_and(|value| constant_time_eq(self.0.as_bytes(), value.as_bytes()))
     }
 
-    /// `html` with every [`TOKEN_PLACEHOLDER`] replaced by the token (hex: safe inside an attribute).
     pub fn inject(&self, html: &str) -> String {
         html.replace(TOKEN_PLACEHOLDER, &self.0)
     }
 
-    /// The raw value, for tests that act as the page.
     #[cfg(test)]
     pub fn expose(&self) -> &str {
         &self.0

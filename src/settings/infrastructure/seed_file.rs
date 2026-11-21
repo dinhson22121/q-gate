@@ -1,5 +1,3 @@
-//! The legacy `<config_dir>/qgate.toml`, imported once into the settings database on first start.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,7 +6,6 @@ use super::paths::AppPaths;
 use crate::settings::application::{EnvLookup, SeedConfigSource, SettingsError};
 use crate::settings::domain::ServerConfig;
 
-/// `changed_by` recorded for the imported version.
 pub const SEED_ORIGIN: &str = "import:qgate.toml";
 
 pub struct TomlSeedSource {
@@ -20,7 +17,6 @@ impl TomlSeedSource {
         Self { path: path.into() }
     }
 
-    /// `<config_dir>/qgate.toml`.
     pub fn from_paths(paths: &AppPaths) -> Self {
         Self::new(paths.server_config_file())
     }
@@ -39,7 +35,6 @@ impl SeedConfigSource for TomlSeedSource {
     }
 }
 
-/// The process environment as an [`EnvLookup`].
 pub fn process_env() -> EnvLookup {
     Arc::new(|name| std::env::var(name).ok())
 }

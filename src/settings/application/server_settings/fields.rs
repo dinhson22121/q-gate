@@ -1,6 +1,3 @@
-//! Field-level access to a `ServerConfig` by dotted path (`jira.email`), via its JSON form.
-//! Lets the env-lock, restart and history rules work from path tables instead of per-field code.
-
 use std::collections::BTreeMap;
 
 use serde_json::Value;
@@ -24,14 +21,12 @@ pub(super) fn get<'a>(config: &'a Value, path: &str) -> Option<&'a Value> {
     config.pointer(&pointer(path))
 }
 
-/// Copies the value at `path` from `source` into `target` (both must contain the path).
 pub(super) fn copy(source: &Value, target: &mut Value, path: &str) {
     if let (Some(value), Some(slot)) = (get(source, path), target.pointer_mut(&pointer(path))) {
         *slot = value.clone();
     }
 }
 
-/// Dotted paths of the leaf values (arrays count as leaves) that differ between `a` and `b`, sorted.
 pub(super) fn changed_paths(a: &Value, b: &Value) -> Vec<String> {
     let (left, right) = (leaves(a), leaves(b));
     let mut paths: Vec<String> =

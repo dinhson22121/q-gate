@@ -1,6 +1,3 @@
-//! [`BaseRunStore`] backed by the `cache` context's result cache. The base commit never changes, so its test
-//! run is stored once and reused by later pushes of the same branch. Any storage or decoding problem is a miss.
-
 use std::sync::Arc;
 
 use crate::cache::application::{ContentKey, ResultCache};

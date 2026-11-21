@@ -7,15 +7,15 @@
 # Every setting is optional: delete a line to get the default shown here.
 #
 # Per-repository settings (model, gate policy, checks, Jira overrides) belong in each repo's .qgate.toml.
-# Endpoints and credentials-related settings ([llm] base_url, [jira] base_url/email/provider/[jira.mcp])
+# Endpoints and credentials-related settings ([llm] claude_bin/timeout_secs, [jira] base_url/email/provider/[jira.mcp])
 # can only be set here, never in a repository's .qgate.toml (see README "Security notes").
 #
 # Environment variables from qgate.env win over this file:
 #   QGATE_BIND -> dashboard.bind     QGATE_REPOS_ROOT -> repos.roots    QGATE_WEBHOOK_URL -> notify.webhook_url
-#   JIRA_BASE_URL -> jira.base_url   JIRA_EMAIL -> jira.email       QGATE_LLM_BASE_URL -> llm.base_url
+#   JIRA_BASE_URL -> jira.base_url   JIRA_EMAIL -> jira.email       QGATE_CLAUDE_BIN -> llm.claude_bin
 #   QGATE_JIRA_ENABLED -> jira.enabled   QGATE_OUTPUT_DIR -> output.dir
 # Fields set by these variables are shown locked on the Settings page.
-# Secrets (ANTHROPIC_API_KEY, JIRA_API_TOKEN, FIGMA_TOKEN) are never read from this file - keep them in qgate.env,
+# Secrets (JIRA_API_TOKEN, FIGMA_TOKEN) are never read from this file - keep them in qgate.env,
 # use their *_FILE variants (Docker secrets, see README "Security notes") or set them on the Settings page.
 
 [dashboard]
@@ -28,7 +28,11 @@ allowed_hosts = ["localhost", "127.0.0.1"]
 
 [repos]
 # Absolute directories scanned for git repositories (inside the container: /repos = REPOS_PATH).
+# Only used when auto_scan is true; otherwise qgate reviews just the repositories imported on the Repositories page.
 roots = ["/repos"]
+# Watch every repository found under roots (true) or only imported ones (false). Env: QGATE_REPOS_AUTO_SCAN.
+# Admin-only: not editable from the Settings page.
+auto_scan = false
 # How many directory levels below each root are searched for repositories (1-10).
 scan_depth = 3
 
@@ -61,9 +65,12 @@ enabled = true
 enabled = true
 
 [llm]
-# Anthropic API endpoint. Must be https://, except http://localhost or http://127.0.0.1 (local proxy).
-# It receives the API key and the reviewed code, so repositories cannot override it.
-base_url = "https://api.anthropic.com"
+# Claude Code CLI, running on your Claude subscription (`claude login`, or CLAUDE_CODE_OAUTH_TOKEN in qgate.env).
+# Admin-only: the binary runs with your credentials, so repositories cannot override it.
+# Path of the `claude` executable (looked up on PATH when it has no directory). Env: QGATE_CLAUDE_BIN.
+claude_bin = "claude"
+# Wall-clock limit of one `claude -p` run, in seconds. Env: QGATE_CLI_TIMEOUT_SECS.
+timeout_secs = 600
 
 [jira]
 # Fetch acceptance criteria for the ticket referenced in the branch name / commit message.

@@ -1,5 +1,3 @@
-//! Pure hand-off model: the review document for coding agents, its Markdown/JSON rendering and file paths.
-
 pub mod document;
 pub mod html;
 pub mod json;

@@ -1,6 +1,3 @@
-//! Pure history model: review runs, the stored-report read model, and the
-//! dashboard computations (period stats, recurring issues, ticket progress). No I/O.
-
 pub mod agent_view;
 pub mod recurring;
 pub mod report_view;

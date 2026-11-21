@@ -1,17 +1,9 @@
-//! Figma design links found in ticket text (description, remote links).
-
-/// Figma hosts accepted (lowercase).
 const FIGMA_HOSTS: &[&str] = &["figma.com", "www.figma.com"];
-/// Path kinds pointing at a design file (FigJam boards, Slides etc. are not designs).
 const DESIGN_KINDS: &[&str] = &["design", "file", "proto"];
-/// Characters that end a URL embedded in text, Markdown, Jira wiki markup or JSON.
 const URL_TERMINATORS: &[char] = &['"', '\'', '<', '>', '(', ')', '[', ']', '{', '}', '|', '\\', '`'];
-/// Punctuation that usually belongs to the sentence, not the URL.
 const TRAILING_PUNCTUATION: &[char] = &['.', ',', ';', ':', '!', '?'];
 const SCHEME: &str = "https://";
 
-/// Figma design links (`https://www.figma.com/{design,file,proto}/<key>/…`) in `text`, in order,
-/// without duplicates. `figma.com/board` and other kinds are ignored.
 pub fn extract_figma_links(text: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut rest = text;
@@ -28,7 +20,6 @@ pub fn extract_figma_links(text: &str) -> Vec<String> {
     links
 }
 
-/// Appends the links of `more` that `links` does not contain yet.
 pub fn merge_links(links: &mut Vec<String>, more: impl IntoIterator<Item = String>) {
     for link in more {
         if !links.contains(&link) {

@@ -1,6 +1,3 @@
-//! Review-file paths: the `output.path_template` placeholders, value sanitisation and the matcher that
-//! recognises files generated from the same template (the only files pruning may delete).
-
 use chrono::{DateTime, Utc};
 
 const MAX_VALUE_LEN: usize = 80;
@@ -14,7 +11,6 @@ const STATUSES: [&str; 2] = ["passed", "failed"];
 pub const NO_TICKET: &str = "no-ticket";
 pub const DETACHED_BRANCH: &str = "detached";
 const UNKNOWN: &str = "unknown";
-/// Stem of `latest.md` / `latest.json`; never treated as a generated per-commit file.
 pub const LATEST_STEM: &str = "latest";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +40,6 @@ impl Placeholder {
         }
     }
 
-    /// Placeholders that differ between commits, so a file name containing one is unique per run.
     fn is_run_unique(self) -> bool {
         matches!(self, Self::Sha7 | Self::Sha | Self::Date)
     }
@@ -56,11 +51,9 @@ enum Part {
     Var(Placeholder),
 }
 
-/// A validated, relative `.md` path template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathTemplate {
     dirs: Vec<Vec<Part>>,
-    /// File name without the `.md` extension.
     stem: Vec<Part>,
 }
 
@@ -68,7 +61,6 @@ pub struct PathTemplate {
 #[error("invalid review file template: {0}")]
 pub struct TemplateError(String);
 
-/// Sanitised placeholder values for one run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathValues {
     pub repo: String,
@@ -119,13 +111,11 @@ impl PathValues {
         }
     }
 
-    /// Folder of `latest.md`: `<repo>/<branch>`.
     pub fn latest_dir(&self) -> String {
         format!("{}/{}", self.repo, self.branch)
     }
 }
 
-/// Keeps `[A-Za-z0-9._-]` (others become `-`), drops leading dots, caps the length; `fallback` when empty.
 pub fn sanitize(value: &str, fallback: &str) -> String {
     let mapped: String = value
         .trim()
@@ -136,7 +126,6 @@ pub fn sanitize(value: &str, fallback: &str) -> String {
     if cleaned.is_empty() { fallback.to_string() } else { cleaned }
 }
 
-/// A rendered path: `dir` (no trailing slash, may be empty) and the file stem.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedPath {
     pub dir: String,
@@ -149,7 +138,6 @@ impl RenderedPath {
     }
 }
 
-/// `dir/name`, or `name` when `dir` is empty.
 pub fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") }
 }
@@ -195,8 +183,6 @@ impl PathTemplate {
         }
     }
 
-    /// Matches file stems generated from this template in the same folder, or `None` when the file name has no
-    /// per-run placeholder ({sha7}, {sha}, {date}): then each run overwrites the same file and nothing is pruned.
     pub fn stem_matcher(&self, values: &PathValues) -> Option<StemMatcher> {
         if !self.stem.iter().any(|p| matches!(p, Part::Var(v) if v.is_run_unique())) {
             return None;
@@ -249,14 +235,12 @@ enum Matcher {
     Var(Placeholder),
 }
 
-/// Recognises stems of files generated from one template for one repo/branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StemMatcher {
     parts: Vec<Matcher>,
 }
 
 impl StemMatcher {
-    /// The stem of `file_name` when it is a generated `.md` / `.json` / `.html` file of this template.
     pub fn stem_of<'a>(&self, file_name: &'a str) -> Option<&'a str> {
         let stem = [".md", ".json", ".html"].iter().find_map(|ext| file_name.strip_suffix(ext))?;
         (stem != LATEST_STEM && matches_from(&self.parts, stem)).then_some(stem)
@@ -268,7 +252,6 @@ fn matches_from(parts: &[Matcher], text: &str) -> bool {
     candidate_lengths(first, text).into_iter().any(|len| matches_from(rest, &text[len..]))
 }
 
-/// Prefix lengths of `text` that `matcher` accepts.
 fn candidate_lengths(matcher: &Matcher, text: &str) -> Vec<usize> {
     let run = |pred: fn(&u8) -> bool| text.bytes().take_while(pred).count();
     match matcher {

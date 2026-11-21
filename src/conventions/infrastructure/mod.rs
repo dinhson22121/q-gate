@@ -1,5 +1,3 @@
-//! Adapters: SQLite store, read-only repository reader, Claude model.
-
 pub mod claude_model;
 pub mod repo_files;
 pub mod sqlite;

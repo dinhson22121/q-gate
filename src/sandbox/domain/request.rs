@@ -1,20 +1,14 @@
-//! One command execution: what is asked, what came back, and which requests are acceptable.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Longest run a request may ask for (a full Gradle build with tests fits comfortably).
 pub const MAX_TIMEOUT_MS: u64 = 6 * 60 * 60 * 1000;
-/// Largest output tail a request may ask for; memory per run stays bounded.
 pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_ARGS: usize = 1024;
 const MAX_ENV_VARS: usize = 256;
 const MAX_STRING_BYTES: usize = 64 * 1024;
 
-/// Environment variables an untrusted command may see from the executing process; everything else
-/// (API keys, tokens) is withheld. Toolchain locations and caches only.
 pub const INHERITED_ENV_VARS: &[&str] = &[
     "PATH",
     "HOME",
@@ -53,35 +47,26 @@ pub const INHERITED_ENV_VARS: &[&str] = &[
     "CI",
 ];
 
-/// A fixed command (no shell) to run in `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecRequest {
-    /// Program and arguments.
     pub argv: Vec<String>,
     pub cwd: PathBuf,
-    /// Extra variables on top of the executor's allow-listed environment.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     pub timeout_ms: u64,
-    /// Bytes of combined stdout/stderr kept (the tail).
     pub max_output_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureKind {
-    /// The program does not exist.
     NotFound,
-    /// The program exists but could not be started (permissions, HOME, wait error...).
     SpawnFailed,
-    /// The request was refused (cwd outside the work root, invalid fields).
     Rejected,
-    /// The isolated runner could not be reached; nothing was executed.
     Unavailable,
 }
 
-/// Why nothing (or nothing complete) ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecFailure {
     pub kind: FailureKind,
@@ -90,9 +75,7 @@ pub struct ExecFailure {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ExecResult {
-    /// `None` when killed by a signal, timed out or never started.
     pub exit_code: Option<i32>,
-    /// Interleaved stdout/stderr tail; a line cut by truncation is dropped.
     pub output_tail: String,
     pub timed_out: bool,
     pub duration_ms: u64,
@@ -110,7 +93,6 @@ impl ExecResult {
     }
 }
 
-/// Field-level checks every executor applies before running anything.
 pub fn validate(request: &ExecRequest) -> Result<(), String> {
     let Some(program) = request.argv.first() else {
         return Err("empty command".into());
@@ -148,7 +130,6 @@ fn is_clean(text: &str) -> bool {
     text.len() <= MAX_STRING_BYTES && !text.contains('\0')
 }
 
-/// True when `path` lies strictly below `root`. Both must already be canonical (symlinks resolved).
 pub fn is_inside(path: &Path, root: &Path) -> bool {
     path != root && path.starts_with(root)
 }
@@ -172,7 +153,6 @@ mod tests {
         assert_eq!(validate(&request()), Ok(()));
     }
 
-    /// A mutation of a valid request and the text its rejection must contain.
     type Case = (fn(&mut ExecRequest), &'static str);
 
     #[test]

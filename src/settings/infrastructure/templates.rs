@@ -1,6 +1,3 @@
-//! Commented example configuration files written by `qgate init` (the server one only seeds the settings database).
-
-/// Example `.qgate.toml` documenting every repository setting with its default.
 pub const CONFIG_TEMPLATE: &str = r#"# qgate repository configuration.
 # Every section and key is optional; the values below are the defaults.
 
@@ -9,11 +6,7 @@ pub const CONFIG_TEMPLATE: &str = r#"# qgate repository configuration.
 model = "claude-opus-5-5"
 # Reasoning effort: low | medium | high | xhigh | max
 effort = "high"
-# The API endpoint is not set here: for security it can only be set in the server config (qgate.toml).
-# Output token budget per request (>= 1024).
-max_tokens = 16000
-# Retry with fallback models when the primary model is overloaded.
-fallbacks = true
+# The `claude` binary is not set here: for security it can only be set in the server config (qgate.toml).
 # Parallel review requests (1..=16).
 concurrency = 4
 
@@ -70,13 +63,12 @@ enabled = true
 review_on_push = true
 "#;
 
-/// Example `<config_dir>/qgate.toml` documenting every server setting with its default.
 pub const SERVER_CONFIG_TEMPLATE: &str = r#"# qgate server configuration (user level, not part of any repository).
 # This file is only used to seed the settings database on first start; after that it is no longer read.
 # Change settings on the Settings page of the dashboard (/settings).
 # Every section and key is optional; the values below are the defaults.
 # Environment overrides: QGATE_BIND, QGATE_REPOS_ROOT (comma-separated), QGATE_WEBHOOK_URL,
-# QGATE_LLM_BASE_URL, JIRA_BASE_URL, JIRA_EMAIL, QGATE_JIRA_ENABLED, QGATE_OUTPUT_DIR. Secrets come from ANTHROPIC_API_KEY /
+# QGATE_CLAUDE_BIN, QGATE_CLI_TIMEOUT_SECS, JIRA_BASE_URL, JIRA_EMAIL, QGATE_JIRA_ENABLED, QGATE_OUTPUT_DIR. Secrets come from
 # JIRA_API_TOKEN / FIGMA_TOKEN, their *_FILE variants (Docker secrets) or the credential store - never from here.
 
 [dashboard]
@@ -86,8 +78,10 @@ bind = "127.0.0.1:8080"
 allowed_hosts = ["localhost", "127.0.0.1"]
 
 [repos]
-# Absolute directories scanned for git repositories.
+# Absolute directories scanned for git repositories when auto_scan is on.
 roots = ["/repos"]
+# Watch every git repository found under roots (true) or only the imported ones (false). Env: QGATE_REPOS_AUTO_SCAN.
+auto_scan = false
 # Directory levels searched below each root.
 scan_depth = 3
 
@@ -118,9 +112,12 @@ enabled = true
 enabled = true
 
 [llm]
-# Anthropic API endpoint. Must be https://, except http://localhost or http://127.0.0.1 (local proxy).
-# Server-only: it receives the API key and the reviewed code, so repositories cannot change it.
-base_url = "https://api.anthropic.com"
+# Claude Code CLI (runs on your Claude subscription; authenticate with `claude login` or CLAUDE_CODE_OAUTH_TOKEN).
+# Server-only (admin): the binary runs with your credentials, so repositories cannot change it.
+# Path of the `claude` executable (looked up on PATH when it has no directory). Env: QGATE_CLAUDE_BIN.
+claude_bin = "claude"
+# Wall-clock limit of one `claude -p` run, in seconds. Env: QGATE_CLI_TIMEOUT_SECS.
+timeout_secs = 600
 
 [jira]
 # Connection settings are server-only; a repository's .qgate.toml may only set

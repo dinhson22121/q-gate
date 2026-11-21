@@ -1,6 +1,3 @@
-//! Protection of the mutating rulebook routes, with the same rules as the settings API: see
-//! [`crate::web::MutationGuard`] (CSRF header, `Origin`, per-instance API token, JSON content type).
-
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::Response;

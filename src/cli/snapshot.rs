@@ -1,10 +1,3 @@
-//! Clean, writable copy of a commit's tree, so checks run against exactly the committed code
-//! (repositories are mounted read-only in Docker, and the working tree may have moved on).
-//!
-//! The tree is materialised with `read-tree` into a throw-away index and `checkout-index`, not with
-//! `git archive`: archive honours in-commit `export-ignore`/`export-subst` attributes (a commit could
-//! hide its own failing tests) and `tar` would restore owner and permission bits.
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -17,12 +10,9 @@ use crate::testing::application::ports::{ScenarioSnapshot, ScenarioSnapshots};
 
 const GIT: &str = "git";
 const SNAPSHOT_PREFIX: &str = "qgate-snapshot-";
-/// Holds the temporary index; shares the snapshot prefix so a crash leftover is swept too.
 const INDEX_DIR_PREFIX: &str = "qgate-snapshot-index-";
-/// Exit status of `git config --get-regexp` when nothing matches.
 const CONFIG_NO_MATCH: i32 = 1;
 
-/// Deleted when dropped.
 pub struct Snapshot {
     dir: TempDir,
 }
@@ -33,7 +23,6 @@ impl Snapshot {
     }
 }
 
-/// Resolves `rev` to a full commit sha in `repo`.
 pub async fn resolve_commit(repo: &Path, rev: &str) -> Result<String> {
     ensure_safe_rev(rev)?;
     let output = tokio::process::Command::new(GIT)
@@ -52,11 +41,6 @@ pub async fn resolve_commit(repo: &Path, rev: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Full messages of the commits in `base..head` (newest first), or of `head` alone without a base.
-/// Used to find the tickets a change implements; capped so a huge range stays cheap.
-///
-/// For a range, only the branch's own commits are walked (`--first-parent`): merging the base
-/// branch into the feature branch must not pull in the base branch's unrelated ticket keys.
 pub async fn commit_messages(repo: &Path, base: Option<&str>, head: &str) -> Result<Vec<String>> {
     const MAX_COMMITS: &str = "200";
     const SEPARATOR: char = '\u{1e}';
@@ -96,7 +80,6 @@ pub async fn commit_messages(repo: &Path, base: Option<&str>, head: &str) -> Res
         .collect())
 }
 
-/// Exports the tree of commit `sha` (a full hex sha) into a new temp dir under `parent`.
 pub async fn export_commit(repo: &Path, sha: &str, parent: &Path) -> Result<Snapshot> {
     if sha.len() < 7 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         bail!("invalid commit sha '{sha}'");
@@ -116,8 +99,6 @@ pub async fn export_commit(repo: &Path, sha: &str, parent: &Path) -> Result<Snap
     Ok(Snapshot { dir })
 }
 
-/// One fresh export per test scenario under the work directory, so scenarios cannot tamper with each
-/// other or with the snapshot the repository checks run in.
 pub struct GitScenarioSnapshots {
     parent: PathBuf,
 }
@@ -137,12 +118,10 @@ impl ScenarioSnapshots for GitScenarioSnapshots {
     }
 }
 
-/// Removes `qgate-snapshot-*` directories left under `parent` by a previous run that did not exit cleanly.
 pub fn sweep_stale_snapshots(parent: &Path) {
     let Ok(entries) = std::fs::read_dir(parent) else { return };
     for entry in entries.flatten() {
         let is_snapshot = entry.file_name().to_str().is_some_and(|name| name.starts_with(SNAPSHOT_PREFIX));
-        // `file_type` does not follow symlinks: a link named like a snapshot is never traversed.
         let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
         if !is_snapshot || !is_dir {
             continue;
@@ -153,7 +132,6 @@ pub fn sweep_stale_snapshots(parent: &Path) {
     }
 }
 
-/// `git read-tree <sha>` into the throw-away `index`, then `git checkout-index -a` into `target`.
 fn checkout_into(repo: &Path, sha: &str, index: &Path, target: &Path) -> Result<()> {
     let filter_overrides = neutralised_filters(repo)?;
     let git = |args: &[&str]| -> Result<Output> {
@@ -171,18 +149,12 @@ fn checkout_into(repo: &Path, sha: &str, index: &Path, target: &Path) -> Result<
     };
     ensure_success("git read-tree", &git(&["read-tree", sha])?)?;
     let mut prefix = target.to_str().context("snapshot path is not valid UTF-8")?.to_string();
-    // checkout-index treats the prefix as a plain string: without the trailing '/' files would be
-    // written next to the snapshot directory as `<dir>name`.
     if !prefix.ends_with('/') {
         prefix.push('/');
     }
     ensure_success("git checkout-index", &git(&["checkout-index", "--all", "--force", &format!("--prefix={prefix}")])?)
 }
 
-/// `-c` overrides that disable every filter driver configured for `repo`.
-///
-/// A driver from the (untrusted) repository config would otherwise run its `smudge`/`process` command
-/// when `checkout-index` meets a matching `filter=` attribute. An empty command means "no filter".
 fn neutralised_filters(repo: &Path) -> Result<Vec<String>> {
     let output = Command::new(GIT)
         .args(GIT_HARDENING_ARGS)
@@ -199,7 +171,6 @@ fn neutralised_filters(repo: &Path) -> Result<Vec<String>> {
     filter_overrides(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Builds the overrides from NUL-separated `filter.<driver>.<key>` names.
 fn filter_overrides(keys: &str) -> Result<Vec<String>> {
     let mut drivers: Vec<&str> = keys
         .split('\0')
@@ -209,7 +180,6 @@ fn filter_overrides(keys: &str) -> Result<Vec<String>> {
     drivers.dedup();
     let mut overrides = Vec::new();
     for driver in drivers {
-        // `-c` splits at the first '=': such a driver could not be overridden, so refuse to export.
         if driver.contains('=') || driver.chars().any(char::is_control) {
             bail!("refusing to export: unsupported filter driver name {driver:?} in the repository config");
         }
@@ -437,7 +407,6 @@ mod tests {
         git(repo.path(), &["commit", "-q", "-m", "base"]);
         let base = resolve_commit(repo.path(), "HEAD").await.unwrap();
 
-        // main advances with its own ticket key, which the feature branch must not inherit.
         std::fs::write(repo.path().join("f.txt"), "main work").unwrap();
         git(repo.path(), &["commit", "-qam", "MAIN-99: unrelated"]);
 

@@ -93,18 +93,14 @@ fn view_masks_webhook_and_lists_locks_and_secrets() {
     assert!(view.webhook_configured);
     assert_eq!(view.config.jira.email, "bot@acme.com");
     assert_eq!(view.locked, vec![LockedField { field: "jira.email", env_var: "JIRA_EMAIL" }]);
-    assert_eq!(view.admin_only.len(), 9);
-    assert!(view.admin_only.contains(&LockedField { field: "llm.base_url", env_var: "QGATE_LLM_BASE_URL" }));
+    assert_eq!(view.admin_only.len(), 11);
+    assert!(view.admin_only.contains(&LockedField { field: "llm.claude_bin", env_var: "QGATE_CLAUDE_BIN" }));
     assert!(view.admin_only.contains(&LockedField { field: "watch.base_branch", env_var: "QGATE_WATCH_BASE_BRANCH" }));
     assert_eq!(view.restart_required_fields.len(), 9);
     let sources: Vec<_> = view.secrets.iter().map(|s| (s.name, s.configured, s.source)).collect();
     assert_eq!(
         sources,
-        vec![
-            ("anthropic_api_key", false, SecretSource::Missing),
-            ("jira_api_token", true, SecretSource::Store),
-            ("figma_token", true, SecretSource::EnvFile),
-        ]
+        vec![("jira_api_token", true, SecretSource::Store), ("figma_token", true, SecretSource::EnvFile),]
     );
     let json = serde_json::to_string(&view).unwrap();
     assert!(!json.contains("secret-token") && !json.contains("tok\""), "{json}");
@@ -203,7 +199,6 @@ fn invalid_values_are_rejected_without_echoing_the_webhook() {
         UpdateSettings::new(&f.deps).execute(page_patch(&f), WebhookChange::Set("nope-token".into())).unwrap_err();
     assert!(matches!(err, SettingsError::AdminOnly { ref field, .. } if field == "notify.webhook_url"));
     assert!(!err.to_string().contains("nope-token"));
-    // A bad stored webhook (saved before it became admin-only) is reported without its value.
     let mut raw = ServerConfig::default();
     raw.notify.webhook_url = "nope-token".into();
     f.store.save_raw(&raw, "legacy").unwrap();
@@ -224,7 +219,6 @@ fn restart_list_tracks_fields_that_differ_from_boot() {
         applied.restart_required,
         vec!["dashboard.allowed_hosts".to_string(), "watch.poll_interval_secs".into()]
     );
-    // A later unrelated save still reports the pending restart.
     let mut patch = page_patch(&f);
     patch.agents.enabled = false;
     let applied = UpdateSettings::new(&f.deps).execute(patch, WebhookChange::Keep).unwrap();
@@ -261,17 +255,17 @@ fn history_lists_changed_paths_and_rollback_appends_a_version() {
 
 #[test]
 fn secrets_are_set_and_cleared_but_not_when_from_env() {
-    let f = fixture(&[("ANTHROPIC_API_KEY", "sk-env")]);
+    let f = fixture(&[("JIRA_API_TOKEN", "sk-env")]);
     let status = SetSecret::new(&f.deps).execute(CredentialName::FigmaToken, " figd_123 ").unwrap();
     assert_eq!((status.configured, status.source), (true, SecretSource::Store));
     assert_eq!(f.credentials.get(CredentialName::FigmaToken).unwrap().unwrap().expose(), "figd_123");
     let status = ClearSecret::new(&f.deps).execute(CredentialName::FigmaToken).unwrap();
     assert_eq!(status.source, SecretSource::Missing);
 
-    let err = SetSecret::new(&f.deps).execute(CredentialName::AnthropicApiKey, "sk-new").unwrap_err();
-    assert_eq!(err, SettingsError::SecretFromEnv { name: "anthropic_api_key", env_var: "ANTHROPIC_API_KEY" });
-    assert!(ClearSecret::new(&f.deps).execute(CredentialName::AnthropicApiKey).is_err());
-    let err = SetSecret::new(&f.deps).execute(CredentialName::JiraApiToken, "a b").unwrap_err();
+    let err = SetSecret::new(&f.deps).execute(CredentialName::JiraApiToken, "sk-new").unwrap_err();
+    assert_eq!(err, SettingsError::SecretFromEnv { name: "jira_api_token", env_var: "JIRA_API_TOKEN" });
+    assert!(ClearSecret::new(&f.deps).execute(CredentialName::JiraApiToken).is_err());
+    let err = SetSecret::new(&f.deps).execute(CredentialName::FigmaToken, "a b").unwrap_err();
     assert!(matches!(err, SettingsError::InvalidSecret(_)));
     assert!(!err.to_string().contains("a b"));
 }
@@ -312,9 +306,9 @@ fn output_dir_is_env_locked_and_restart_only_while_the_rest_is_live() {
 
 #[test]
 fn admin_only_fields_cannot_change_over_http() {
-    let f = fixture(&[("QGATE_LLM_BASE_URL", "http://127.0.0.1:4000")]);
+    let f = fixture(&[("QGATE_CLAUDE_BIN", "/opt/claude/bin/claude")]);
     let cases: [fn(&mut ServerConfig); 6] = [
-        |c| c.llm.base_url = "https://attacker.example".into(),
+        |c| c.llm.claude_bin = "/tmp/evil".into(),
         |c| c.jira.base_url = "https://attacker.example".into(),
         |c| c.jira.mcp.command = vec!["sh".into()],
         |c| c.jira.mcp.env_passthrough.push("ANTHROPIC_API_KEY".into()),
@@ -334,12 +328,11 @@ fn admin_only_fields_cannot_change_over_http() {
     assert!(matches!(err, SettingsError::AdminOnly { .. }));
     assert_eq!(f.store.rows.lock().unwrap().len(), 1, "nothing was saved");
 
-    // Unchanged admin-only fields (including the env-set one) save fine; env values are not persisted.
     let mut patch = page_patch(&f);
     patch.agents.max_parallel = 4;
     UpdateSettings::new(&f.deps).execute(patch, WebhookChange::Keep).unwrap();
-    assert_eq!(latest(&f).llm.base_url, "https://api.anthropic.com");
-    assert_eq!(f.shared.read().unwrap().llm.base_url, "http://127.0.0.1:4000");
+    assert_eq!(latest(&f).llm.claude_bin, "claude");
+    assert_eq!(f.shared.read().unwrap().llm.claude_bin, "/opt/claude/bin/claude");
 }
 
 #[test]
@@ -368,7 +361,7 @@ fn repository_checks_can_be_turned_off_but_not_on() {
 #[test]
 fn rollback_keeps_current_admin_only_values() {
     let mut old = ServerConfig::default();
-    old.llm.base_url = "https://old-proxy.example".into();
+    old.llm.claude_bin = "/old/claude".into();
     old.jira.mcp.command = vec!["old-mcp".into()];
     old.notify.webhook_url = WEBHOOK.into();
     old.agents.max_parallel = 5;
@@ -380,12 +373,11 @@ fn rollback_keeps_current_admin_only_values() {
     RollbackSettings::new(&f.deps).execute(1).unwrap();
     let rolled = latest(&f);
     assert_eq!(rolled.agents.max_parallel, 5, "ordinary fields are restored");
-    assert_eq!(rolled.llm.base_url, "https://api.anthropic.com");
+    assert_eq!(rolled.llm.claude_bin, "claude");
     assert_eq!(rolled.jira.mcp.command, ServerConfig::default().jira.mcp.command);
     assert_eq!(rolled.notify.webhook_url, "");
     assert!(!rolled.watch.run_repo_checks, "a rollback never turns repository checks on");
 
-    // Tightening values from the target are restored.
     let mut tight = ServerConfig::default();
     tight.watch.run_repo_checks = false;
     let g = fixture_with(tight, &[]);

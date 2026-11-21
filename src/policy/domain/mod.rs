@@ -1,6 +1,3 @@
-//! Pure policy model: the settable-field allow-list, proposal validation and lifecycle, sensitive-change
-//! (gate loosening) detection, diff rendering and the history dry-run. No I/O.
-
 pub mod dry_run;
 pub mod fields;
 pub mod gate;

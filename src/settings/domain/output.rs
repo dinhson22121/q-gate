@@ -1,5 +1,3 @@
-//! Server settings for the review files written after each scan, which developers hand to their coding agent.
-
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -12,14 +10,12 @@ const DEFAULT_KEEP_LAST: u32 = 20;
 const MAX_KEEP_LAST: u32 = 1000;
 const MAX_TEMPLATE_LEN: usize = 200;
 const TEMPLATE_EXTENSION: &str = ".md";
-/// Reserved: `latest.md` / `latest.json` are written next to the per-commit files.
 const RESERVED_FILE_NAME: &str = "latest.md";
 const DEFAULT_RULES_FILE: &str = "qgate-rules.md";
 const DEFAULT_RULES_MAX: u32 = 100;
 const MAX_RULES_MAX: u32 = 1000;
 const MAX_RULES_FILE_LEN: usize = 100;
 
-/// Placeholders accepted in `output.path_template`.
 pub const OUTPUT_PLACEHOLDERS: [&str; 7] = ["repo", "branch", "sha7", "sha", "date", "ticket", "status"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -27,7 +23,6 @@ pub const OUTPUT_PLACEHOLDERS: [&str; 7] = ["repo", "branch", "sha7", "sha", "da
 pub enum OutputFormat {
     Markdown,
     Json,
-    /// Self-contained report for humans (Jira evidence, print to PDF); opt-in.
     Html,
 }
 
@@ -35,22 +30,14 @@ pub enum OutputFormat {
 #[serde(default, deny_unknown_fields)]
 pub struct OutputConfig {
     pub enabled: bool,
-    /// Absolute directory the files are written under (in Docker: the `REVIEWS_PATH` mount).
     pub dir: String,
-    /// Relative path of each review file below `dir`; see [`OUTPUT_PLACEHOLDERS`].
     pub path_template: String,
-    /// Also write `{repo}/{branch}/latest.md` (and `latest.json` / `latest.html` when those formats are enabled).
     pub write_latest: bool,
     pub formats: Vec<OutputFormat>,
-    /// Also write per-commit files when the gate passed (`latest` is always kept current).
     pub include_passing: bool,
-    /// Generated files kept per folder; older ones are deleted. 0 keeps everything.
     pub keep_last: u32,
-    /// Merge each review's prevention rules into `{repo}/<rules_file>` for the developer's coding agent.
     pub rules_enabled: bool,
-    /// File name (no folder) of the per-repo rules file; its state is kept in `.<stem>.json` next to it.
     pub rules_file: String,
-    /// Most rules kept per repository; the least severe, least recently seen are dropped first.
     pub rules_max: u32,
 }
 
@@ -90,7 +77,6 @@ impl OutputConfig {
     }
 }
 
-/// A plain `.md` file name: letters, digits, `.`, `_`, `-`; no folder, not hidden, not `latest.md`.
 pub fn validate_rules_file(name: &str) -> Result<(), String> {
     if name.is_empty() || name.len() > MAX_RULES_FILE_LEN {
         return Err(format!("must be 1 to {MAX_RULES_FILE_LEN} characters"));
@@ -107,7 +93,6 @@ pub fn validate_rules_file(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Checks the syntax of a review-file path template; returns a user-facing message on error.
 pub fn validate_path_template(template: &str) -> Result<(), String> {
     if template.trim().is_empty() {
         return Err("must not be empty".into());

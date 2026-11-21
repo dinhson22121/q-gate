@@ -1,5 +1,3 @@
-//! Terminal and JSON presentation of a review report.
-
 use std::fmt::Write as _;
 
 use owo_colors::OwoColorize;
@@ -9,11 +7,9 @@ use crate::review::application::{
     CheckOutcome, CheckResult, Confidence, CriterionStatus, Finding, RequirementsReport, ReviewReport, Severity,
 };
 
-/// Output tail lines shown for a failed check.
 const CHECK_TAIL_LINES: usize = 10;
 const TOKENS_PER_THOUSAND: f64 = 1000.0;
 
-/// Which non-blocking findings to show (blocking ones are always shown).
 #[derive(Debug, Clone, Copy)]
 pub struct DisplayFilter {
     pub min_severity: Severity,

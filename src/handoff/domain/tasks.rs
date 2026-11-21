@@ -1,5 +1,3 @@
-//! Turns review results into self-contained tasks, split into blocking and warnings, in a stable order.
-
 use super::document::{CodeBlock, Fact, HandoffInput, Task, TaskKind};
 use super::text::language_of;
 use crate::review::application::{
@@ -10,11 +8,9 @@ use crate::review::application::{
 const DO_NOT_EDIT_TEST: &str =
     "Change the production code so this test passes. Do not weaken, skip or delete the generated test.";
 
-/// (blocking, warnings), each in the order the developer should handle them.
 pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
     let report = input.report;
     let mut rules = input.rules;
-    // A passing gate means nothing blocked, whatever the policy says.
     if report.gate.passed {
         rules.failed_tests = false;
         rules.rule_violations = false;
@@ -91,7 +87,6 @@ pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
     (blocking, warnings)
 }
 
-/// Same key format as the gate's `design_mismatches`.
 fn design_key(d: &DesignMismatch) -> String {
     format!("{:?}:{}", d.kind, d.node_id).to_lowercase()
 }
@@ -150,7 +145,6 @@ fn check_task(check: &CheckResult, kind: TaskKind) -> Task {
 }
 
 fn finding_task(finding: &Finding) -> Task {
-    // `FindingSource` is not part of the review application API; read its serialized form instead.
     let source = serde_json::to_value(&finding.source)
         .ok()
         .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_string))
@@ -253,7 +247,6 @@ fn evidence_blocks(label: &str, refs: &[EvidenceRef]) -> Vec<CodeBlock> {
     refs.iter().map(|r| code(format!("{label} ({}:{})", r.file, r.line), language_of(&r.file), &r.quote)).collect()
 }
 
-/// Text of a criterion by id ("" when unknown).
 pub(super) fn criterion_text(requirements: &RequirementsReport, id: &str) -> String {
     requirements.requirements.criteria.iter().find(|c| c.id == id).map(|c| c.text.clone()).unwrap_or_default()
 }

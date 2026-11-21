@@ -1,11 +1,3 @@
-//! Decorator that reuses a scenario's `Passed` result while everything it depended on is unchanged.
-//!
-//! Correctness beats hit-rate: the key holds the scenario, the model/prompt/toolchain tags, the
-//! changed paths, the tree id of every module directory the changes live in and the root build
-//! manifests. Only `Passed` results are stored (a failing test must always re-run to confirm a fix;
-//! inconclusive results are noise), and only when the code the test exercised lies inside the
-//! directories the key covers, so a dependency the key cannot see is never cached.
-
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -19,7 +11,6 @@ use crate::testing::domain::verdict::criterion_texts;
 
 const KIND: &str = "test_scenario";
 const SCHEMA_VERSION: u32 = 1;
-/// Files that mark a build module; the nearest one above a changed file defines its module directory.
 const MANIFESTS: [&str; 13] = [
     "Cargo.toml",
     "go.mod",
@@ -35,24 +26,20 @@ const MANIFESTS: [&str; 13] = [
     "Gemfile",
     "composer.json",
 ];
-/// Root-level lockfiles and workspace files that change the build of every module.
 const ROOT_BUILD_FILES: [&str; 6] =
     ["Cargo.lock", "go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"];
 
-/// What is stored: the passing result and the commit it was produced on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct StoredTest {
     commit: String,
     result: TestResult,
 }
 
-/// The key of one scenario run plus the module directories it covers.
 struct ScenarioKey {
     key: ContentKey,
     covered_dirs: Vec<String>,
 }
 
-/// A [`TestAgent`] that consults the cache before running `inner`.
 pub struct CachingTestAgent {
     inner: Arc<dyn TestAgent>,
     store: CacheStore,
@@ -61,7 +48,6 @@ pub struct CachingTestAgent {
 }
 
 impl CachingTestAgent {
-    /// `no_cache` bypasses every lookup and store (`qgate: no-cache` trailer / dashboard button).
     pub fn new(
         inner: Arc<dyn TestAgent>,
         cache: Arc<dyn crate::cache::application::ResultCache>,
@@ -72,7 +58,6 @@ impl CachingTestAgent {
         Self { inner, store: CacheStore::new(cache, no_cache), ids, tags }
     }
 
-    /// `None` when any part of the key cannot be determined: the result must then not be cached.
     async fn scenario_key(&self, input: &AgentInput<'_>, scenario: &TestScenario) -> Option<ScenarioKey> {
         let paths: BTreeSet<&str> = input.files.iter().map(|f| f.path.as_str()).collect();
         let mut modules = HashMap::new();
@@ -96,7 +81,6 @@ impl CachingTestAgent {
         Some(ScenarioKey { key, covered_dirs: covered.into_iter().collect() })
     }
 
-    /// Directory of the nearest build manifest at or above `path` (`""` = repository root).
     async fn module_dir(
         &self,
         commit: &str,
@@ -141,7 +125,6 @@ fn scenario_digest(input: &AgentInput<'_>, scenario: &TestScenario) -> String {
     digest(parts)
 }
 
-/// A result may be stored only when it passed and every file it exercised is inside a covered module.
 fn is_cacheable(result: &TestResult, covered_dirs: &[String]) -> bool {
     if result.verdict != TestVerdict::Passed {
         return false;

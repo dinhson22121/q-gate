@@ -9,7 +9,6 @@ use crate::quality::domain::{Language, QualityTool};
 
 const GO_MOD: &str = "go.mod";
 
-/// Go vulnerabilities whose vulnerable code is actually reachable (call-graph analysis).
 pub struct GovulncheckCheck {
     runner: ToolRunner,
     binary: Option<PathBuf>,

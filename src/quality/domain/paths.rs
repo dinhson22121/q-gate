@@ -1,9 +1,5 @@
-//! Tool output names files in several ways (relative, absolute, `./`-prefixed); the gate needs one form.
-
 use std::path::Path;
 
-/// `path` relative to `root` with `/` separators and no `./` prefix; unchanged shape when it is already relative
-/// or outside `root`.
 pub fn relative_to(path: &str, root: &Path) -> String {
     let stripped = Path::new(path).strip_prefix(root).map_or(path, |rest| rest.to_str().unwrap_or(path));
     let normalised = stripped.replace('\\', "/");

@@ -1,6 +1,3 @@
-//! Reads translation strings from json/yaml files under `locales`, `i18n`, `lang` or `translations`
-//! directories of a repository. Symlinks are not followed; size and count are capped.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,7 +28,6 @@ impl I18nSource for FsI18nSource {
     }
 }
 
-/// Translation strings of every i18n resource under `root` (JSON string leaves; YAML raw content).
 pub fn load_texts(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
     collect(root, root, 0, &mut files);
@@ -60,7 +56,6 @@ fn collect(root: &Path, dir: &Path, depth: usize, out: &mut Vec<(PathBuf, u64)>)
     let mut entries: Vec<_> = entries.flatten().collect();
     entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
-        // symlink_metadata: never follow links out of the repository.
         let Ok(meta) = fs::symlink_metadata(entry.path()) else { continue };
         let name = entry.file_name().to_string_lossy().to_string();
         if meta.is_dir() && !SKIPPED_DIRS.contains(&name.as_str()) {

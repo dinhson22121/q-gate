@@ -62,7 +62,6 @@ impl TestServer {
         format!("http://{}{path}", self.addr)
     }
 
-    /// A same-origin request as the page sends it.
     fn page(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.custom(method, path, "application/json", &format!("http://localhost:{}", self.addr.port()))
     }
@@ -114,7 +113,7 @@ async fn get_returns_view_without_secret_or_webhook_values() {
     assert_eq!(body["locked"], json!([{ "field": "jira.email", "env_var": "JIRA_EMAIL" }]));
     assert_eq!(body["restart_required_fields"].as_array().unwrap().len(), 9);
     assert_eq!(
-        body["secrets"][1],
+        body["secrets"][0],
         json!({ "name": "jira_api_token", "configured": true, "source": "store", "env_var": "JIRA_API_TOKEN" })
     );
     assert_eq!(body["config"]["agents"]["tests"]["languages"], json!(["go", "java", "python", "rust"]));
@@ -197,7 +196,6 @@ async fn mutations_require_header_token_json_and_allowed_origin() {
     let form = server.custom(put.clone(), "/api/settings", "text/plain", &local).body(body.clone());
     assert_eq!(form.send().await.unwrap().status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
-    // A local process sending the CSRF header but not this instance's token.
     let no_token = server.without_token(put.clone(), "/api/settings", "application/json", &local).body(body.clone());
     let response = no_token.send().await.unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -242,7 +240,7 @@ async fn host_check_still_applies_to_settings_routes() {
 
 #[tokio::test]
 async fn secret_endpoints_never_echo_values() {
-    let server = TestServer::start(&[("ANTHROPIC_API_KEY", "sk-from-env")]).await;
+    let server = TestServer::start(&[("JIRA_API_TOKEN", "sk-from-env")]).await;
     let response = server
         .page(reqwest::Method::PUT, "/api/secrets/figma_token")
         .json(&json!({ "value": SECRET_VALUE }))
@@ -265,12 +263,11 @@ async fn secret_endpoints_never_echo_values() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(!response.text().await.unwrap().contains("space-secret"));
 
-    let env_owned =
-        server.page(reqwest::Method::PUT, "/api/secrets/anthropic_api_key").json(&json!({ "value": "sk-x" }));
+    let env_owned = server.page(reqwest::Method::PUT, "/api/secrets/jira_api_token").json(&json!({ "value": "sk-x" }));
     let response = env_owned.send().await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let text = response.text().await.unwrap();
-    assert!(text.contains("ANTHROPIC_API_KEY") && !text.contains("sk-from-env"), "{text}");
+    assert!(text.contains("JIRA_API_TOKEN") && !text.contains("sk-from-env"), "{text}");
 
     let deleted = server.page(reqwest::Method::DELETE, "/api/secrets/figma_token").send().await.unwrap();
     assert_eq!(deleted.status(), StatusCode::OK);
@@ -378,11 +375,12 @@ async fn review_file_settings_are_saved_and_validated() {
 
 #[tokio::test]
 async fn endpoints_commands_and_webhook_are_read_only_over_http() {
-    let server = TestServer::start(&[("QGATE_LLM_BASE_URL", "http://127.0.0.1:4000")]).await;
+    let server = TestServer::start(&[("QGATE_CLAUDE_BIN", "/opt/claude/bin/claude")]).await;
     let settings = server.settings().await;
     let admin_only = settings["admin_only"].as_array().unwrap();
     for (field, env_var) in [
-        ("llm.base_url", "QGATE_LLM_BASE_URL"),
+        ("llm.claude_bin", "QGATE_CLAUDE_BIN"),
+        ("llm.timeout_secs", "QGATE_CLI_TIMEOUT_SECS"),
         ("jira.mcp.command", "QGATE_JIRA_MCP_COMMAND"),
         ("notify.webhook_url", "QGATE_WEBHOOK_URL"),
         ("watch.run_repo_checks", "QGATE_RUN_REPO_CHECKS"),
@@ -391,7 +389,7 @@ async fn endpoints_commands_and_webhook_are_read_only_over_http() {
     }
     let base = settings["config"].clone();
     let changes: [(&str, &str, Value); 6] = [
-        ("llm", "base_url", json!("https://attacker.example")),
+        ("llm", "claude_bin", json!("/tmp/evil")),
         ("jira", "base_url", json!("https://attacker.example")),
         ("figma", "api_base_url", json!("https://attacker.example")),
         ("figma", "mcp_url", json!("https://attacker.example/mcp")),
@@ -415,16 +413,14 @@ async fn endpoints_commands_and_webhook_are_read_only_over_http() {
     }
     assert_eq!(server.store.recent(10).unwrap().len(), 1, "nothing was saved");
 
-    // Tightening stays allowed: repository checks off, webhook cleared.
     let mut config = base.clone();
     config["watch"]["run_repo_checks"] = json!(false);
     let (status, text) = server.put_config(json!({ "config": config, "webhook": { "action": "clear" } })).await;
     assert_eq!(status, StatusCode::OK, "{text}");
     let saved = server.store.load_raw().unwrap().unwrap();
     assert!(!saved.watch.run_repo_checks && saved.notify.webhook_url.is_empty());
-    assert_eq!(saved.llm.base_url, "https://api.anthropic.com", "the env value is not persisted");
+    assert_eq!(saved.llm.claude_bin, "claude", "the env value is not persisted");
 
-    // ...but turning them back on is not.
     let mut config = server.settings().await["config"].clone();
     config["watch"]["run_repo_checks"] = json!(true);
     let (status, text) = server.put_config(json!({ "config": config })).await;

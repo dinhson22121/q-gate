@@ -1,6 +1,3 @@
-//! Shared HTTP plumbing for the dashboard's api layers (settings, rulebook, policy): the per-instance
-//! API token and the checks every mutating route runs. Used only by `*/api` modules; no domain code.
-
 mod api_token;
 mod mutation_guard;
 

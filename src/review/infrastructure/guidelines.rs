@@ -1,15 +1,8 @@
-//! Loads repository-specific review guidelines (CLAUDE.md, CONTRIBUTING.md, ...).
-
 use std::path::{Component, Path};
 
 const TRUNCATED_NOTE: &str = "[truncated]";
 const SECTION_SEPARATOR: &str = "\n\n";
 
-/// Concatenates the guideline `files` (relative to `root`) that exist, followed by `extra`.
-///
-/// Each file becomes a `## <path>` section, cut to `max_bytes_per_file` on a char boundary.
-/// Absolute paths, paths with `..`, symlinks and unreadable or non-UTF-8 files are ignored,
-/// so a repository cannot pull content from outside itself into the prompt.
 pub async fn load_guidelines(root: &Path, files: &[String], extra: &str, max_bytes_per_file: usize) -> String {
     let mut sections = Vec::new();
     for file in files.iter().filter(|f| is_safe_relative(f)) {
@@ -29,14 +22,12 @@ fn is_safe_relative(path: &str) -> bool {
     !path.as_os_str().is_empty() && path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
-/// Non-empty UTF-8 content of a regular, non-symlink file that really lives below `root`.
 async fn read_guideline(root: &Path, file: &str) -> Option<String> {
     let path = root.join(file);
     let metadata = tokio::fs::symlink_metadata(&path).await.ok()?;
     if !metadata.file_type().is_file() {
         return None;
     }
-    // A symlinked parent directory could still point outside the repository.
     let real_root = tokio::fs::canonicalize(root).await.ok()?;
     if !tokio::fs::canonicalize(&path).await.ok()?.starts_with(real_root) {
         return None;

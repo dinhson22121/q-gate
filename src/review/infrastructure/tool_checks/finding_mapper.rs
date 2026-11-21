@@ -1,13 +1,8 @@
-//! Maps the deterministic contexts' results (quality tools, regression detection) onto review `Finding`s, so the
-//! existing gate, handoff file, dashboard and redaction handle them without knowing where they came from.
-//! Findings that block carry Critical severity and High confidence; the rest are minor and never block.
-
-use crate::impact::domain::Regression;
+use crate::impact::application::Regression;
 use crate::quality::{QualityCategory, QualityFinding, Verdict};
 use crate::review::domain::finding::{Category, Confidence, Finding, FindingSource, PreventionRule, Severity};
 
 const REGRESSION_TOOL: &str = "regression";
-/// Findings have no line zero; whole-file findings (a manifest dependency, a package) point at line 1.
 const FIRST_LINE: u32 = 1;
 
 pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
@@ -42,8 +37,6 @@ pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
     }
 }
 
-/// A confirmed regression: a test that passed on base and fails on head. Always blocking. `location` is the
-/// failing test's `(file, line)` when it could be found; otherwise the finding points at the package.
 pub fn regression_to_finding(regression: &Regression, location: Option<(String, u32)>) -> Finding {
     let (file, line) = location.unwrap_or_else(|| (regression.package.clone(), FIRST_LINE));
     let subject = if regression.test.is_empty() { "package tests".to_string() } else { regression.test.clone() };

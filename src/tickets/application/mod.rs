@@ -1,5 +1,3 @@
-//! Tickets use cases and the ports they need. Other contexts use the tickets context only through here.
-
 pub mod analyze_ticket;
 pub mod fetch_requirements;
 pub mod load_ticket_context;

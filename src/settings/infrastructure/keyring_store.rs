@@ -1,9 +1,6 @@
-//! Credential store backed by the OS keychain (macOS Keychain, Windows Credential Manager).
-
 use crate::settings::application::credentials::{CredentialError, CredentialStore};
 use crate::settings::domain::credentials::{CredentialName, Secret};
 
-/// Keychain service name under which every qgate secret is stored.
 pub const KEYRING_SERVICE: &str = "qgate";
 
 #[derive(Debug, Clone, Default)]
@@ -48,7 +45,6 @@ fn map_delete(result: keyring::Result<()>) -> Result<(), CredentialError> {
     }
 }
 
-/// keyring errors describe the failure, never the password.
 fn store_error(error: keyring::Error) -> CredentialError {
     CredentialError::Store(format!("OS keychain: {error}"))
 }

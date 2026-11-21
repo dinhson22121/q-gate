@@ -1,5 +1,3 @@
-//! Single-instance guard: an exclusive lock on `<data_dir>/qgate/watch.lock`.
-
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -9,8 +7,6 @@ use crate::watch::application::ports::WatchError;
 const APP_DIR: &str = "qgate";
 const LOCK_FILE: &str = "watch.lock";
 
-/// Held for the lifetime of the watcher; the OS releases the lock when the process exits,
-/// even on a crash, so a stale file never blocks a restart.
 #[derive(Debug)]
 pub struct InstanceGuard {
     _file: File,
@@ -18,13 +14,10 @@ pub struct InstanceGuard {
 }
 
 impl InstanceGuard {
-    /// `<data_dir>/qgate/watch.lock`, when the platform has a data directory.
     pub fn default_path() -> Option<PathBuf> {
         dirs::data_dir().map(|dir| dir.join(APP_DIR).join(LOCK_FILE))
     }
 
-    /// Takes the lock and records the current pid, or fails with
-    /// [`WatchError::AlreadyRunning`] when another process holds it.
     pub fn acquire(path: &Path) -> Result<Self, WatchError> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -49,7 +42,6 @@ impl InstanceGuard {
     }
 }
 
-/// Pid recorded by the lock holder (unreadable on platforms with mandatory locks).
 fn read_pid(file: &mut File) -> Option<u32> {
     let mut text = String::new();
     file.read_to_string(&mut text).ok()?;
@@ -79,8 +71,6 @@ mod tests {
         }
 
         drop(first);
-        // Children forked concurrently by other tests briefly inherit the descriptor (until
-        // exec closes it), which can hold the lock for a few milliseconds.
         let mut reacquired = InstanceGuard::acquire(&path);
         for _ in 0..100 {
             if reacquired.is_ok() {

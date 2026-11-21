@@ -1,5 +1,3 @@
-//! SHA-256 (FIPS 180-4) for cache keys. Small and dependency-free; not used for security decisions.
-
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
     0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
@@ -13,10 +11,8 @@ const K: [u32; 64] = [
 const INITIAL_STATE: [u32; 8] =
     [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
 const BLOCK_LEN: usize = 64;
-/// Bytes at the end of the last block holding the message length in bits.
 const LENGTH_LEN: usize = 8;
 
-/// Lowercase hex SHA-256 of `data`.
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut padded = data.to_vec();
     padded.push(0x80);

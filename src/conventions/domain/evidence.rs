@@ -1,18 +1,12 @@
-//! Mechanical grounding: rule examples must quote files the model was shown, and violations must
-//! quote code the change added. Anything else is dropped.
-
 use std::collections::HashMap;
 
 use globset::Glob;
 
 use super::rulebook::{FileLine, MAX_EXAMPLES, RuleDraft};
 
-/// Lines a quote may be away from the line the model reported.
 pub const LINE_WINDOW: u32 = 3;
-/// A quote shorter than this (non-whitespace chars) does not identify anything.
 const MIN_QUOTE_CHARS: usize = 6;
 
-/// One line of a changed file's new version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewLine {
     pub number: u32,
@@ -20,11 +14,9 @@ pub struct NewLine {
     pub added: bool,
 }
 
-/// A changed file as the conventions check sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangedFile {
     pub path: String,
-    /// Numbered diff text shown to the model.
     pub diff: String,
     pub new_lines: Vec<NewLine>,
 }
@@ -41,9 +33,6 @@ fn is_substantial(quote: &str) -> bool {
     quote.chars().filter(|c| !c.is_whitespace()).count() >= MIN_QUOTE_CHARS
 }
 
-/// Finds `quote` (consecutive lines, whitespace-insensitive, each quote line contained in its file
-/// line) starting within [`LINE_WINDOW`] of `line` in `lines` (`(number, text)` pairs in order).
-/// Returns the index of the first matched entry.
 fn find_quote(lines: &[(u32, &str)], line: u32, quote: &str) -> Option<usize> {
     let wanted = quote_lines(quote);
     if wanted.is_empty() || !is_substantial(quote) {
@@ -55,22 +44,17 @@ fn find_quote(lines: &[(u32, &str)], line: u32, quote: &str) -> Option<usize> {
     })
 }
 
-/// Line where the example's quote really is in `content`, if it is within the window.
 pub fn locate_example(content: &str, example: &FileLine) -> Option<u32> {
     let lines: Vec<(u32, &str)> = (1u32..).zip(content.lines()).collect();
     find_quote(&lines, example.line, &example.quote).map(|i| lines[i].0)
 }
 
-/// Whether `quote` is in the new code near `line` and touches at least one added line.
 pub fn quote_in_added_code(file: &ChangedFile, line: u32, quote: &str) -> bool {
     let lines: Vec<(u32, &str)> = file.new_lines.iter().map(|l| (l.number, l.text.as_str())).collect();
     find_quote(&lines, line, quote)
         .is_some_and(|start| file.new_lines[start..].iter().take(quote_lines(quote).len()).any(|l| l.added))
 }
 
-/// Cleans model drafts: examples must exist in `files` (path → content shown to the model; line
-/// numbers are corrected to where the quote really is), at most [`MAX_EXAMPLES`] are kept, and a
-/// rule without a verified example is dropped. Invalid scope globs are removed.
 pub fn validate_drafts(drafts: Vec<RuleDraft>, files: &HashMap<String, String>) -> Vec<RuleDraft> {
     drafts
         .into_iter()

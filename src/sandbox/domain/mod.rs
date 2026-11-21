@@ -1,6 +1,3 @@
-//! Pure rules for running untrusted commands: the request/result model, request limits, the
-//! environment allow-list and the bounded output tail.
-
 mod output;
 mod request;
 

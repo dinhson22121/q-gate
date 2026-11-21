@@ -102,7 +102,6 @@ impl TestServer {
         format!("http://{}{path}", self.addr)
     }
 
-    /// A same-origin request as the page sends it.
     fn post(&self, path: &str) -> reqwest::RequestBuilder {
         self.client
             .post(self.url(path))
@@ -252,16 +251,14 @@ async fn bad_input_and_missing_items_map_to_clear_statuses() {
 }
 
 #[tokio::test]
-async fn missing_api_key_points_to_settings_and_model_failures_are_generic() {
-    let unavailable = FakeModel {
-        error: Some(PolicyError::ModelUnavailable("no Anthropic API key configured".into())),
-        ..FakeModel::default()
-    };
+async fn missing_claude_auth_points_to_the_readme_and_model_failures_are_generic() {
+    let unavailable =
+        FakeModel { error: Some(PolicyError::ModelUnavailable("claude CLI not found".into())), ..FakeModel::default() };
     let server = TestServer::start(unavailable).await;
     let (status, body) = server.send(server.post("/api/policy/proposals").json(&json!({ "description": "x" }))).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert!(body["error"].as_str().unwrap().contains("/settings"));
-    assert_eq!(server.get("/policy").await.0, StatusCode::OK, "the page works without a key");
+    assert!(body["error"].as_str().unwrap().contains("Claude CLI"));
+    assert_eq!(server.get("/policy").await.0, StatusCode::OK, "the page works without the CLI");
 
     let failing = FakeModel { error: Some(PolicyError::Model("secret detail".into())), ..FakeModel::default() };
     let server = TestServer::start(failing).await;

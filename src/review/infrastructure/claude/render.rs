@@ -1,21 +1,12 @@
-//! Renders changed files as numbered, tagged text for the model.
-//!
-//! Format (explained to the model in the user message):
-//! - diff lines: `<new line no> + code` (added), `<new line no>   code` (context), `<blank> - code` (removed);
-//! - file content lines: `<line no> | code`, with `…` marking omitted ranges.
-
 use std::fmt::Write as _;
 use std::ops::RangeInclusive;
 
 use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange, Hunk};
 
-/// Files up to this many lines are shown in full; longer ones as windows around the changes.
 pub const FULL_FILE_LINE_LIMIT: usize = 400;
-/// Lines of context shown on each side of a changed position in a windowed file.
 pub const WINDOW_RADIUS: u32 = 30;
 const GAP_MARKER: &str = "…";
 
-/// `<changed_file>` element with both the numbered diff and the (possibly windowed) new content.
 pub fn render_file_for_review(file: &FileChange) -> String {
     let mut out = open_file_tag(file);
     out.push_str(&render_diff_block(file));
@@ -24,7 +15,6 @@ pub fn render_file_for_review(file: &FileChange) -> String {
     out
 }
 
-/// `<changed_file>` element with the numbered diff only.
 pub fn render_file_diff_only(file: &FileChange) -> String {
     let mut out = open_file_tag(file);
     out.push_str(&render_diff_block(file));
@@ -104,8 +94,7 @@ fn render_content_block(file: &FileChange) -> String {
     out
 }
 
-/// Line ranges of the new file to show: everything for short files, else merged windows.
-#[allow(clippy::single_range_in_vec_init)] // a one-range list is intended, not a vector of numbers
+#[allow(clippy::single_range_in_vec_init)]
 fn visible_ranges(file: &FileChange, total: usize) -> Vec<RangeInclusive<u32>> {
     let total = u32::try_from(total).unwrap_or(u32::MAX);
     if total as usize <= FULL_FILE_LINE_LIMIT {
@@ -138,7 +127,6 @@ fn number_width(max_line: u32) -> usize {
     max_line.max(1).to_string().len()
 }
 
-/// Escapes a value for use inside a double-quoted XML-style attribute.
 pub fn escape_attr(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
@@ -185,7 +173,6 @@ mod tests {
         assert!(!out.contains(" 469 | "));
         assert!(out.contains(" 570 | line570\n…\n</new_file_content>"));
         assert!(!out.contains(" 571 | "));
-        // windows around 500 and 540 overlap and are merged without a gap marker
         assert_eq!(out.matches(GAP_MARKER).count(), 2);
     }
 

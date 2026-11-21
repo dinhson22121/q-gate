@@ -1,6 +1,3 @@
-//! osv-scanner: `osv-scanner scan source --format json -r .` prints `{"results":[{"source":..,"packages":[..]}]}`.
-//! One finding per vulnerability group (a group is the same advisory under its CVE/GHSA/GO ids).
-
 use std::path::Path;
 
 use serde_json::Value;
@@ -62,7 +59,6 @@ fn package_findings(package: &Value, manifest: Option<&str>) -> Vec<QualityFindi
         .collect()
 }
 
-/// CVSS score of the group, else the advisory's own label, else medium (unknown severity warns, never blocks).
 fn severity(group: &Value, advisory: Option<&Value>) -> QualitySeverity {
     let score = group["max_severity"].as_str().and_then(|s| s.trim().parse::<f64>().ok());
     if let Some(score) = score {

@@ -1,6 +1,3 @@
-//! SQLite `DesignCache`. Shares the qgate database file but owns its tables
-//! (`design_schema_version`, `figma_cache`).
-
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,7 +10,6 @@ use crate::design::application::{CachedDesign, DesignCache, DesignError, DesignS
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ordered schema migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE figma_cache (
         file_key   TEXT NOT NULL,
@@ -36,7 +32,6 @@ fn storage(err: impl std::fmt::Display) -> DesignError {
 }
 
 impl SqliteDesignCache {
-    /// Opens (creating the parent directory and file if needed) `<data_dir>/qgate.db` and migrates.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DesignError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -96,7 +91,6 @@ fn read(conn: &Connection, file_key: &str, node_id: &str) -> Result<Option<Cache
         .optional()
         .map_err(storage)?;
     let Some((version, fetched_at, spec_json, png)) = row else { return Ok(None) };
-    // An unreadable row (older format) is a miss, not an error: it will be overwritten.
     Ok(serde_json::from_str::<DesignSpec>(&spec_json).ok().map(|spec| CachedDesign { version, fetched_at, spec, png }))
 }
 

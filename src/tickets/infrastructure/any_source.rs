@@ -1,5 +1,3 @@
-//! The configured Jira provider as one [`TicketSource`], forwarding the freshness probe too.
-
 use crate::tickets::application::{TicketError, TicketSource};
 use crate::tickets::domain::{Ticket, TicketKey};
 

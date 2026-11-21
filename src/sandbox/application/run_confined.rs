@@ -1,6 +1,3 @@
-//! Use case of the isolated runner: validate a request, confine its working directory to the work
-//! root (after resolving symlinks), then execute it.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,12 +6,10 @@ use crate::sandbox::domain::{ExecRequest, ExecResult, FailureKind, is_inside, va
 
 pub struct RunConfined {
     backend: Arc<dyn ExecBackend>,
-    /// Canonical work root.
     root: PathBuf,
 }
 
 impl RunConfined {
-    /// Fails when `root` does not exist.
     pub fn new(backend: Arc<dyn ExecBackend>, root: &Path) -> std::io::Result<Self> {
         Ok(Self { backend, root: std::fs::canonicalize(root)? })
     }

@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"stop_reason":"stop_sequence","terminal_reason":"api_error","num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0},"result":"You've hit your limit · resets 4:30pm (Asia/Ho_Chi_Minh)"}

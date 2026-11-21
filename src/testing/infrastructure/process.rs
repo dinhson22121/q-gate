@@ -1,7 +1,3 @@
-//! Runs the generated test's fixed command through the sandbox's execution backend: in the isolated
-//! runner container under Docker, as a child process natively (no shell, environment allow-list,
-//! process-group kill on exit/timeout/cancellation either way).
-
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +6,6 @@ use crate::sandbox::application::{ExecBackend, ExecRequest, ExecResult, FailureK
 use crate::testing::application::ports::TestRunner;
 use crate::testing::domain::classify::RawRun;
 
-/// Bytes of output kept (the tail holds the failing assertion).
 const TAIL_MAX_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]

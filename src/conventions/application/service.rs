@@ -1,5 +1,3 @@
-//! Keeps rulebooks current (one build at a time per repository) and applies human decisions.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
@@ -11,7 +9,6 @@ use super::build::{BuildRulebook, blocking, repo_key};
 use super::ports::{ConventionsError, RuleDecision, RuleModel, RulebookStore};
 use crate::conventions::domain::rulebook::{RuleStatus, Rulebook, TeamRule, normalize_title};
 
-/// Progress of the latest build of one repository.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildState {
     pub building: bool,
@@ -24,8 +21,6 @@ struct Registry {
     states: HashMap<String, BuildState>,
 }
 
-/// Process-wide so every service instance (reviewer per review, dashboard API) shares the per-repo
-/// build lock: a repository is never built twice at the same time.
 static REGISTRY: LazyLock<StdMutex<Registry>> = LazyLock::new(StdMutex::default);
 
 fn with_registry<T>(f: impl FnOnce(&mut Registry) -> T) -> T {
@@ -60,8 +55,6 @@ impl RulebookService {
         self.model.as_ref()
     }
 
-    /// The stored rulebook if it is still current; otherwise builds one. Concurrent callers for the
-    /// same repository wait for a single build.
     pub async fn current(&self, root: &Path, refresh_days: u32) -> Result<Rulebook, ConventionsError> {
         let repo = repo_key(root);
         let lock = build_lock(&repo);
@@ -75,7 +68,6 @@ impl RulebookService {
         self.build_locked(&repo, root).await
     }
 
-    /// Builds a new rulebook even if the current one is fresh.
     pub async fn rebuild(&self, root: &Path) -> Result<Rulebook, ConventionsError> {
         let repo = repo_key(root);
         let lock = build_lock(&repo);
@@ -94,8 +86,6 @@ impl RulebookService {
         result
     }
 
-    /// Starts a rebuild of a repository that already has a rulebook (never an arbitrary path) in the
-    /// background. Returns at once; progress is visible through [`Self::build_state`].
     pub async fn start_rebuild(self: &Arc<Self>, repo: &str) -> Result<(), ConventionsError> {
         if self.load(repo).await?.is_none() {
             return Err(ConventionsError::NotFound(format!("no rulebook for repository {repo}")));
@@ -104,7 +94,6 @@ impl RulebookService {
         let service = self.clone();
         let root = PathBuf::from(repo);
         tokio::spawn(async move {
-            // Errors are recorded in the build state and logged by `build_locked`.
             let _ = service.rebuild(&root).await;
         });
         Ok(())
@@ -125,7 +114,6 @@ impl RulebookService {
         blocking(move || store.repos()).await
     }
 
-    /// Records a human decision on one rule; it survives rebuilds (matched by normalized title).
     pub async fn decide(&self, repo: &str, rule_id: &str, status: RuleStatus) -> Result<Rulebook, ConventionsError> {
         let store = self.store.clone();
         let (repo, rule_id) = (repo.to_string(), rule_id.to_string());
@@ -142,8 +130,6 @@ impl RulebookService {
         .await
     }
 
-    /// Adds or edits team rules (Policy assistant) with their statuses recorded as decisions, so both
-    /// survive rebuilds. Creates the repository's rulebook when there is none yet. Waits for a running build.
     pub async fn add_team_rules(&self, repo: &str, writes: Vec<TeamRule>) -> Result<Rulebook, ConventionsError> {
         let lock = build_lock(repo);
         let _guard = lock.lock().await;

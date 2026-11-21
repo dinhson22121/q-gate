@@ -1,5 +1,3 @@
-//! Jira connection settings, shared by the server config (defaults) and repository configs (overrides).
-
 use serde::{Deserialize, Serialize};
 
 use super::validation::{ValidationError, ValidationResult, require_env_name, require_non_empty, require_secure_url};
@@ -8,26 +6,19 @@ const DEFAULT_BASE_URL: &str = "https://yourcompany.atlassian.net";
 const DEFAULT_MCP_TOOL: &str = "jira_get_issue";
 const CUSTOM_FIELD_PREFIX: &str = "customfield_";
 
-/// How acceptance criteria are fetched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JiraProvider {
-    /// Jira Cloud REST API with email + API token.
     #[default]
     Rest,
-    /// An MCP server (e.g. `mcp-atlassian`) started as a child process.
     Mcp,
 }
 
-/// MCP server used when `provider = "mcp"`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JiraMcpConfig {
-    /// Program and arguments, started without a shell.
     pub command: Vec<String>,
-    /// Tool that returns an issue by key.
     pub tool: String,
-    /// Environment variables forwarded to the MCP server (everything else is cleared).
     pub env_passthrough: Vec<String>,
 }
 
@@ -41,7 +32,6 @@ impl Default for JiraMcpConfig {
     }
 }
 
-/// Fully resolved Jira settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JiraConfig {
@@ -49,9 +39,7 @@ pub struct JiraConfig {
     pub base_url: String,
     pub email: String,
     pub provider: JiraProvider,
-    /// Optional custom field id holding the acceptance criteria (e.g. `customfield_10050`).
     pub ac_field: String,
-    /// Optional allow-list of project keys recognised in branch names / commit messages.
     pub key_pattern_projects: Vec<String>,
     pub mcp: JiraMcpConfig,
 }
@@ -71,7 +59,6 @@ impl Default for JiraConfig {
 }
 
 impl JiraConfig {
-    /// Full validation: formats, plus everything the selected provider needs when enabled.
     pub fn validate(&self, prefix: &str) -> ValidationResult {
         self.validate_format(prefix)?;
         if !self.enabled {
@@ -86,7 +73,6 @@ impl JiraConfig {
         }
     }
 
-    /// Checks the shape of each value without requiring the settings to be complete.
     pub fn validate_format(&self, prefix: &str) -> ValidationResult {
         require_secure_url(&format!("{prefix}.base_url"), &self.base_url)?;
         validate_ac_field(&format!("{prefix}.ac_field"), &self.ac_field)?;
@@ -100,11 +86,6 @@ impl JiraConfig {
     }
 }
 
-/// Repository-level `[jira]` section: every field is optional and falls back to the server defaults.
-///
-/// Only harmless settings can be overridden. The endpoint, account, provider and MCP command decide where
-/// the Jira API token goes (or which program receives it), so they come from the server config only:
-/// a repository's `.qgate.toml` is controlled by whoever can push a commit.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JiraOverride {
@@ -114,7 +95,6 @@ pub struct JiraOverride {
 }
 
 impl JiraOverride {
-    /// The values set here, falling back to `defaults` for anything left unset.
     pub fn apply_to(&self, defaults: &JiraConfig) -> JiraConfig {
         JiraConfig {
             enabled: self.enabled.unwrap_or(defaults.enabled),
@@ -130,13 +110,11 @@ impl JiraOverride {
         }
     }
 
-    /// Checks the format of the values that are set (completeness is checked after merging).
     pub fn validate(&self, prefix: &str) -> ValidationResult {
         self.apply_to(&JiraConfig::default()).validate_format(prefix)
     }
 }
 
-/// Requires a non-empty program name.
 pub(crate) fn require_command(field: &str, command: &[String]) -> ValidationResult {
     match command.first() {
         Some(program) if !program.trim().is_empty() => Ok(()),
@@ -144,7 +122,6 @@ pub(crate) fn require_command(field: &str, command: &[String]) -> ValidationResu
     }
 }
 
-/// Field ids end up in API URLs, so only `customfield_<digits>` (or empty) is accepted.
 fn validate_ac_field(field: &str, value: &str) -> ValidationResult {
     if value.is_empty() {
         return Ok(());
@@ -156,7 +133,6 @@ fn validate_ac_field(field: &str, value: &str) -> ValidationResult {
     Ok(())
 }
 
-/// Jira project keys: an uppercase letter followed by uppercase letters, digits or `_`.
 fn validate_project_key(field: &str, key: &str) -> ValidationResult {
     let mut chars = key.chars();
     let valid_start = chars.next().is_some_and(|c| c.is_ascii_uppercase());

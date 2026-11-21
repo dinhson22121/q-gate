@@ -1,10 +1,7 @@
-//! Per-test results of one `go test` run, independent of how they were produced.
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-/// The pseudo test name holding a package's own result (build failure, panic, timeout, TestMain).
 pub const PACKAGE_LEVEL: &str = "";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,16 +15,12 @@ pub enum TestOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestResult {
     pub outcome: TestOutcome,
-    /// Tail of the test's output; kept for failures only.
     pub output_tail: String,
 }
 
-/// Results by package, then by test name (`PACKAGE_LEVEL` for the package itself). Serializable so
-/// the base-side run can be cached.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestRun {
     pub packages: BTreeMap<String, BTreeMap<String, TestResult>>,
-    /// Output was cut or a command timed out, so some results may be missing.
     #[serde(default)]
     pub incomplete: bool,
 }
@@ -45,7 +38,6 @@ impl TestRun {
         self.result(package, test).map(|r| r.outcome)
     }
 
-    /// Every failed `(package, test)`.
     pub fn failures(&self) -> impl Iterator<Item = (&str, &str, &TestResult)> {
         self.packages.iter().flat_map(|(package, tests)| {
             tests

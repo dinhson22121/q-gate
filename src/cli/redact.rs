@@ -1,14 +1,9 @@
-//! Removes secrets from a report before it is stored, shown on the dashboard or sent to a webhook.
-//! Check output and quoted code are repository-controlled and may echo credentials.
-
 use crate::review::application::ReviewReport;
 use crate::review::domain::agent_results::{AgentReport, TestScenario};
 
 pub const REDACTED: &str = "[REDACTED]";
-/// Prefixes of well-known credential formats, redacted together with the token characters that follow.
 const TOKEN_PREFIXES: &[&str] = &["sk-ant-", "ghp_", "github_pat_", "xoxb-", "xoxp-", "AKIA", "ATATT"];
 const MIN_TOKEN_BODY: usize = 12;
-/// Secrets shorter than this are not redacted by value (too many false positives).
 const MIN_SECRET_LEN: usize = 8;
 
 pub fn redact_report(report: &mut ReviewReport, secrets: &[&str]) {
@@ -37,8 +32,6 @@ pub fn redact_report(report: &mut ReviewReport, secrets: &[&str]) {
     }
 }
 
-/// Test output and sources are written by the model and run in the snapshot: the likeliest place for a
-/// leaked credential to surface.
 fn redact_agents(agents: &mut AgentReport, clean: &impl Fn(&mut String)) {
     if let Some(brief) = agents.brief.as_mut() {
         clean(&mut brief.context);

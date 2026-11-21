@@ -1,6 +1,3 @@
-//! SQLite `ProposalStore`: one row per proposal in `qgate.db` (its own table), the proposal as JSON and
-//! the status in a column so a status change is a conditional update.
-
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -12,7 +9,6 @@ use crate::policy::domain::{Proposal, ProposalStatus};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ordered migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE policy_proposals (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +30,6 @@ pub struct SqliteProposalStore {
 }
 
 impl SqliteProposalStore {
-    /// Opens (creating parent directories and the file if needed) and migrates `<data_dir>/qgate.db`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, PolicyError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -77,7 +72,6 @@ fn to_json(proposal: &Proposal) -> Result<String, PolicyError> {
     serde_json::to_string(proposal).map_err(storage)
 }
 
-/// The row's id and status win over the JSON copy.
 fn read_row(id: i64, status: &str, json: &str) -> Result<Proposal, PolicyError> {
     let proposal: Proposal =
         serde_json::from_str(json).map_err(|e| storage(format!("stored proposal {id} is unreadable: {e}")))?;

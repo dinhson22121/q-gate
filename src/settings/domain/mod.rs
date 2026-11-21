@@ -1,9 +1,8 @@
-//! Settings domain: configuration models, their defaults and validation rules, and secret types.
-
 pub mod agents;
 pub mod config;
 pub mod credentials;
 pub mod jira;
+mod legacy;
 pub mod output;
 pub mod server;
 pub mod validation;

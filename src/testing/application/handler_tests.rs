@@ -94,7 +94,6 @@ async fn write_test_only_accepts_the_allowed_new_path() {
     let ok = h.call(WRITE_TEST, write("./calc/qgate_s1_test.go")).await;
     assert!(!ok.is_error, "{}", ok.content);
     assert_eq!(fs::read_to_string(f.dir.path().join("calc/qgate_s1_test.go")).unwrap(), TEST);
-    // Rewriting the same file (repair) is fine; a second file is not.
     assert!(!h.call(WRITE_TEST, json!({ "path": "calc/qgate_s1_test.go", "content": "v2" })).await.is_error);
     let second = h.call(WRITE_TEST, write("calc/existing_test.go")).await;
     assert!(second.content.contains("only one test file"));

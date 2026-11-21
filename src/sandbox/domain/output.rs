@@ -1,5 +1,3 @@
-//! Keeps only the last bytes of a command's output, so memory stays bounded however much it prints.
-
 #[derive(Debug)]
 pub struct OutputTail {
     bytes: Vec<u8>,
@@ -25,7 +23,6 @@ impl OutputTail {
         self.truncated
     }
 
-    /// The kept text (lossy UTF-8). After truncation the first, partial line is dropped.
     pub fn render(&self) -> String {
         let text = String::from_utf8_lossy(&self.bytes);
         if !self.truncated {

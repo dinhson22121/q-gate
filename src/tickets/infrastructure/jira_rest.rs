@@ -1,5 +1,3 @@
-//! Jira Cloud / Server REST adapter (`GET /rest/api/3/issue/{key}`), the default ticket source.
-
 use std::time::Duration;
 
 use reqwest::{StatusCode, Url};
@@ -13,28 +11,19 @@ use crate::tickets::domain::{
 use super::adf::{all_strings, field_to_text};
 use super::secret::Secret;
 
-/// Per-request timeout for Jira calls.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// Fields always requested from Jira.
 const BASE_FIELDS: &str = "summary,description,status,issuetype,parent,updated";
-/// Field requested by the cheap freshness probe.
 const UPDATED_FIELD: &str = "updated";
-/// Hosts allowed over plain HTTP (local test servers only).
 const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]"];
 
-/// Connection settings for [`JiraRestSource`].
 #[derive(Debug, Clone)]
 pub struct JiraRestConfig {
-    /// e.g. `https://acme.atlassian.net` (https required; http only for localhost).
     pub base_url: String,
     pub email: String,
     pub token: Secret,
-    /// Custom field holding acceptance criteria, e.g. `customfield_10042`. When set and non-empty
-    /// its items are the criteria; otherwise the description is parsed.
     pub ac_field: Option<String>,
 }
 
-/// Fetches tickets from the Jira REST API v3 using basic auth (email + API token).
 #[derive(Debug, Clone)]
 pub struct JiraRestSource {
     client: reqwest::Client,
@@ -45,7 +34,6 @@ pub struct JiraRestSource {
 }
 
 impl JiraRestSource {
-    /// Validates the configuration and builds the HTTP client.
     pub fn new(config: JiraRestConfig) -> Result<Self, TicketError> {
         let base_url = validate_base_url(&config.base_url)?;
         if config.email.trim().is_empty() || config.token.expose().trim().is_empty() {
@@ -57,7 +45,6 @@ impl JiraRestSource {
         }
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
-            // Never follow redirects: the credentials must only ever reach the configured host.
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| TicketError::Config(format!("cannot build HTTP client: {e}")))?;
@@ -80,12 +67,10 @@ impl JiraRestSource {
         self.get_json(&self.issue_url(key), key).await
     }
 
-    /// Figma links of the issue's remote links (`object.url`). Best effort: a failure only loses links.
     async fn remote_figma_links(&self, key: &TicketKey) -> Vec<String> {
         let url = format!("{}/rest/api/3/issue/{key}/remotelink", self.base_url);
         match self.get_json(&url, key).await {
             Ok(links) => remote_link_urls(&links).iter().flat_map(|u| extract_figma_links(u)).collect(),
-            // Old Jira versions or disabled remote links: nothing to read.
             Err(TicketError::NotFound(_)) => Vec::new(),
             Err(error) => {
                 eprintln!("qgate tickets: remote links of {key} not read: {error}");
@@ -122,7 +107,6 @@ impl TicketSource for JiraRestSource {
     }
 }
 
-/// `[{"object": {"url": ...}}, ...]` → the URLs.
 fn remote_link_urls(links: &Value) -> Vec<String> {
     links
         .as_array()
@@ -132,7 +116,6 @@ fn remote_link_urls(links: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Requires https (http only for localhost) and strips the trailing slash.
 fn validate_base_url(raw: &str) -> Result<String, TicketError> {
     let url = Url::parse(raw.trim()).map_err(|e| TicketError::Config(format!("invalid Jira base URL: {e}")))?;
     let host = url.host_str().unwrap_or_default();
@@ -146,7 +129,6 @@ fn validate_base_url(raw: &str) -> Result<String, TicketError> {
     Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
-/// Custom field ids are interpolated into the query string, so only allow `[A-Za-z0-9_]`.
 fn validate_field_name(field: &str) -> Result<(), TicketError> {
     if field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         Ok(())
@@ -182,7 +164,6 @@ fn check_status(status: StatusCode, key: &TicketKey) -> Result<(), TicketError> 
     }
 }
 
-/// Maps a Jira issue JSON (`{"fields": {...}}`) to a ticket.
 fn map_issue(key: &TicketKey, issue: &Value, ac_field: Option<&str>, url: &str) -> Result<Ticket, TicketError> {
     let fields = issue
         .get("fields")
@@ -226,7 +207,6 @@ mod tests {
 
     use super::*;
 
-    /// base64("me@example.com:tok-123")
     const EXPECTED_AUTH: &str = "Basic bWVAZXhhbXBsZS5jb206dG9rLTEyMw==";
 
     fn config(base_url: &str, ac_field: Option<&str>) -> JiraRestConfig {
@@ -366,7 +346,6 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_server_is_unavailable() {
-        // Port 9 (discard) is closed on developer machines and CI runners.
         let source = JiraRestSource::new(config("http://127.0.0.1:9", None)).unwrap();
         assert!(matches!(source.fetch(&key()).await, Err(TicketError::Unavailable(_))));
     }

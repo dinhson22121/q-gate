@@ -7,7 +7,6 @@ use serde::Serialize;
 use super::report_view::ReportView;
 use crate::review::application::{CriterionStatus, ReviewReport, Severity};
 
-/// What started a review run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Trigger {
@@ -17,7 +16,6 @@ pub enum Trigger {
     PrePush,
 }
 
-/// Outcome of a review run: gate passed, gate failed, or the run itself errored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -61,17 +59,13 @@ string_enum!(Trigger, "trigger", { Commit => "commit", Push => "push", Manual =>
 string_enum!(RunStatus, "status", { Passed => "passed", Failed => "failed", Error => "error" });
 
 impl RunStatus {
-    /// Status for a completed review: follows the gate decision.
     pub fn of_report(report: &ReviewReport) -> Self {
         if report.gate.passed { Self::Passed } else { Self::Failed }
     }
 }
 
-/// One review run. `R` is the report representation: the live [`ReviewReport`]
-/// when recording, the deserialized [`ReportView`] when reading back.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewRun<R = ReviewReport> {
-    /// 0 before the run is saved.
     pub id: i64,
     pub repo_path: String,
     pub repo_name: String,
@@ -85,7 +79,6 @@ pub struct ReviewRun<R = ReviewReport> {
     pub report: Option<R>,
 }
 
-/// A run as read back from storage.
 pub type StoredRun = ReviewRun<ReportView>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -107,7 +100,6 @@ impl SeverityCounts {
     }
 }
 
-/// Row of the runs table: run metadata plus counts, without the full report.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RunListItem {
     pub id: i64,

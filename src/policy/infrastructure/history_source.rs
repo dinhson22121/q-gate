@@ -1,5 +1,3 @@
-//! `RunHistory` on the history context's use cases: stored runs as gate facts, and stored findings.
-
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -22,7 +20,6 @@ fn policy_error(err: HistoryError) -> PolicyError {
     PolicyError::Storage(err.to_string())
 }
 
-/// `None` for a run without a report (it errored before the gate).
 fn facts(run: &StoredRun) -> Option<RunFacts> {
     let report = run.report.as_ref()?;
     let gate = &report.gate;

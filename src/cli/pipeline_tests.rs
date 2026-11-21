@@ -1,17 +1,18 @@
-//! End-to-end pipeline test: real git repo, real checks, real SQLite history; Claude and Jira mocked over HTTP.
-
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
+use serde_json::Value;
 use serde_json::json;
-use wiremock::matchers::{body_string_contains, method, path};
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 use crate::history::application::GetRun;
-use crate::review::application::{CriterionStatus, NoProgress};
-use crate::settings::application::{JiraConfig, ServerLlmConfig, store_secret};
+use crate::llm::{LlmError, Structured, Usage};
+use crate::review::application::{CriterionStatus, NoProgress, ToolOutcome};
+use crate::settings::application::{JiraConfig, store_secret};
 use crate::settings::infrastructure::FileStore;
 
 const VULNERABLE_LINE: &str = "\tdb.Query(\"SELECT * FROM users WHERE id=\" + id)";
@@ -27,7 +28,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// `config` is committed in the first commit, so it governs the reviewed (second) commit.
 fn repo_with_commit(dir: &Path, config: &str) -> String {
     git(dir, &["init", "-q"]);
     std::fs::write(dir.join("main.go"), "package main\n").unwrap();
@@ -41,14 +41,42 @@ fn repo_with_commit(dir: &Path, config: &str) -> String {
     git(dir, &["rev-parse", "HEAD"])
 }
 
-fn claude_reply(answer: serde_json::Value) -> ResponseTemplate {
-    ResponseTemplate::new(200).set_body_json(json!({
-        "model": "claude-opus-5-5",
-        "content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": answer.to_string()}],
-        "stop_reason": "end_turn",
-        "stop_details": null,
-        "usage": {"input_tokens": 1000, "output_tokens": 200, "cache_read_input_tokens": 0}
-    }))
+struct ScriptedModel;
+
+const CALL_COST_USD: f64 = 0.25;
+
+impl StructuredModel for ScriptedModel {
+    fn structured_json<'a>(
+        &'a self,
+        _system: &'a str,
+        _user_prompt: &'a str,
+        schema: &'a Value,
+    ) -> BoxFuture<'a, Result<Structured<Value>, LlmError>> {
+        let value = if schema.to_string().contains("criterion_id") { assessments() } else { findings() };
+        let usage = Usage { input_tokens: 1000, output_tokens: 200, ..Usage::default() };
+        Box::pin(async move { Ok(Structured { value, usage, cost_usd: CALL_COST_USD }) })
+    }
+}
+
+fn assessments() -> Value {
+    json!({"assessments": [
+        {"criterion_id": "SHOP-7/AC-1", "status": "met", "explanation": "lookup added",
+         "evidence": [{"file": "main.go", "line": 4, "quote": VULNERABLE_LINE.trim()}]},
+        {"criterion_id": "SHOP-7/AC-2", "status": "not_met", "explanation": "no audit log", "evidence": []}
+    ]})
+}
+
+fn findings() -> Value {
+    json!({"findings": [
+        {"file": "main.go", "line": 4, "severity": "critical", "category": "security", "confidence": "high",
+         "title": "SQL injection", "explanation": "id is concatenated into SQL",
+         "evidence": VULNERABLE_LINE.trim(), "suggestion": "use a placeholder",
+         "prevention_rule": "Build SQL only with bound parameters, never by string concatenation.",
+         "rule_scope": "**/*.go"},
+        {"file": "main.go", "line": 4, "severity": "major", "category": "correctness", "confidence": "high",
+         "title": "invented", "explanation": "not real", "evidence": "os.RemoveAll(path)", "suggestion": "",
+         "prevention_rule": "Never delete paths taken from input.", "rule_scope": ""}
+    ]})
 }
 
 async fn mock_services() -> MockServer {
@@ -65,42 +93,13 @@ async fn mock_services() -> MockServer {
         })))
         .mount(&server)
         .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .and(body_string_contains("criterion_id"))
-        .respond_with(claude_reply(json!({"assessments": [
-            {"criterion_id": "SHOP-7/AC-1", "status": "met", "explanation": "lookup added",
-             "evidence": [{"file": "main.go", "line": 4, "quote": VULNERABLE_LINE.trim()}]},
-            {"criterion_id": "SHOP-7/AC-2", "status": "not_met", "explanation": "no audit log", "evidence": []}
-        ]})))
-        .with_priority(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(claude_reply(json!({"findings": [
-            {"file": "main.go", "line": 4, "severity": "critical", "category": "security", "confidence": "high",
-             "title": "SQL injection", "explanation": "id is concatenated into SQL",
-             "evidence": VULNERABLE_LINE.trim(), "suggestion": "use a placeholder",
-             "prevention_rule": "Build SQL only with bound parameters, never by string concatenation.",
-             "rule_scope": "**/*.go"},
-            {"file": "main.go", "line": 4, "severity": "major", "category": "correctness", "confidence": "high",
-             "title": "invented", "explanation": "not real", "evidence": "os.RemoveAll(path)", "suggestion": "",
-             "prevention_rule": "Never delete paths taken from input.", "rule_scope": ""}
-        ]})))
-        .with_priority(5)
-        .mount(&server)
-        .await;
     server
 }
 
 fn context(dir: &Path, mock_uri: &str) -> AppContext {
     let store = FileStore::new(dir.join("config/credentials.toml"));
-    store_secret(CredentialName::AnthropicApiKey, "sk-ant-test", &store).unwrap();
     store_secret(CredentialName::JiraApiToken, "jira-token", &store).unwrap();
     let server = ServerConfig {
-        llm: ServerLlmConfig { base_url: mock_uri.to_string() },
-        // Ticket agents have their own tests; this one covers the core pipeline.
         agents: crate::settings::application::AgentsConfig { enabled: false, ..Default::default() },
         jira: JiraConfig {
             enabled: true,
@@ -118,6 +117,7 @@ fn context(dir: &Path, mock_uri: &str) -> AppContext {
             crate::settings::infrastructure::SqliteServerConfigStore::open(dir.join("data/qgate.db")).unwrap(),
         ),
         env: Arc::new(|_: &str| None),
+        model_override: Some(Arc::new(ScriptedModel)),
     }
 }
 
@@ -155,7 +155,8 @@ async fn commit_review_runs_checks_assesses_ticket_verifies_findings_and_records
     assert!(!report.gate.passed);
     assert_eq!(report.gate.blocking, vec![0]);
     assert_eq!(report.gate.unmet_criteria, vec!["SHOP-7/AC-2"]);
-    assert!(report.estimated_cost_usd.is_some());
+    let cost = report.estimated_cost_usd.expect("CLI cost is summed into the report");
+    assert!(cost >= 2.0 * CALL_COST_USD - 1e-9, "review + assessment costs are summed: {cost}");
 
     let run_id = outcome.run_id.expect("run recorded");
     let stored = GetRun::new(history).execute(run_id).unwrap().expect("run exists");
@@ -172,7 +173,6 @@ async fn commit_review_runs_checks_assesses_ticket_verifies_findings_and_records
     assert!(!rules.contains("Never delete paths"), "rules of rejected findings are not learned");
 }
 
-/// The per-repo rules file the export wrote (outside Docker: below `<repo>/.qgate/reviews`).
 fn learned_rules(repo: &Path) -> String {
     let reviews = crate::handoff::native_default_dir(repo);
     let repo_dir = std::fs::read_dir(&reviews).unwrap().next().expect("a folder per repository").unwrap().path();
@@ -251,16 +251,18 @@ async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks
                 ticket_in_progress: false,
             };
             let server = pipeline.context.server();
-            let prep = ToolPrep {
-                request: &request,
-                server: &server,
-                db: &data.join("qgate.db"),
-                exec: pipeline.context.exec_backend(),
-                work_dir: &data.join("work"),
-                head: &repo,
-                base_runs: None,
-            };
-            pipeline.tool_outcome(prep).await
+            let cache = ReviewCache::open(&data.join("qgate.db"), true);
+            let checks = pipeline
+                .supplementary_checks(
+                    &request,
+                    &server,
+                    &data.join("qgate.db"),
+                    &data.join("work"),
+                    &pipeline.context.exec_backend(),
+                    &cache,
+                )
+                .unwrap();
+            checks.run(&repo).await
         }
     };
     let both_off = run(false, false).await;
@@ -268,4 +270,75 @@ async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks
     let regression_only = run(false, true).await;
     assert!(regression_only.notes.iter().all(|n| n.contains("regression")), "{:?}", regression_only.notes);
     assert!(!regression_only.notes.is_empty(), "an enabled check reports why it could not run");
+}
+
+#[test]
+fn structured_model_uses_the_override_else_validates_the_cli_settings() {
+    let work = tempfile::tempdir().unwrap();
+    let mut ctx = context(work.path(), "http://127.0.0.1:1");
+    assert!(ctx.structured_model("claude-opus-5-5", "high").is_ok(), "the override is returned as is");
+
+    ctx.model_override = None;
+    assert!(ctx.structured_model("claude-opus-5-5", "high").is_ok());
+    let rejected = |model: &str, effort: &str| match ctx.structured_model(model, effort) {
+        Err(LlmError::Rejected(reason)) => reason,
+        other => panic!("expected Rejected, got {:?}", other.map(|_| ())),
+    };
+    assert!(rejected("claude-opus-5-5", "huge").contains("effort"));
+    assert!(rejected("--dangerous", "high").contains("model"));
+    ctx.server.write().unwrap().llm.claude_bin = "/opt/claude".into();
+    ctx.server.write().unwrap().llm.timeout_secs = 42;
+    let config = ctx.cli_config("claude-opus-5-5", "high");
+    assert_eq!(config.claude_bin, std::path::PathBuf::from("/opt/claude"));
+    assert_eq!(config.timeout, std::time::Duration::from_secs(42));
+}
+
+struct LimitedModel {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl StructuredModel for LimitedModel {
+    fn structured_json<'a>(
+        &'a self,
+        _system: &'a str,
+        _user_prompt: &'a str,
+        _schema: &'a Value,
+    ) -> BoxFuture<'a, Result<Structured<Value>, LlmError>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async { Err(LlmError::Unavailable("must not be called".into())) })
+    }
+
+    fn preflight(&self) -> BoxFuture<'_, Result<(), LlmError>> {
+        Box::pin(async {
+            Err(LlmError::RateLimited { resets_at: Some("4:30pm".into()), message: "You've hit your limit".into() })
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_rate_limited_preflight_aborts_the_review_before_any_agent_and_records_an_error() {
+    let repo = tempfile::tempdir().unwrap();
+    let sha = repo_with_commit(repo.path(), "");
+    let work = tempfile::tempdir().unwrap();
+    let limited = Arc::new(LimitedModel { calls: Default::default() });
+    let mut context = context(work.path(), "http://127.0.0.1:1");
+    context.model_override = Some(limited.clone());
+    let context = Arc::new(context);
+    let history = context.open_history().unwrap();
+    let pipeline = ReviewPipeline::new(context, Some(history.clone()));
+    let request = ReviewRequest {
+        repo_root: repo.path().to_path_buf(),
+        target: DiffTarget::Commit(sha),
+        trigger: Trigger::Push,
+        explicit_ticket: None,
+        ticket_in_progress: false,
+    };
+
+    let error = pipeline.run(&request, &NoProgress).await.err().expect("a rate-limited review must not pass");
+
+    assert!(format!("{error:#}").contains("waiting for session reset (resets 4:30pm)"), "{error:#}");
+    assert_eq!(limited.calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no agent ran");
+    let runs = history.list(&crate::history::application::RunFilter { limit: 10, ..Default::default() }).unwrap();
+    assert_eq!((runs.len(), runs[0].status), (1, RunStatus::Error), "recorded as an error, never as a pass");
+    assert!(runs[0].error.as_deref().unwrap().contains("not running"));
 }

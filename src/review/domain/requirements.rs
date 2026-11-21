@@ -1,5 +1,3 @@
-//! Acceptance criteria a change is expected to satisfy, and their verified assessments.
-
 use serde::{Deserialize, Serialize};
 
 use super::change_set::ChangeSet;
@@ -7,12 +5,10 @@ use super::verification::evidence_exists;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AcceptanceCriterion {
-    /// Stable id within the requirement set, e.g. "AC-1".
     pub id: String,
     pub text: String,
 }
 
-/// What the change is supposed to implement (typically one Jira ticket).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Requirements {
     pub key: String,
@@ -59,7 +55,6 @@ pub struct CriterionAssessment {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RequirementsReport {
     pub requirements: Requirements,
-    /// One assessment per criterion, in criterion order.
     pub assessments: Vec<CriterionAssessment>,
 }
 
@@ -73,9 +68,6 @@ impl RequirementsReport {
     }
 }
 
-/// Aligns reviewer assessments with the criteria and verifies "met" claims:
-/// a criterion is only `Met` when at least one quoted evidence exists in the changed code.
-/// Unknown ids are dropped; criteria without an assessment become `Unclear`.
 pub fn verify_assessments(
     changes: &ChangeSet,
     requirements: Requirements,

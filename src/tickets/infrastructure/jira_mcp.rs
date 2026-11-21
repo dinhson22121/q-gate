@@ -1,6 +1,3 @@
-//! Optional ticket source for teams already running a Jira MCP server (e.g. `uvx mcp-atlassian`).
-//! The server is spawned as a child process over stdio, one tool call is made, and the child is shut down.
-
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -16,26 +13,16 @@ use crate::tickets::domain::{
 
 use super::adf::{all_strings, field_to_text};
 
-/// Upper bound for spawning the server, initializing and calling the tool.
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Name of the tool argument carrying the ticket key.
 const ISSUE_KEY_ARGUMENT: &str = "issue_key";
-/// Environment variables inherited from the parent so launchers like `uvx` / `npx` still work.
-/// Everything else (API keys of other tools...) is withheld from the child.
 const INHERITED_ENV: &[&str] = &["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG"];
-/// Lowercase markers in error text meaning the issue does not exist.
 const NOT_FOUND_MARKERS: &[&str] = &["not found", "does not exist", "404"];
-/// Lowercase markers in error text meaning credentials were rejected.
 const UNAUTHORIZED_MARKERS: &[&str] = &["unauthorized", "forbidden", "401", "403", "permission"];
 
-/// Jira MCP server launch settings.
 #[derive(Clone)]
 pub struct JiraMcpSource {
-    /// Program and arguments, e.g. `["uvx", "mcp-atlassian"]`.
     command: Vec<String>,
-    /// Tool to call, e.g. `jira_get_issue`.
     tool: String,
-    /// Environment passed to the server (e.g. `JIRA_URL`, `JIRA_API_TOKEN`); values may be secret.
     env: Vec<(String, String)>,
     timeout: Duration,
 }
@@ -52,7 +39,6 @@ impl std::fmt::Debug for JiraMcpSource {
 }
 
 impl JiraMcpSource {
-    /// Validates that a program and a tool name are configured.
     pub fn new(command: Vec<String>, tool: String, env: Vec<(String, String)>) -> Result<Self, TicketError> {
         if command.first().is_none_or(|program| program.trim().is_empty()) {
             return Err(TicketError::Config("Jira MCP command is empty".into()));
@@ -78,8 +64,6 @@ impl JiraMcpSource {
         Ok(transport)
     }
 
-    /// Initializes the session, calls the tool once, then cancels the session (which closes the
-    /// transport and terminates the child). Dropping on timeout also kills the child.
     async fn call(&self, key: &TicketKey) -> Result<CallToolResult, TicketError> {
         let transport = self.spawn()?;
         let client =
@@ -87,7 +71,6 @@ impl JiraMcpSource {
         let mut arguments = JsonObject::new();
         arguments.insert(ISSUE_KEY_ARGUMENT.into(), Value::String(key.to_string()));
         let result = client.call_tool(CallToolRequestParams::new(self.tool.clone()).with_arguments(arguments)).await;
-        // Shutdown errors are irrelevant once we have (or failed to get) the result.
         let _ = client.cancel().await;
         result.map_err(|e| TicketError::Unavailable(format!("MCP tool {:?} failed: {e}", self.tool)))
     }
@@ -102,7 +85,6 @@ impl TicketSource for JiraMcpSource {
     }
 }
 
-/// Maps a tool result to a ticket: structured content or JSON text first, else markdown/plain text.
 pub fn map_tool_result(key: &TicketKey, result: &CallToolResult) -> Result<Ticket, TicketError> {
     let text = result
         .content
@@ -134,7 +116,6 @@ fn classify_tool_error(key: &TicketKey, text: &str) -> TicketError {
     }
 }
 
-/// Parses tool text: JSON object (optionally wrapped as `{"issue": ...}` or with `fields`) or free text.
 pub fn ticket_from_text(key: &TicketKey, text: &str) -> Ticket {
     match serde_json::from_str::<Value>(text.trim()) {
         Ok(json) if json.is_object() => ticket_from_json(key, &json),
@@ -142,10 +123,6 @@ pub fn ticket_from_text(key: &TicketKey, text: &str) -> Ticket {
     }
 }
 
-/// Reads `summary`/`title`, `description`, `status` (string or `{name}`), `url`, `updated`,
-/// `issue_type`/`issuetype`, `parent` and any field whose name mentions "acceptance" from the issue
-/// object (top level or under `fields`). Hierarchy is best effort: servers that omit the issue type
-/// and parent leave them `None`.
 pub fn ticket_from_json(key: &TicketKey, json: &Value) -> Ticket {
     let issue = json.get("issue").filter(|v| v.is_object()).unwrap_or(json);
     let lookup = |name: &str| issue.get(name).or_else(|| issue.pointer(&format!("/fields/{name}")));
@@ -172,12 +149,10 @@ pub fn ticket_from_json(key: &TicketKey, json: &Value) -> Ticket {
     }
 }
 
-/// A string, or an object's `name`.
 fn name_of(value: &Value) -> Option<String> {
     value.as_str().or_else(|| value.get("name").and_then(Value::as_str)).map(str::to_string)
 }
 
-/// `{"key": ..., "issue_type"|"issuetype"|"fields": {"issuetype": ...}}` or a bare key string.
 fn parent_ref(value: &Value) -> Option<ParentRef> {
     let key = value.as_str().or_else(|| value.get("key").and_then(Value::as_str))?;
     let issue_type = ["/issue_type", "/issuetype", "/fields/issuetype"]
@@ -199,7 +174,6 @@ fn field_named_acceptance(object: &Value) -> Option<&Value> {
         .map(|(_, value)| value)
 }
 
-/// Free text: the first non-empty line (without `#` markers) is the title, the rest the description.
 fn ticket_from_markdown(key: &TicketKey, text: &str) -> Ticket {
     let mut lines = text.lines().skip_while(|l| l.trim().is_empty());
     let title = lines.next().unwrap_or_default().trim().trim_start_matches('#').trim().to_string();
@@ -329,11 +303,8 @@ mod tests {
         assert!(matches!(source.fetch(&key()).await, Err(TicketError::Config(_))));
     }
 
-    /// Variable present in the test process (set by cargo) but not configured for the child.
     const LEAK_PROBE: &str = "CARGO_MANIFEST_DIR";
 
-    /// Minimal MCP server over stdio (legacy `initialize` handshake + one tool). It echoes the
-    /// `issue_key` argument and the `FAKE_TOKEN` env var, and reports whether the parent-only [`LEAK_PROBE`] variable reached it.
     const FAKE_SERVER: &str = r#"
 import json, os, sys
 for line in sys.stdin:
@@ -378,7 +349,6 @@ for line in sys.stdin:
 
         assert_eq!(ticket.title, "Fake ABC-1");
         assert_eq!(ticket.status.as_deref(), Some("configured"));
-        // cargo sets CARGO_MANIFEST_DIR for test binaries; it must not reach the child.
         assert!(std::env::var_os(LEAK_PROBE).is_some(), "precondition: {LEAK_PROBE} set in the test process");
         assert_eq!(ticket.criteria, vec!["leaked=False"]);
     }
@@ -394,8 +364,6 @@ for line in sys.stdin:
         assert!(matches!(err, TicketError::Unavailable(ref m) if m.contains("did not answer")), "{err}");
     }
 
-    /// Against a real server: `JIRA_URL=... JIRA_USERNAME=... JIRA_API_TOKEN=... QGATE_TEST_ISSUE=ABC-1 \
-    /// cargo test real_mcp_atlassian -- --ignored` (requires `uvx`).
     #[tokio::test]
     #[ignore = "needs uvx, network and real Jira credentials"]
     async fn real_mcp_atlassian() {

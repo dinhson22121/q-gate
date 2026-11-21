@@ -1,5 +1,4 @@
-//! Pure rules of the watch context: what a commit event is and when it deserves a review.
-
+pub mod browse;
 pub mod detection;
 pub mod freshness;
 pub mod message;

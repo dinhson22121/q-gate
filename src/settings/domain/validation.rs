@@ -1,10 +1,5 @@
-//! Validation error type and small reusable field rules shared by the config sections.
-
 use std::fmt;
 
-/// A configuration value that is out of range or malformed.
-///
-/// `field` is the dotted TOML path (e.g. `llm.base_url`) so the user can find it directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
     pub field: String,
@@ -29,10 +24,8 @@ pub type ValidationResult = Result<(), ValidationError>;
 
 const HTTPS_SCHEME: &str = "https://";
 const HTTP_SCHEME: &str = "http://";
-/// Hosts for which plain HTTP is acceptable (traffic never leaves the machine).
 const LOOPBACK_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 
-/// Fails when `value` is empty or only whitespace.
 pub fn require_non_empty(field: &str, value: &str) -> ValidationResult {
     if value.trim().is_empty() {
         return Err(ValidationError::new(field, "must not be empty"));
@@ -40,7 +33,6 @@ pub fn require_non_empty(field: &str, value: &str) -> ValidationResult {
     Ok(())
 }
 
-/// Fails when `value` is outside `min..=max`.
 pub fn require_range<T>(field: &str, value: T, min: T, max: T) -> ValidationResult
 where
     T: PartialOrd + fmt::Display + Copy,
@@ -51,13 +43,11 @@ where
     Ok(())
 }
 
-/// Requires an `https://` URL; plain `http://` is accepted only for localhost / 127.0.0.1.
 pub fn require_secure_url(field: &str, url: &str) -> ValidationResult {
     if let Some(rest) = url.strip_prefix(HTTPS_SCHEME) {
         return require_host(field, rest);
     }
     if let Some(rest) = url.strip_prefix(HTTP_SCHEME) {
-        // `http://localhost:x@evil.example/` must not pass as localhost: reject userinfo first.
         require_host(field, rest)?;
         let host = host_of(rest);
         if LOOPBACK_HOSTS.contains(&host) {
@@ -71,7 +61,6 @@ pub fn require_secure_url(field: &str, url: &str) -> ValidationResult {
     Err(ValidationError::new(field, format!("must be an https:// URL, got '{url}'")))
 }
 
-/// Requires an `http://` or `https://` URL with a host.
 pub fn require_http_url(field: &str, url: &str) -> ValidationResult {
     let rest = url
         .strip_prefix(HTTPS_SCHEME)
@@ -88,17 +77,14 @@ fn require_host(field: &str, after_scheme: &str) -> ValidationResult {
     Ok(())
 }
 
-/// Authority part of `authority[/path][?query][#fragment]`.
 fn authority_of(after_scheme: &str) -> &str {
     after_scheme.split(['/', '?', '#']).next().unwrap_or_default()
 }
 
-/// Host part of `host[:port][/path][?query]`.
 fn host_of(after_scheme: &str) -> &str {
     authority_of(after_scheme).split(':').next().unwrap_or_default()
 }
 
-/// Requires a portable environment variable name (`[A-Za-z_][A-Za-z0-9_]*`).
 pub fn require_env_name(field: &str, name: &str) -> ValidationResult {
     let mut chars = name.chars();
     let valid_start = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');

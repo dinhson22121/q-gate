@@ -1,6 +1,3 @@
-//! SQLite `RulebookStore`: the rulebook is stored as JSON, decisions in their own table so they
-//! survive rebuilds. Shares `qgate.db` with other contexts but only touches its own tables.
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -13,7 +10,6 @@ use crate::conventions::domain::rulebook::{RuleStatus, Rulebook};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Ordered migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE rulebooks (
         repo          TEXT    NOT NULL PRIMARY KEY,
@@ -39,7 +35,6 @@ pub struct SqliteRulebookStore {
 }
 
 impl SqliteRulebookStore {
-    /// Opens (creating parent directories and the file if needed) and migrates `<data_dir>/qgate.db`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ConventionsError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -134,7 +129,6 @@ impl RulebookStore for SqliteRulebookStore {
         let mut out = HashMap::new();
         for row in rows {
             let (title, status) = row.map_err(storage)?;
-            // An unknown status (written by a newer qgate) is ignored rather than failing the build.
             if let Some(status) = RuleStatus::parse(&status) {
                 out.insert(title, status);
             }

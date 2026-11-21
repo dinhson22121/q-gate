@@ -1,6 +1,3 @@
-//! Use case: the Ticket Analyst. Turns acceptance criteria, ticket description and design links
-//! plus a compact view of the change into a validated, cached [`TicketBrief`].
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -14,9 +11,7 @@ use crate::tickets::domain::sha256_hex;
 
 use super::ports::{BriefCache, BriefGenerator, BriefRequest};
 
-/// Upper bound of the change view sent to the model.
 pub const MAX_CHANGE_VIEW_CHARS: usize = 60_000;
-/// Bump when the prompt or validation changes, so cached briefs are not reused.
 const BRIEF_FORMAT_VERSION: &str = "ticket-brief-v1";
 const SCENARIO_ID_PREFIX: &str = "S";
 
@@ -27,7 +22,6 @@ pub struct AnalyzeTicket {
 }
 
 impl AnalyzeTicket {
-    /// `max_scenarios` is clamped to at least 1.
     pub fn new(generator: Arc<dyn BriefGenerator>, cache: Arc<dyn BriefCache>, max_scenarios: usize) -> Self {
         Self { generator, cache, max_scenarios: max_scenarios.max(1) }
     }
@@ -67,7 +61,6 @@ impl TicketAnalyst for AnalyzeTicket {
     }
 }
 
-/// sha256 over criteria, description, design links, sorted changed paths and the full diff's hash.
 fn brief_hash(request: &BriefRequest, files: &[FileChange]) -> String {
     let mut paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
     paths.sort_unstable();
@@ -84,8 +77,6 @@ fn brief_hash(request: &BriefRequest, files: &[FileChange]) -> String {
     sha256_hex(material.to_string().as_bytes())
 }
 
-/// Keeps scenarios that only cite existing criteria and have a title and an expected outcome,
-/// caps them at `max_scenarios` and renumbers them `S1..`.
 pub fn validate_brief(raw: TicketBrief, criteria: &[AcceptanceCriterion], max_scenarios: usize) -> TicketBrief {
     let known: HashSet<&str> = criteria.iter().map(|c| c.id.as_str()).collect();
     let proposed = raw.scenarios.len();
@@ -126,8 +117,6 @@ fn dedup_trimmed(items: Vec<String>) -> Vec<String> {
     unique
 }
 
-/// File headers and diff hunks (`+`/`-`/` ` prefixed lines), cut at a line boundary after
-/// `max_chars` bytes with a note of how many files were left out.
 pub fn render_change_view(files: &[FileChange], max_chars: usize) -> String {
     let mut out = String::new();
     for (index, file) in files.iter().enumerate() {

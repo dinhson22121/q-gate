@@ -8,20 +8,16 @@ use super::config::QualityConfig;
 use super::ports::{CheckInput, CheckOutcome, QualityCheck};
 use crate::quality::domain::{ChangeIndex, ChangedFile, QualityFinding, Verdict};
 
-/// Pre-existing findings kept for reference; the rest are summarised in a note.
 const MAX_REFERENCE_FINDINGS: usize = 25;
 
-/// What the caller knows about the change.
 #[derive(Debug, Clone)]
 pub struct QualityRequest {
-    /// Directory holding the exact head commit tree (see `cli::snapshot`).
     pub snapshot: PathBuf,
     pub base_sha: Option<String>,
     pub head_sha: String,
     pub changed_files: Vec<ChangedFile>,
 }
 
-/// Findings ordered blocking first, then new, then by severity; plus notes about skipped or failed tools.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct QualityReport {
     pub findings: Vec<QualityFinding>,
@@ -29,12 +25,10 @@ pub struct QualityReport {
 }
 
 impl QualityReport {
-    /// Findings that should block the gate.
     pub fn blocking(&self) -> impl Iterator<Item = &QualityFinding> {
         self.findings.iter().filter(|f| f.gate_verdict() == Verdict::Block)
     }
 
-    /// Findings introduced by the change.
     pub fn new_findings(&self) -> impl Iterator<Item = &QualityFinding> {
         self.findings.iter().filter(|f| f.is_new)
     }
@@ -50,7 +44,6 @@ impl RunQualityChecks {
         Self { checks, config }
     }
 
-    /// Runs every enabled check whose language is selected, concurrently; never fails.
     pub async fn execute(&self, request: &QualityRequest) -> QualityReport {
         let changes = ChangeIndex::new(&request.changed_files);
         let input = CheckInput { request, changes: &changes, languages: &self.config.languages };
@@ -86,8 +79,6 @@ impl RunQualityChecks {
     }
 }
 
-/// The same vulnerability in the same package reported by two tools: keep the first (reachability-aware
-/// govulncheck sorts before osv-scanner because checks run in registration order), merging the newness.
 fn merge_duplicates(findings: Vec<QualityFinding>) -> Vec<QualityFinding> {
     let mut kept: Vec<QualityFinding> = Vec::new();
     for finding in findings {

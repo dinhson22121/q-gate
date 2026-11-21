@@ -1,6 +1,3 @@
-//! The verdict of one scenario, decided by qgate from the LAST real run (the model's verdict is
-//! advisory), and the evidence assembled from facts qgate recorded itself.
-
 use crate::review::application::{EvidenceRef, Requirements, TestEvidence, TestResult, TestScenario, TestVerdict};
 
 use super::classify::{RawRun, RunClass};
@@ -8,7 +5,6 @@ use super::language::TestLanguage;
 use super::paths::join;
 use super::profile::TestTarget;
 
-/// One execution of the generated test, with the source exactly as it was run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRecord {
     pub class: RunClass,
@@ -16,29 +12,22 @@ pub struct RunRecord {
     pub source: String,
 }
 
-/// Everything known about a scenario once the agent loop is over.
 #[derive(Debug, Clone)]
 pub struct ScenarioOutcome<'a> {
     pub scenario: &'a TestScenario,
     pub language: TestLanguage,
     pub criterion_texts: Vec<String>,
     pub commit: &'a str,
-    /// Repository root as shown to the developer (used in the reproduce command).
     pub repo_root: &'a str,
-    /// The target the test was written to, if any.
     pub target: Option<&'a TestTarget>,
     pub runs: &'a [RunRecord],
     pub max_repair_rounds: u32,
-    /// Verified references to production code (quotes checked against the snapshot).
     pub code_under_test: Vec<EvidenceRef>,
-    /// The model's own verdict from `report_result`; never decides anything.
     pub advisory: Option<TestVerdict>,
     pub explanation: String,
-    /// Extra facts for the note (loop errors, rejected references...).
     pub remarks: Vec<String>,
 }
 
-/// An inconclusive result without evidence (nothing ran).
 pub fn inconclusive(scenario_id: &str, language: &str, note: impl Into<String>) -> TestResult {
     TestResult {
         scenario_id: scenario_id.to_string(),
@@ -134,7 +123,6 @@ fn assemble_evidence(outcome: &ScenarioOutcome<'_>, target: &TestTarget, last: &
     }
 }
 
-/// Texts of the scenario's criteria. Ids are `KEY/AC-n` (or a bare `AC-n`); unknown ids are skipped.
 pub fn criterion_texts(requirements: Option<&Requirements>, ids: &[String]) -> Vec<String> {
     let Some(requirements) = requirements else {
         return Vec::new();
@@ -150,7 +138,6 @@ pub fn criterion_texts(requirements: Option<&Requirements>, ids: &[String]) -> V
         .collect()
 }
 
-/// `cd <repo>/<module> && <command>`, noting that the test file comes from qgate.
 pub fn reproduce_command(repo_root: &str, target: &TestTarget) -> String {
     let dir = join(repo_root.trim_end_matches('/'), &target.module_dir);
     let command: Vec<String> = target.command.iter().map(|a| shell_quote(a)).collect();
@@ -162,7 +149,6 @@ pub fn reproduce_command(repo_root: &str, target: &TestTarget) -> String {
     )
 }
 
-/// POSIX single-quoting unless the word only has shell-safe characters.
 fn shell_quote(word: &str) -> String {
     let safe = !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || "_-./=:,+@%".contains(c));
     if safe { word.to_string() } else { format!("'{}'", word.replace('\'', "'\\''")) }

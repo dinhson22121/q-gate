@@ -1,9 +1,5 @@
-//! Finds where a failing Go test is defined: the `_test.go` file and line of its top-level function. `go test -json`
-//! reports no position, so the package directory of the snapshot is scanned for `func <Name>(`.
-
 use std::path::Path;
 
-/// Directory of `package` (an import path) relative to the module root, from the `module` line of `go.mod`.
 pub fn package_rel_dir(snapshot: &Path, package: &str) -> Option<String> {
     let go_mod = std::fs::read_to_string(snapshot.join("go.mod")).ok()?;
     let module = go_mod.lines().find_map(|line| line.trim().strip_prefix("module "))?.trim().trim_matches('"');
@@ -11,8 +7,6 @@ pub fn package_rel_dir(snapshot: &Path, package: &str) -> Option<String> {
     (rest.is_empty() || rest.starts_with('/')).then(|| rest.trim_start_matches('/').to_string())
 }
 
-/// `(repo-relative file, 1-based line)` of the top-level test function behind `test` (a subtest `TestA/case` maps
-/// to `TestA`). `None` for package-level failures, unknown packages or when no file defines it.
 pub fn locate_test(snapshot: &Path, package: &str, test: &str) -> Option<(String, u32)> {
     let name = test.split('/').next().filter(|n| !n.is_empty())?;
     let rel_dir = package_rel_dir(snapshot, package)?;

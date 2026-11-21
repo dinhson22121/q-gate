@@ -1,6 +1,3 @@
-//! Adapters of the policy context: Claude model, SQLite proposal store, and gateways to the settings,
-//! conventions and history contexts (through their application layers).
-
 pub mod claude_model;
 pub mod history_source;
 pub mod rulebook_gateway;

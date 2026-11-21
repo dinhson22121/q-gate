@@ -1,6 +1,3 @@
-//! Use case: load the tickets a change implements, walk up to their parent Story, and merge
-//! everything into review requirements plus reviewer context. Tickets are cached when a cache is given.
-
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
@@ -10,22 +7,15 @@ use crate::tickets::domain::{ParentRef, Ticket, TicketKey, merge_links};
 
 use super::ports::{CacheError, CachedTicket, TicketCache, TicketError, TicketSource};
 
-/// Parents followed at most (Sub-task → Story → Epic).
 const MAX_PARENT_HOPS: usize = 2;
-/// Maximum characters of one ticket's description passed on as context.
 pub const MAX_DESCRIPTION_CHARS: usize = 6000;
 const TRUNCATION_MARKER: &str = " […truncated]";
-/// Separator between the titles of several implemented tickets.
 const TITLE_SEPARATOR: &str = " | ";
 
-/// Behaviour switches, usually from the ticket analyst settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadOptions {
-    /// Follow `parent` up to the Story and merge its criteria, description and design links.
     pub include_parent_story: bool,
-    /// Fill `TicketContext::description`; when false it stays empty.
     pub include_description: bool,
-    /// A cached ticket younger than this is used without asking the tracker.
     pub cache_ttl: Duration,
 }
 
@@ -35,13 +25,10 @@ impl Default for LoadOptions {
     }
 }
 
-/// Result of [`LoadTicketContext::execute`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedTickets {
-    /// Criteria of all tickets, ids `<KEY>/AC-n`; `key` is the first implemented key.
     pub requirements: Requirements,
     pub context: TicketContext,
-    /// What could not be loaded or was degraded (parent missing, stale cache...), for the report.
     pub notes: Vec<String>,
 }
 
@@ -70,8 +57,6 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         self
     }
 
-    /// Loads `keys` (the implemented tickets, first one is the main ticket) and their parents.
-    /// Fails only when none of `keys` could be loaded; other failures become notes.
     pub async fn execute(&self, keys: &[TicketKey]) -> Result<LoadedTickets, TicketError> {
         let mut notes = Vec::new();
         let mut implemented = Vec::new();
@@ -98,7 +83,6 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         Ok(self.assemble(&implemented, &ancestors, notes))
     }
 
-    /// Follows `parent` until a Story, an Epic, an already loaded ticket or [`MAX_PARENT_HOPS`].
     async fn walk_parents(
         &self,
         ticket: &Ticket,
@@ -142,7 +126,6 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         }
     }
 
-    /// Fetches one ticket, through the cache when there is one.
     async fn load(&self, key: &TicketKey, notes: &mut Vec<String>) -> Result<Ticket, TicketError> {
         let Some(cache) = &self.cache else {
             return self.source.fetch(key).await;
@@ -236,7 +219,6 @@ fn cache_note(error: &CacheError) -> String {
     format!("ticket cache unavailable ({error}); tickets were fetched from the tracker")
 }
 
-/// `[KEY] title` + description per ticket that has one, each truncated.
 fn describe(tickets: &[&Ticket]) -> String {
     tickets
         .iter()

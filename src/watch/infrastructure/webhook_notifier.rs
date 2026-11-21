@@ -1,5 +1,3 @@
-//! Notifier posting `{"text": "..."}` to a webhook (Slack incoming-webhook compatible).
-
 use std::time::Duration;
 
 use reqwest::{Client, Url, redirect};
@@ -15,8 +13,6 @@ struct Payload<'a> {
     text: &'a str,
 }
 
-/// Best effort: failures are logged on stderr (without the URL, which usually embeds a
-/// secret token) and never propagated.
 #[derive(Debug, Clone)]
 pub struct WebhookNotifier {
     client: Client,
@@ -28,7 +24,6 @@ impl WebhookNotifier {
         let url = validate_webhook_url(url)?;
         let client = Client::builder()
             .timeout(TIMEOUT)
-            // A redirect could downgrade to plain HTTP or leave the allowed host.
             .redirect(redirect::Policy::none())
             .build()
             .map_err(|e| WatchError::Config(format!("cannot build HTTP client: {e}")))?;
@@ -36,7 +31,6 @@ impl WebhookNotifier {
     }
 }
 
-/// Accepts `https://` URLs, and `http://` only for the local host.
 pub fn validate_webhook_url(raw: &str) -> Result<Url, WatchError> {
     let invalid = |why: &str| WatchError::Config(format!("webhook URL {why}"));
     let url = Url::parse(raw.trim()).map_err(|_| invalid("is not a valid URL"))?;
@@ -107,7 +101,6 @@ mod tests {
         Mock::given(method("POST")).respond_with(ResponseTemplate::new(500)).expect(1).mount(&server).await;
         WebhookNotifier::new(&server.uri()).unwrap().notify("t", "").await;
 
-        // Port 9 (discard) on loopback is normally closed: connection refused.
         WebhookNotifier::new("http://127.0.0.1:9/").unwrap().notify("t", "b").await;
     }
 }

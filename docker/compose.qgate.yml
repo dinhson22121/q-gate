@@ -12,10 +12,14 @@ services:
   qgate:
     build:
       context: .
+      # Default target: the runner image plus the pinned `claude` CLI (QGATE_CLAUDE_VERSION).
+      target: qgate
       args:
         QGATE_UID: ${QGATE_UID:-1000}
         QGATE_GID: ${QGATE_GID:-1000}
     image: qgate:local
+    # Claude auth lives here: CLAUDE_CODE_OAUTH_TOKEN (claude setup-token) or, after `claude login` inside the
+    # container, in the qgate-data volume (/data/home/.claude). See qgate.env.example.
     env_file: qgate.env
     environment:
       # Run every untrusted command in qgate-runner; if it is unreachable, checks/tests fail with a note
@@ -87,8 +91,14 @@ services:
     mem_limit: ${QGATE_SERVICE_MEMORY_LIMIT:-1g}
 
   qgate-runner:
-    image: qgate:local
-    # Same image as qgate (built by the qgate service); never pulled from a registry.
+    # Same Dockerfile, `runner` target: NO `claude` binary and no token. Built locally, never pulled.
+    build:
+      context: .
+      target: runner
+      args:
+        QGATE_UID: ${QGATE_UID:-1000}
+        QGATE_GID: ${QGATE_GID:-1000}
+    image: qgate-runner:local
     pull_policy: never
     command: ["qgate", "runner", "--socket", "/work/.runner/runner.sock", "--max-jobs", "${QGATE_RUNNER_MAX_JOBS:-4}"]
     # NO env_file: the runner holds no secrets. Only toolchain/cache locations, all in its own volumes.

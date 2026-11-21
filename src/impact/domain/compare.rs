@@ -1,5 +1,3 @@
-//! Regression = passes on base, fails on head, and fails again when re-run on head.
-
 use std::collections::BTreeSet;
 
 use super::test_run::{PACKAGE_LEVEL, TestOutcome, TestRun};
@@ -18,11 +16,8 @@ impl TestKey {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Comparison {
-    /// Passed on base, failed on head: regressions pending a re-run.
     pub candidates: Vec<TestKey>,
-    /// Failed on base too: not caused by this change.
     pub pre_existing: Vec<TestKey>,
-    /// Failed on head with no passing base result (new tests): the quality path's concern.
     pub new_failures: Vec<TestKey>,
 }
 
@@ -47,7 +42,6 @@ fn has_named_failure(run: &TestRun, package: &str) -> bool {
     run.failures().any(|(p, t, _)| p == package && t != PACKAGE_LEVEL)
 }
 
-/// A failing subtest fails its parent too; report only the leaf.
 fn without_failed_parents(keys: Vec<TestKey>) -> Vec<TestKey> {
     let all: BTreeSet<&TestKey> = keys.iter().collect();
     let parents: BTreeSet<TestKey> = all
@@ -61,8 +55,6 @@ fn without_failed_parents(keys: Vec<TestKey>) -> Vec<TestKey> {
     keys.into_iter().filter(|k| !parents.contains(k)).collect()
 }
 
-/// Splits candidates into `(confirmed, flaky)` using a re-run on head: confirmed only if the same
-/// test fails again; a test that passes, or is missing from the re-run, is treated as flaky.
 pub fn confirm(candidates: &[TestKey], rerun: &TestRun) -> (Vec<TestKey>, Vec<TestKey>) {
     candidates.iter().cloned().partition(|k| rerun.outcome(&k.package, &k.test) == Some(TestOutcome::Fail))
 }

@@ -1,6 +1,3 @@
-//! User-level server configuration (`<config_dir>/qgate.toml`): dashboard, repositories, notifications,
-//! watcher, the Anthropic endpoint and default Jira settings. Unlike `.qgate.toml` it is not part of any repository.
-
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -8,10 +5,13 @@ use serde::{Deserialize, Serialize};
 
 use super::agents::{AgentsConfig, FigmaConfig};
 use super::jira::JiraConfig;
+use super::legacy::LegacyField;
 use super::output::OutputConfig;
-use super::validation::{ValidationError, ValidationResult, require_http_url, require_range, require_secure_url};
+use super::validation::{ValidationError, ValidationResult, require_http_url, require_non_empty, require_range};
 
-const DEFAULT_LLM_BASE_URL: &str = "https://api.anthropic.com";
+const DEFAULT_CLAUDE_BIN: &str = "claude";
+const DEFAULT_CLI_TIMEOUT_SECS: u64 = 600;
+const MAX_CLI_TIMEOUT_SECS: u64 = 6 * 60 * 60;
 const DEFAULT_BIND: &str = "127.0.0.1:8080";
 const DEFAULT_ALLOWED_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 const DEFAULT_REPOS_ROOT: &str = "/repos";
@@ -24,11 +24,12 @@ const MAX_CONCURRENT_REVIEWS: usize = 16;
 const DEFAULT_REMOTE: &str = "origin";
 const LIST_SEPARATOR: char = ',';
 
-/// Environment variables that override the most common server settings.
 pub const ENV_BIND: &str = "QGATE_BIND";
 pub const ENV_REPOS_ROOT: &str = "QGATE_REPOS_ROOT";
+pub const ENV_REPOS_AUTO_SCAN: &str = "QGATE_REPOS_AUTO_SCAN";
 pub const ENV_WEBHOOK_URL: &str = "QGATE_WEBHOOK_URL";
-pub const ENV_LLM_BASE_URL: &str = "QGATE_LLM_BASE_URL";
+pub const ENV_CLAUDE_BIN: &str = "QGATE_CLAUDE_BIN";
+pub const ENV_CLI_TIMEOUT_SECS: &str = "QGATE_CLI_TIMEOUT_SECS";
 pub const ENV_JIRA_BASE_URL: &str = "JIRA_BASE_URL";
 pub const ENV_JIRA_EMAIL: &str = "JIRA_EMAIL";
 pub const ENV_JIRA_ENABLED: &str = "QGATE_JIRA_ENABLED";
@@ -45,9 +46,7 @@ pub const ENV_REGRESSION_ENABLED: &str = "QGATE_REGRESSION_ENABLED";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DashboardConfig {
-    /// Socket address the dashboard listens on.
     pub bind: String,
-    /// Accepted `Host` header values (DNS-rebinding protection).
     pub allowed_hosts: Vec<String>,
 }
 
@@ -58,7 +57,6 @@ impl Default for DashboardConfig {
 }
 
 impl DashboardConfig {
-    /// The parsed bind address (always valid after [`ServerConfig::validate`]).
     pub fn bind_addr(&self) -> Result<SocketAddr, ValidationError> {
         self.bind.parse().map_err(|_| {
             ValidationError::new("dashboard.bind", format!("must be an IP:port address, got '{}'", self.bind))
@@ -83,19 +81,22 @@ impl DashboardConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReposConfig {
-    /// Absolute directories scanned for git repositories.
     pub roots: Vec<String>,
-    /// How many directory levels below each root are searched.
     pub scan_depth: u32,
+    pub auto_scan: bool,
 }
 
 impl Default for ReposConfig {
     fn default() -> Self {
-        Self { roots: vec![DEFAULT_REPOS_ROOT.into()], scan_depth: DEFAULT_SCAN_DEPTH }
+        Self { roots: vec![DEFAULT_REPOS_ROOT.into()], scan_depth: DEFAULT_SCAN_DEPTH, auto_scan: false }
     }
 }
 
 impl ReposConfig {
+    pub fn scanned_roots(&self) -> &[String] {
+        if self.auto_scan { &self.roots } else { &[] }
+    }
+
     fn validate(&self) -> ValidationResult {
         if self.roots.is_empty() {
             return Err(ValidationError::new("repos.roots", "must list at least one directory"));
@@ -110,7 +111,6 @@ impl ReposConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NotifyConfig {
-    /// Webhook receiving review results; empty disables it.
     pub webhook_url: String,
 }
 
@@ -128,13 +128,8 @@ impl NotifyConfig {
 pub struct ServerWatchConfig {
     pub poll_interval_secs: u64,
     pub max_concurrent_reviews: usize,
-    /// Run the `[[checks]]` commands declared in each repository's `.qgate.toml`.
-    /// They execute repository-controlled commands, so turn this off for repos you do not trust.
     pub run_repo_checks: bool,
-    /// Git remote whose tracking refs (`refs/remotes/<remote>/*`) are watched for pushes.
     pub remote: String,
-    /// Branch a pushed branch is compared against (merge-base). Empty = auto-resolve
-    /// `<remote>/main`, then `<remote>/master`. A push to this branch is never reviewed.
     pub base_branch: String,
 }
 
@@ -159,8 +154,6 @@ impl ServerWatchConfig {
     }
 }
 
-/// A git remote or branch name: no whitespace, control characters or leading '-'. `allow_empty`
-/// permits "" (used for `watch.base_branch`, where empty means auto-resolve).
 pub(super) fn require_ref_token(field: &str, value: &str, allow_empty: bool) -> ValidationResult {
     if value.is_empty() {
         return if allow_empty { Ok(()) } else { Err(ValidationError::new(field, "must not be empty")) };
@@ -171,7 +164,6 @@ pub(super) fn require_ref_token(field: &str, value: &str, allow_empty: bool) -> 
     Ok(())
 }
 
-/// Best-effort quality tools (gitleaks, osv-scanner, golangci-lint, govulncheck...) run on every review.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct QualityConfig {
@@ -184,7 +176,6 @@ impl Default for QualityConfig {
     }
 }
 
-/// Regression detection: re-runs the repository's tests on the base commit to find newly failing tests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RegressionConfig {
@@ -197,28 +188,32 @@ impl Default for RegressionConfig {
     }
 }
 
-/// Anthropic API connection. Only the server config may set it: the endpoint receives the API key and
-/// every reviewed diff, so a repository's `.qgate.toml` (attacker-controllable) must not choose it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerLlmConfig {
-    /// API endpoint; must be https except for a local proxy (localhost / 127.0.0.1).
-    pub base_url: String,
+    pub claude_bin: String,
+    pub timeout_secs: u64,
+    #[serde(default, skip_serializing, rename = "base_url")]
+    legacy_base_url: LegacyField,
 }
 
 impl Default for ServerLlmConfig {
     fn default() -> Self {
-        Self { base_url: DEFAULT_LLM_BASE_URL.into() }
+        Self {
+            claude_bin: DEFAULT_CLAUDE_BIN.into(),
+            timeout_secs: DEFAULT_CLI_TIMEOUT_SECS,
+            legacy_base_url: LegacyField,
+        }
     }
 }
 
 impl ServerLlmConfig {
     fn validate(&self) -> ValidationResult {
-        require_secure_url("llm.base_url", &self.base_url)
+        require_non_empty("llm.claude_bin", &self.claude_bin)?;
+        require_range("llm.timeout_secs", self.timeout_secs, 1, MAX_CLI_TIMEOUT_SECS)
     }
 }
 
-/// Contents of `<config_dir>/qgate.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
@@ -229,13 +224,9 @@ pub struct ServerConfig {
     pub quality: QualityConfig,
     pub regression: RegressionConfig,
     pub llm: ServerLlmConfig,
-    /// Default Jira settings for repositories that do not set them.
     pub jira: JiraConfig,
-    /// Multi-agent ticket review (ticket analysis, test agents, architecture conformance).
     pub agents: AgentsConfig,
-    /// Design checks against Figma frames linked from the ticket's Story.
     pub figma: FigmaConfig,
-    /// Review files written after each scan for the developer's coding agent.
     pub output: OutputConfig,
 }
 
@@ -252,7 +243,6 @@ impl ServerConfig {
         self.output.validate()
     }
 
-    /// Applies the `QGATE_*` / `JIRA_*` overrides from [`ENV_OVERRIDES`]; empty or unset variables are ignored.
     pub fn with_env_overrides(mut self, env: impl Fn(&str) -> Option<String>) -> Self {
         for (entry, value) in active_env_overrides(&env) {
             (entry.apply)(&mut self, &value);
@@ -261,7 +251,6 @@ impl ServerConfig {
     }
 }
 
-/// One environment variable that replaces a server setting. `field` is the dotted path of the setting.
 #[derive(Clone, Copy)]
 pub struct EnvOverride {
     pub env_var: &'static str,
@@ -275,16 +264,25 @@ impl std::fmt::Debug for EnvOverride {
     }
 }
 
-/// The single source of truth for env overrides: used both to apply them and to lock the fields they set.
-pub const ENV_OVERRIDES: [EnvOverride; 16] = [
+pub const ENV_OVERRIDES: [EnvOverride; 18] = [
     EnvOverride { env_var: ENV_BIND, field: "dashboard.bind", apply: |c, v| c.dashboard.bind = v.into() },
     EnvOverride { env_var: ENV_REPOS_ROOT, field: "repos.roots", apply: |c, v| c.repos.roots = split_list(v) },
+    EnvOverride {
+        env_var: ENV_REPOS_AUTO_SCAN,
+        field: "repos.auto_scan",
+        apply: |c, v| c.repos.auto_scan = parse_flag(v),
+    },
     EnvOverride {
         env_var: ENV_WEBHOOK_URL,
         field: "notify.webhook_url",
         apply: |c, v| c.notify.webhook_url = v.into(),
     },
-    EnvOverride { env_var: ENV_LLM_BASE_URL, field: "llm.base_url", apply: |c, v| c.llm.base_url = v.into() },
+    EnvOverride { env_var: ENV_CLAUDE_BIN, field: "llm.claude_bin", apply: |c, v| c.llm.claude_bin = v.into() },
+    EnvOverride {
+        env_var: ENV_CLI_TIMEOUT_SECS,
+        field: "llm.timeout_secs",
+        apply: |c, v| c.llm.timeout_secs = v.trim().parse().unwrap_or(c.llm.timeout_secs),
+    },
     EnvOverride { env_var: ENV_JIRA_BASE_URL, field: "jira.base_url", apply: |c, v| c.jira.base_url = v.into() },
     EnvOverride { env_var: ENV_JIRA_EMAIL, field: "jira.email", apply: |c, v| c.jira.email = v.into() },
     EnvOverride { env_var: ENV_JIRA_ENABLED, field: "jira.enabled", apply: |c, v| c.jira.enabled = parse_flag(v) },
@@ -327,12 +325,10 @@ pub const ENV_OVERRIDES: [EnvOverride; 16] = [
     },
 ];
 
-/// Settings that decide where credentials and code are sent, or which program runs with them. They are
-/// never changed over HTTP (settings page, policy assistant): any process that can reach the dashboard
-/// could otherwise redirect the API key or run a command. Set them with their env variable (see
-/// [`admin_env_var`]) or, before the first start, in the `qgate.toml` seed.
-pub const ADMIN_ONLY_FIELDS: [&str; 7] = [
-    "llm.base_url",
+pub const ADMIN_ONLY_FIELDS: [&str; 9] = [
+    "repos.auto_scan",
+    "llm.claude_bin",
+    "llm.timeout_secs",
     "jira.base_url",
     "jira.mcp.command",
     "jira.mcp.env_passthrough",
@@ -340,17 +336,13 @@ pub const ADMIN_ONLY_FIELDS: [&str; 7] = [
     "figma.mcp_url",
     "watch.base_branch",
 ];
-/// Write-only and admin-only to set; clearing it over HTTP is allowed (it only stops notifications).
 pub const WEBHOOK_URL_FIELD: &str = "notify.webhook_url";
-/// Turning repository checks off over HTTP is allowed (tightening); turning them on is admin-only.
 pub const RUN_REPO_CHECKS_FIELD: &str = "watch.run_repo_checks";
 
-/// The env variable that sets an (admin-only) field.
 pub fn admin_env_var(field: &str) -> Option<&'static str> {
     ENV_OVERRIDES.iter().find(|entry| entry.field == field).map(|entry| entry.env_var)
 }
 
-/// Settings read once at startup: changing them needs `docker compose restart qgate`.
 pub const RESTART_REQUIRED_FIELDS: [&str; 9] = [
     "dashboard.bind",
     "dashboard.allowed_hosts",
@@ -363,7 +355,6 @@ pub const RESTART_REQUIRED_FIELDS: [&str; 9] = [
     "output.dir",
 ];
 
-/// The overrides whose variable is set to a non-empty value, with that (trimmed) value.
 pub fn active_env_overrides(env: &impl Fn(&str) -> Option<String>) -> Vec<(EnvOverride, String)> {
     ENV_OVERRIDES
         .iter()
@@ -402,7 +393,23 @@ mod tests {
         assert_eq!(config.watch.max_concurrent_reviews, 2);
         assert_eq!(config.watch.remote, "origin");
         assert_eq!(config.watch.base_branch, "");
-        assert_eq!(config.llm.base_url, "https://api.anthropic.com");
+        assert_eq!((config.llm.claude_bin.as_str(), config.llm.timeout_secs), ("claude", 600));
+    }
+
+    #[test]
+    fn settings_saved_with_the_removed_base_url_still_load() {
+        let config: ServerConfig = toml::from_str("[llm]\nbase_url = \"https://api.anthropic.com\"\n").unwrap();
+        assert_eq!(config, ServerConfig::default());
+        let written: toml::Value = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert!(written["llm"].get("base_url").is_none());
+        let json: ServerConfig = serde_json::from_str(r#"{"llm":{"base_url":"http://127.0.0.1:4000"}}"#).unwrap();
+        assert_eq!(json.llm.claude_bin, "claude");
+    }
+
+    #[test]
+    fn an_unparsable_timeout_env_keeps_the_configured_value() {
+        let config = ServerConfig::default().with_env_overrides(env(&[(ENV_CLI_TIMEOUT_SECS, "soon")]));
+        assert_eq!(config.llm.timeout_secs, 600);
     }
 
     #[test]
@@ -411,7 +418,8 @@ mod tests {
             (ENV_BIND, "0.0.0.0:9000"),
             (ENV_REPOS_ROOT, "/repos/a, /repos/b,,"),
             (ENV_WEBHOOK_URL, "http://ntfy/qgate"),
-            (ENV_LLM_BASE_URL, "http://127.0.0.1:4000"),
+            (ENV_CLAUDE_BIN, "/opt/claude/bin/claude"),
+            (ENV_CLI_TIMEOUT_SECS, "900"),
             (ENV_JIRA_BASE_URL, "https://acme.atlassian.net"),
             (ENV_JIRA_EMAIL, "bot@acme.com"),
             (ENV_OUTPUT_DIR, "/data/reviews"),
@@ -419,7 +427,7 @@ mod tests {
         assert_eq!(config.dashboard.bind, "0.0.0.0:9000");
         assert_eq!(config.repos.roots, vec!["/repos/a".to_string(), "/repos/b".to_string()]);
         assert_eq!(config.notify.webhook_url, "http://ntfy/qgate");
-        assert_eq!(config.llm.base_url, "http://127.0.0.1:4000");
+        assert_eq!((config.llm.claude_bin.as_str(), config.llm.timeout_secs), ("/opt/claude/bin/claude", 900));
         assert_eq!(config.jira.base_url, "https://acme.atlassian.net");
         assert_eq!(config.jira.email, "bot@acme.com");
         assert_eq!(config.output.dir, "/data/reviews");
@@ -481,8 +489,11 @@ mod tests {
         c.watch.base_branch = "bad branch".into();
         cases.push((c, "watch.base_branch"));
         let mut c = base.clone();
-        c.llm.base_url = "http://api.example.com".into();
-        cases.push((c, "llm.base_url"));
+        c.llm.claude_bin = " ".into();
+        cases.push((c, "llm.claude_bin"));
+        let mut c = base.clone();
+        c.llm.timeout_secs = 0;
+        cases.push((c, "llm.timeout_secs"));
         let mut c = base.clone();
         c.jira.enabled = true;
         cases.push((c, "jira.email"));
@@ -511,7 +522,7 @@ mod tests {
             ("jira.email", ENV_JIRA_EMAIL, "a@b.c")
         );
         assert!(format!("{:?}", active[0].0).contains("jira.email"));
-        assert_eq!(ENV_OVERRIDES.len(), 16);
+        assert_eq!(ENV_OVERRIDES.len(), 18);
     }
 
     #[test]
@@ -523,6 +534,7 @@ mod tests {
             (ENV_FIGMA_MCP_URL, "https://mcp.proxy.example/mcp"),
             (ENV_RUN_REPO_CHECKS, "off"),
             (ENV_WATCH_BASE_BRANCH, "develop"),
+            (ENV_REPOS_AUTO_SCAN, "true"),
         ]));
         assert_eq!(config.jira.mcp.command, vec!["uvx".to_string(), "mcp-atlassian==0.24.0".into()]);
         assert_eq!(config.jira.mcp.env_passthrough, vec!["JIRA_URL".to_string(), "JIRA_API_TOKEN".into()]);
@@ -530,10 +542,20 @@ mod tests {
         assert_eq!(config.figma.mcp_url, "https://mcp.proxy.example/mcp");
         assert!(!config.watch.run_repo_checks);
         assert_eq!(config.watch.base_branch, "develop");
+        assert!(config.repos.auto_scan);
         assert!(config.validate().is_ok());
         for field in ADMIN_ONLY_FIELDS.iter().chain([&WEBHOOK_URL_FIELD, &RUN_REPO_CHECKS_FIELD]) {
             assert!(admin_env_var(field).is_some(), "{field} needs an env override");
         }
         assert_eq!(admin_env_var("agents.model"), None);
+    }
+
+    #[test]
+    fn scanning_is_off_by_default_so_no_root_is_scanned() {
+        let config = ReposConfig::default();
+        assert!(!config.auto_scan);
+        assert!(config.scanned_roots().is_empty());
+        let scanning = ReposConfig { auto_scan: true, ..config };
+        assert_eq!(scanning.scanned_roots(), [DEFAULT_REPOS_ROOT.to_string()]);
     }
 }

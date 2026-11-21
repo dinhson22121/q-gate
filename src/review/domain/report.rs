@@ -60,17 +60,11 @@ pub struct SkippedFile {
 pub struct ReviewReport {
     pub files_reviewed: Vec<String>,
     pub skipped: Vec<SkippedFile>,
-    /// Verified findings, most severe first.
     pub findings: Vec<Finding>,
-    /// Findings dropped because they could not be verified against the code.
     pub rejected: Vec<RejectedFinding>,
-    /// Acceptance-criteria assessment, when the change is linked to requirements.
     pub requirements: Option<RequirementsReport>,
-    /// Results of the repository's deterministic checks.
     pub checks: Vec<CheckResult>,
-    /// Ticket agents (generated tests, architecture rules, design checks), after verification.
     pub agents: Option<AgentReport>,
-    /// Ticket keys, description and design links the review used as context.
     pub ticket: Option<TicketContext>,
     pub gate: GateDecision,
     pub usage: TokenUsage,
@@ -78,7 +72,6 @@ pub struct ReviewReport {
 }
 
 impl ReviewReport {
-    /// True when some file could not be reviewed, so a passing gate is not a full verdict.
     pub fn is_incomplete(&self) -> bool {
         self.skipped.iter().any(|s| matches!(s.reason, SkipReason::ReviewFailed(_)))
     }

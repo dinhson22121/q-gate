@@ -1,19 +1,13 @@
-//! The work item a change implements.
-
 use serde::{Deserialize, Serialize};
 
 use super::ticket_key::TicketKey;
 
-/// Issue type names (lowercase) that end the parent walk.
 const STORY_TYPES: &[&str] = &["story", "user story"];
-/// Issue type names (lowercase) that are never merged into a ticket's requirements.
 const EPIC_TYPES: &[&str] = &["epic", "initiative"];
 
-/// The parent of a ticket as reported by the tracker (`fields.parent` in Jira).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParentRef {
     pub key: TicketKey,
-    /// Issue type name of the parent (e.g. "Story", "Epic"), when known.
     pub issue_type: Option<String>,
 }
 
@@ -27,36 +21,26 @@ fn is_one_of(issue_type: Option<&str>, names: &[&str]) -> bool {
     issue_type.is_some_and(|t| names.contains(&t.trim().to_lowercase().as_str()))
 }
 
-/// A ticket as fetched from the tracker, with its acceptance criteria already extracted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub key: TicketKey,
     pub title: String,
-    /// Browser URL of the ticket, when known.
     pub url: Option<String>,
-    /// Workflow status name (e.g. "In Progress"), when known.
     pub status: Option<String>,
-    /// Acceptance criteria in ticket order; empty when the ticket has none that could be parsed.
     pub criteria: Vec<String>,
-    /// Issue type name (e.g. "Sub-task", "Story"). `None` when the tracker did not say, which also
-    /// means the hierarchy (parent) is unknown.
     #[serde(default)]
     pub issue_type: Option<String>,
     #[serde(default)]
     pub parent: Option<ParentRef>,
-    /// Full description as plain text (untruncated).
     #[serde(default)]
     pub description: String,
-    /// Figma links from the description and the ticket's remote links, in order of appearance.
     #[serde(default)]
     pub design_links: Vec<String>,
-    /// Tracker's last-modified marker (Jira `fields.updated`), compared verbatim.
     #[serde(default)]
     pub updated: Option<String>,
 }
 
 impl Ticket {
-    /// A ticket with only a key and title; the other fields are empty.
     pub fn new(key: TicketKey, title: impl Into<String>) -> Self {
         Self {
             key,

@@ -1,7 +1,3 @@
-//! Orchestrates the ticket agents for one review: the analyst first (its brief feeds the others),
-//! then test agents (one per scenario, bounded), architecture and design checks in parallel.
-//! Orchestration is plain code: the split of work is fixed, so no planning model is needed.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,14 +8,12 @@ use crate::review::domain::agent_results::{AgentReport, TicketBrief, TicketConte
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::requirements::Requirements;
 
-/// The agents enabled for this review. Every one is optional.
 #[derive(Clone, Default)]
 pub struct AgentSuite {
     pub analyst: Option<Arc<dyn TicketAnalyst>>,
     pub tests: Option<Arc<dyn TestAgent>>,
     pub architecture: Option<Arc<dyn ArchitectureReviewer>>,
     pub design: Option<Arc<dyn DesignReviewer>>,
-    /// Test agents running at the same time.
     pub max_parallel: usize,
     pub max_scenarios: usize,
 }
@@ -30,7 +24,6 @@ impl AgentSuite {
     }
 }
 
-/// Where the agents run: facts the review use case does not otherwise know.
 pub struct AgentRun<'a> {
     pub suite: &'a AgentSuite,
     pub ticket: Option<&'a TicketContext>,
@@ -39,7 +32,6 @@ pub struct AgentRun<'a> {
     pub snapshot_root: Option<&'a Path>,
 }
 
-/// Runs the suite. Agent failures become notes; they never fail the review.
 pub async fn run_agents(run: &AgentRun<'_>, files: &[FileChange], requirements: Option<&Requirements>) -> AgentReport {
     let input = AgentInput {
         files,
@@ -130,13 +122,11 @@ fn run_tests<'a>(
     let parallel = suite.max_parallel.max(1);
     async move {
         let Some(agent) = agent else { return Vec::new() };
-        // Futures are built eagerly (Iterator::map) to keep the stream's item type free of closure lifetimes.
         let runs: Vec<_> = scenarios.into_iter().map(|scenario| agent.run(input, scenario)).collect();
         stream::iter(runs).buffer_unordered(parallel).collect().await
     }
 }
 
-/// Orders "S2" before "S10".
 fn natural_key(id: &str) -> (String, u64) {
     let digits: String =
         id.chars().rev().take_while(char::is_ascii_digit).collect::<Vec<_>>().into_iter().rev().collect();

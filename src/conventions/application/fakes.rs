@@ -1,5 +1,3 @@
-//! In-memory test doubles for the conventions ports.
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -13,7 +11,6 @@ use super::ports::{
 };
 use crate::conventions::domain::rulebook::{RuleDraft, RuleStatus, Rulebook};
 
-/// Files keyed by repository-relative path, the same for every root.
 #[derive(Default)]
 pub struct MemoryRepo {
     pub files: Mutex<HashMap<String, String>>,
@@ -78,7 +75,6 @@ impl RulebookStore for MemoryStore {
     }
 }
 
-/// Returns canned drafts / violations, counts calls and records the last requests.
 #[derive(Default)]
 pub struct FakeModel {
     pub drafts: Mutex<Vec<RuleDraft>>,

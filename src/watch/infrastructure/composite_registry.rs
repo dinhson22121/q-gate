@@ -1,11 +1,7 @@
-//! Union of two repository sources, deduplicated by canonical path.
-
 use std::collections::HashSet;
 
 use crate::watch::application::ports::{RepoSource, WatchError, WatchedRepo};
 
-/// Lists `first` then `second`; when both contain a repository the entry of `first` wins.
-/// An error from either source fails the listing (the watcher then keeps its last list).
 #[derive(Debug)]
 pub struct CompositeRegistry<A, B> {
     first: A,
@@ -60,7 +56,6 @@ mod tests {
         let canonical = std::fs::canonicalize(dir.path()).unwrap();
         let other = PathBuf::from("/does/not/exist");
         let first = Fixed(Ok(vec![repo(&canonical, "registered")]));
-        // Same directory reached through a non-canonical spelling.
         let second = Fixed(Ok(vec![repo(&dir.path().join("."), "scanned"), repo(&other, "x")]));
 
         let repos = CompositeRegistry::new(first, second).list().await.unwrap();

@@ -1,6 +1,3 @@
-//! Read-only repository access: tracked files via `git ls-files` (hardened like the review
-//! context's git calls), falling back to a bounded directory walk outside a git checkout.
-
 use std::fs::File;
 use std::io::Read;
 use std::path::{Component, Path};
@@ -9,11 +6,8 @@ use std::process::{Command, Stdio};
 use crate::conventions::application::{ConventionsError, RepoReader};
 use crate::conventions::domain::sources::is_ignored_path;
 
-/// Files listed at most (protects against monorepos with millions of files).
 const MAX_FILES: usize = 50_000;
-/// Directory levels walked by the fallback.
 const MAX_WALK_DEPTH: usize = 12;
-/// Same hardening as the review context: the repository's own config must not run programs.
 const GIT_ARGS: &[&str] = &[
     "-c",
     "core.fsmonitor=false",
@@ -76,7 +70,6 @@ fn walk(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) -> std::io
     Ok(())
 }
 
-/// Only plain relative paths inside the root (no `..`, no absolute paths).
 fn is_safe_relative(path: &str) -> bool {
     !path.is_empty() && Path::new(path).components().all(|c| matches!(c, Component::Normal(_)))
 }
@@ -98,7 +91,6 @@ impl RepoReader for FsRepoReader {
         if !is_safe_relative(path) {
             return Ok(None);
         }
-        // Symlinks (the file or any parent directory) could point outside the repository.
         let Some(full) = resolve_without_symlinks(root, path) else { return Ok(None) };
         let file = File::open(&full).map_err(repository)?;
         let mut bytes = Vec::with_capacity(cap.min(64 * 1024));
@@ -110,7 +102,6 @@ impl RepoReader for FsRepoReader {
     }
 }
 
-/// `root/path` when every component below `root` is a real directory and the last one a regular file.
 fn resolve_without_symlinks(root: &Path, path: &str) -> Option<std::path::PathBuf> {
     let mut full = root.to_path_buf();
     let mut components = Path::new(path).components().peekable();
@@ -166,7 +157,7 @@ mod tests {
         let root = dir.path();
         let git = |args: &[&str]| Command::new("git").args(args).current_dir(root).output().unwrap();
         if !git(&["init", "-q"]).status.success() {
-            return; // git not installed
+            return;
         }
         std::fs::write(root.join("tracked.rs"), "fn t() {}\n").unwrap();
         std::fs::write(root.join("untracked.rs"), "fn u() {}\n").unwrap();

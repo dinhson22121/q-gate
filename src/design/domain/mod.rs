@@ -1,5 +1,3 @@
-//! Pure design model and mismatch detection. No I/O.
-
 pub mod checks;
 mod component_check;
 mod copy_check;

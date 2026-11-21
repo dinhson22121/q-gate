@@ -1,5 +1,3 @@
-//! Pure rulebook model: rules, fingerprints, code sampling, scope selection and evidence checks.
-
 pub mod evidence;
 pub mod rulebook;
 pub mod sampling;

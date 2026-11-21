@@ -1,11 +1,3 @@
-//! Quality bounded context: deterministic checks for what SonarQube does not cover, graded on the new code only
-//! ("clean as you code"): dependency vulnerabilities (osv-scanner, govulncheck), leaked secrets (gitleaks) and
-//! architecture rules (Go import boundaries through golangci-lint's depguard).
-//!
-//! Every tool runs through the sandbox's `ExecBackend` against a commit snapshot. A missing tool or an
-//! unselected language skips the check with a note; it never fails the review. Java architecture rules
-//! (ArchUnit) are test based: repositories add those tests themselves and qgate's test runner executes them.
-
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
@@ -13,7 +5,7 @@ pub mod infrastructure;
 pub use application::{QualityConfig, QualityReport, QualityRequest, RunQualityChecks};
 pub use domain::{
     ChangedFile, DependencyRef, ImportBoundary, Language, QualityCategory, QualityFinding, QualityRule,
-    QualitySeverity, QualityTool, Verdict,
+    QualitySeverity, QualityTool, Verdict, parse_boundary_directives,
 };
 pub use infrastructure::{ToolchainPaths, default_checks};
 
@@ -21,7 +13,6 @@ use std::sync::Arc;
 
 use crate::sandbox::application::ExecBackend;
 
-/// Composition root: the use case wired to the real tool adapters running through `backend`.
 pub fn build(backend: Arc<dyn ExecBackend>, config: QualityConfig) -> RunQualityChecks {
     RunQualityChecks::new(default_checks(backend, &config), config)
 }

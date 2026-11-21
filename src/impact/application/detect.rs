@@ -1,6 +1,3 @@
-//! `DetectRegressions`: re-run the existing tests of the impacted packages on base and head and
-//! report the ones that passed before and fail now.
-
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +8,6 @@ use crate::impact::domain::{
     compute_impacted, confirm,
 };
 
-/// Default cap on the number of packages whose tests are re-run.
 pub const DEFAULT_MAX_PACKAGES: usize = 50;
 const EVIDENCE_TAIL_BYTES: usize = 4000;
 
@@ -20,9 +16,7 @@ pub struct DetectRequest {
     pub head_sha: String,
     pub base_snapshot: PathBuf,
     pub head_snapshot: PathBuf,
-    /// Paths changed between base and head, relative to the repo root.
     pub changed_files: Vec<String>,
-    /// Cap on re-run packages; use [`DEFAULT_MAX_PACKAGES`].
     pub max_packages: usize,
 }
 
@@ -36,14 +30,12 @@ impl DetectRegressions {
         Self { toolchain, base_store: None }
     }
 
-    /// Reuses (and fills) base-side results through `store`.
     #[must_use]
     pub fn with_base_store(mut self, store: Arc<dyn BaseRunStore>) -> Self {
         self.base_store = Some(store);
         self
     }
 
-    /// Never fails: anything that prevents the check is reported as a skipped report.
     pub async fn execute(&self, request: &DetectRequest) -> RegressionReport {
         match self.detect(request).await {
             Ok(report) => report,
@@ -82,7 +74,6 @@ impl DetectRegressions {
         Ok(report)
     }
 
-    /// Packages that exist on base too; new packages have nothing to regress against.
     async fn packages_on_both_commits(
         &self,
         request: &DetectRequest,
@@ -108,7 +99,6 @@ impl DetectRegressions {
         Ok((base?, head?))
     }
 
-    /// The base-side step: stable for a `(base sha, packages)` pair, hence cacheable.
     pub async fn base_run(
         &self,
         request: &DetectRequest,
@@ -175,8 +165,6 @@ fn whole_packages(packages: &[String]) -> Vec<TestSelection> {
     packages.iter().map(|package| TestSelection { package: package.clone(), tests: Vec::new() }).collect()
 }
 
-/// One selection per package: the top-level names of its failing tests, or the whole package when
-/// the package itself failed.
 fn rerun_selections(candidates: &[TestKey]) -> Vec<TestSelection> {
     let mut by_package: BTreeMap<&str, Option<Vec<String>>> = BTreeMap::new();
     for key in candidates {
@@ -247,8 +235,6 @@ mod tests {
         run
     }
 
-    /// Answers by snapshot path: base and head have their own package lists and results. `head_runs`
-    /// are consumed in order (first run, then re-runs); the last one repeats.
     struct FakeGo {
         module: bool,
         base_packages: Result<Vec<GoPackage>, String>,

@@ -1,13 +1,8 @@
-//! "Dry-run on history": replays the deterministic gate over stored runs with the current and the
-//! proposed policy and reports which runs would flip. Model-judged results (findings, rule violations,
-//! test verdicts) are taken as recorded; new rules cannot be replayed.
-
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::review::application::{Category, Confidence, DesignMismatchKind, GatePolicy, Severity};
 
-/// What the gate looks at in one stored run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunFacts {
     pub run_id: i64,
@@ -15,19 +10,15 @@ pub struct RunFacts {
     pub repo_name: String,
     pub created_at: DateTime<Utc>,
     pub recorded_passed: bool,
-    /// (severity, category, confidence) of each verified finding.
     pub findings: Vec<(Severity, Category, Confidence)>,
     pub unmet_criteria: usize,
-    /// Required checks that did not pass (they always block).
     pub failed_checks: usize,
     pub incomplete: bool,
     pub failed_tests: usize,
-    /// Violations of approved rules.
     pub rule_violations: usize,
     pub design_mismatches: Vec<DesignMismatchKind>,
 }
 
-/// The same decision as the review context's `GatePolicy::decide`, on recorded facts.
 pub fn passes(policy: &GatePolicy, run: &RunFacts) -> bool {
     let blocking = run.findings.iter().any(|(severity, category, confidence)| {
         *severity >= policy.fail_on && *confidence >= policy.min_confidence && policy.categories.contains(category)
@@ -58,13 +49,10 @@ pub struct DryRunRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DryRunReport {
     pub evaluated: usize,
-    /// Runs without a report (errored) are not replayed.
     pub skipped: usize,
     pub pass_to_fail: usize,
     pub fail_to_pass: usize,
-    /// Only the runs whose outcome flips, newest first.
     pub flips: Vec<DryRunRow>,
-    /// Runs whose replay with today's policy differs from the recorded result (the policy changed since).
     pub drifted: usize,
     pub caveats: Vec<String>,
 }
@@ -74,7 +62,6 @@ pub const CAVEAT_MODEL_RESULTS: &str = "Findings, rule violations and generated-
 pub const CAVEAT_NEW_RULES: &str = "New or edited rules are judged by the model on future commits and cannot be \
      replayed on history: their effect is not evaluated here (estimate only).";
 
-/// `before`/`after` decide each run under the current and the proposed policy.
 pub fn summarize(
     runs: &[RunFacts],
     skipped: usize,

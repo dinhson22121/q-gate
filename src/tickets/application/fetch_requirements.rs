@@ -1,14 +1,10 @@
-//! Use case: find the ticket a change belongs to and turn it into review requirements.
-
 use crate::review::application::{AcceptanceCriterion, Requirements};
 use crate::tickets::domain::{Ticket, TicketKey, extract_ticket_key};
 
 use super::ports::{TicketError, TicketSource};
 
-/// Prefix of generated criterion ids (`AC-1`, `AC-2`...).
 const CRITERION_ID_PREFIX: &str = "AC-";
 
-/// Resolves the ticket key from the branch / commit message and fetches its requirements.
 pub struct FetchRequirements<S> {
     source: S,
 }
@@ -18,8 +14,6 @@ impl<S: TicketSource> FetchRequirements<S> {
         Self { source }
     }
 
-    /// Returns `Ok(None)` when no ticket key is found in the branch or commit message.
-    /// A ticket without parsable acceptance criteria yields requirements with zero criteria.
     pub async fn execute(
         &self,
         branch: Option<&str>,
@@ -32,14 +26,12 @@ impl<S: TicketSource> FetchRequirements<S> {
         self.execute_for_key(&key).await.map(Some)
     }
 
-    /// Fetches the requirements of an explicitly given ticket (e.g. `--ticket ABC-123`).
     pub async fn execute_for_key(&self, key: &TicketKey) -> Result<Requirements, TicketError> {
         let ticket = self.source.fetch(key).await?;
         Ok(to_requirements(&ticket))
     }
 }
 
-/// Maps a ticket to the review context's requirements, numbering criteria `AC-1..n`.
 pub fn to_requirements(ticket: &Ticket) -> Requirements {
     let criteria = ticket
         .criteria
@@ -59,7 +51,6 @@ mod tests {
 
     use super::*;
 
-    /// Records requested keys and returns a canned result.
     struct FakeSource {
         result: Result<Vec<String>, TicketError>,
         requested: Mutex<Vec<String>>,

@@ -1,5 +1,3 @@
-//! Credential port and the use cases that read and store secrets.
-
 use std::io;
 use std::path::Path;
 
@@ -9,25 +7,18 @@ use crate::settings::domain::credentials::{CredentialName, Secret};
 pub enum CredentialError {
     #[error("invalid secret: {0}")]
     InvalidSecret(&'static str),
-    /// `<NAME>_FILE` points to a file that cannot be used. Never contains the file content.
     #[error("cannot read secret file {path} (from {var}): {reason}")]
     SecretFile { var: &'static str, path: String, reason: String },
     #[error("credential store error: {0}")]
     Store(String),
 }
 
-/// Persistent secret storage (OS keychain, credentials file...).
 pub trait CredentialStore: Send + Sync {
     fn get(&self, name: CredentialName) -> Result<Option<Secret>, CredentialError>;
     fn set(&self, name: CredentialName, secret: &Secret) -> Result<(), CredentialError>;
-    /// Removing a secret that is not stored is not an error.
     fn delete(&self, name: CredentialName) -> Result<(), CredentialError>;
 }
 
-/// Finds a secret: `<NAME>` env var, then the file named by `<NAME>_FILE`, then `store`.
-///
-/// Empty or whitespace-only env values count as unset. A `<NAME>_FILE` that cannot be read
-/// or is empty is an error rather than a silent fall-through, since it is an explicit setting.
 pub fn resolve<S>(
     name: CredentialName,
     env_lookup: impl Fn(&str) -> Option<String>,
@@ -61,7 +52,6 @@ fn read_secret_file(
     Ok(Secret::new(value))
 }
 
-/// Validates and stores a secret typed or pasted by the user. Surrounding whitespace is trimmed.
 pub fn store_secret<S>(name: CredentialName, raw: &str, store: &S) -> Result<(), CredentialError>
 where
     S: CredentialStore + ?Sized,
@@ -76,7 +66,6 @@ where
     store.set(name, &Secret::new(value))
 }
 
-/// Removes a stored secret (no-op when absent).
 pub fn delete_secret<S>(name: CredentialName, store: &S) -> Result<(), CredentialError>
 where
     S: CredentialStore + ?Sized,
@@ -91,7 +80,6 @@ pub(crate) mod fakes {
 
     use super::*;
 
-    /// In-memory store; `failing` makes every call return a store error.
     #[derive(Default)]
     pub struct MemoryStore {
         pub values: Mutex<HashMap<CredentialName, String>>,
@@ -135,7 +123,7 @@ mod tests {
     use super::fakes::MemoryStore;
     use super::*;
 
-    const KEY: CredentialName = CredentialName::AnthropicApiKey;
+    const KEY: CredentialName = CredentialName::FigmaToken;
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let map: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
@@ -155,12 +143,7 @@ mod tests {
     #[test]
     fn env_var_wins_over_file_and_store() {
         let store = store_with("from-store");
-        let found = resolve(
-            KEY,
-            env(&[("ANTHROPIC_API_KEY", " from-env "), ("ANTHROPIC_API_KEY_FILE", "/x")]),
-            no_files,
-            &store,
-        );
+        let found = resolve(KEY, env(&[("FIGMA_TOKEN", " from-env "), ("FIGMA_TOKEN_FILE", "/x")]), no_files, &store);
         assert_eq!(found.unwrap().unwrap().expose(), "from-env");
     }
 
@@ -171,24 +154,19 @@ mod tests {
             assert_eq!(path, Path::new("/run/secrets/key"));
             Ok("from-file\n".to_string())
         };
-        let found = resolve(
-            KEY,
-            env(&[("ANTHROPIC_API_KEY", ""), ("ANTHROPIC_API_KEY_FILE", "/run/secrets/key")]),
-            read,
-            &store,
-        );
+        let found = resolve(KEY, env(&[("FIGMA_TOKEN", ""), ("FIGMA_TOKEN_FILE", "/run/secrets/key")]), read, &store);
         assert_eq!(found.unwrap().unwrap().expose(), "from-file");
     }
 
     #[test]
     fn unreadable_or_empty_secret_file_is_an_error_without_content() {
         let store = store_with("from-store");
-        let err = resolve(KEY, env(&[("ANTHROPIC_API_KEY_FILE", "/missing")]), no_files, &store).unwrap_err();
-        assert!(matches!(err, CredentialError::SecretFile { var: "ANTHROPIC_API_KEY_FILE", .. }));
+        let err = resolve(KEY, env(&[("FIGMA_TOKEN_FILE", "/missing")]), no_files, &store).unwrap_err();
+        assert!(matches!(err, CredentialError::SecretFile { var: "FIGMA_TOKEN_FILE", .. }));
         assert!(err.to_string().contains("/missing"));
 
         let empty = |_: &Path| Ok("  \n".to_string());
-        let err = resolve(KEY, env(&[("ANTHROPIC_API_KEY_FILE", "/empty")]), empty, &store).unwrap_err();
+        let err = resolve(KEY, env(&[("FIGMA_TOKEN_FILE", "/empty")]), empty, &store).unwrap_err();
         assert!(err.to_string().contains("file is empty"));
     }
 

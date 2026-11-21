@@ -1,5 +1,3 @@
-//! golangci-lint with only depguard enabled: `golangci-lint run --output.json.path=stdout ...`.
-
 use std::path::Path;
 
 use serde_json::Value;
@@ -11,7 +9,6 @@ use crate::quality::domain::{architecture_rule, json_documents, relative_to};
 const DEPGUARD: &str = "depguard";
 const LIST_MARKER: &str = "from list '";
 
-/// The depguard list name is the boundary id (depguard lower-cases it), which ties an issue back to its rule.
 pub fn parse(output: &str, root: &Path, boundaries: &[ImportBoundary]) -> Option<Vec<QualityFinding>> {
     let report = json_documents(output).into_iter().find(|doc| doc.get("Issues").is_some())?;
     let issues = report["Issues"].as_array().map(Vec::as_slice).unwrap_or_default();

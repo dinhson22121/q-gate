@@ -1,7 +1,3 @@
-//! Prevention rules learned from reviews: every finding with a rule (and every architecture-rule violation)
-//! becomes a project rule the developer's coding agent follows. The per-repo rule book is merged
-//! deterministically after each scan and stored as JSON (the source of truth); Markdown is rendered from it.
-
 use std::cmp::Reverse;
 use std::collections::HashSet;
 
@@ -10,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::review::application::{Finding, ReviewReport, RuleViolation, Severity};
 
-/// `schema` value of the stored rule book.
 pub const RULES_SCHEMA: &str = "qgate.rules/v1";
 const STATE_EXTENSION: &str = ".json";
 const MARKDOWN_EXTENSION: &str = ".md";
@@ -18,33 +13,27 @@ const EXAMPLE_CHARS: usize = 120;
 const ARCHITECTURE: &str = "architecture";
 const TRAILING_PUNCTUATION: [char; 6] = ['.', '!', ';', ':', ',', '?'];
 
-/// Where a rule was last (or first) seen.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sighting {
-    /// Short commit sha.
     pub commit: String,
     pub at: DateTime<Utc>,
 }
 
-/// One place the defect was found: `file:line` and the first line of the (already redacted) evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleExample {
     pub location: String,
     pub evidence: String,
 }
 
-/// A rule produced by one review, before merging.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuleCandidate {
     pub text: String,
-    /// Glob of the files it applies to; `None` for all files.
     pub scope: Option<String>,
     pub severity: Severity,
     pub category: String,
     pub example: Option<RuleExample>,
 }
 
-/// A rule in the per-repo rule book.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LearnedRule {
     pub text: String,
@@ -54,13 +43,11 @@ pub struct LearnedRule {
     pub category: String,
     pub first_seen: Sighting,
     pub last_seen: Sighting,
-    /// Number of reviewed commits the rule came up in.
     pub hits: u32,
     #[serde(default)]
     pub example: Option<RuleExample>,
 }
 
-/// The per-repo rule book (`.qgate-rules.json`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleBook {
     pub schema: String,
@@ -77,15 +64,12 @@ impl Default for RuleBook {
 #[error("{0}")]
 pub struct RuleBookError(String);
 
-/// Result of merging one review into the rule book.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeOutcome {
     pub book: RuleBook,
-    /// Rules of this review that were not in the book before, in candidate order.
     pub added: Vec<RuleCandidate>,
 }
 
-/// Relative paths of the Markdown rules file and its JSON state, both in the repository's folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulesPaths {
     pub markdown: String,
@@ -93,22 +77,16 @@ pub struct RulesPaths {
 }
 
 impl RulesPaths {
-    /// `repo_dir` is the sanitised repository folder; `file_name` a validated `*.md` name (`qgate-rules.md` →
-    /// state `.qgate-rules.json`).
     pub fn new(repo_dir: &str, file_name: &str) -> Self {
         let stem = file_name.strip_suffix(MARKDOWN_EXTENSION).unwrap_or(file_name);
         Self { markdown: format!("{repo_dir}/{file_name}"), state: format!("{repo_dir}/.{stem}{STATE_EXTENSION}") }
     }
 
-    /// File names (without folder) of both files, so pruning never touches them.
     pub fn file_names(&self) -> [&str; 2] {
         [&self.markdown, &self.state].map(|p| p.rsplit('/').next().unwrap_or(p))
     }
 }
 
-/// Rules of one review: findings the developer sees (blocking or at least minor) that carry a prevention
-/// rule, and architecture-rule violations. Deduplicated by rule key (keeping the highest severity) and sorted by
-/// severity, then text, so the output does not depend on the order the agents reported in.
 pub fn candidates(report: &ReviewReport) -> Vec<RuleCandidate> {
     let shown = |(index, finding): &(usize, &Finding)| {
         report.gate.blocking.contains(index) || finding.severity >= Severity::Minor
@@ -139,7 +117,6 @@ fn finding_candidate(finding: &Finding) -> Option<RuleCandidate> {
     })
 }
 
-/// Approved architecture rules are binding (major); inferred ones are suggestions (minor).
 fn violation_candidate(violation: &RuleViolation) -> RuleCandidate {
     let title = violation.rule_title.split_whitespace().collect::<Vec<_>>().join(" ");
     let text = if title.is_empty() { format!("Follow architecture rule {}", violation.rule_id.trim()) } else { title };
@@ -165,7 +142,6 @@ fn example(file: &str, line: u32, evidence: &str) -> Option<RuleExample> {
     Some(RuleExample { location: format!("{file}:{line}"), evidence: short })
 }
 
-/// Dedupe key: lowercase text with whitespace collapsed and trailing punctuation stripped, plus the scope.
 pub fn rule_key(text: &str, scope: Option<&str>) -> (String, String) {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     let text = text.trim_end_matches(|c: char| TRAILING_PUNCTUATION.contains(&c) || c.is_whitespace());
@@ -173,7 +149,6 @@ pub fn rule_key(text: &str, scope: Option<&str>) -> (String, String) {
 }
 
 impl RuleBook {
-    /// Parses a stored rule book; an unknown schema is an error so a newer format is never overwritten.
     pub fn from_json(bytes: &[u8]) -> Result<Self, RuleBookError> {
         let book: Self = serde_json::from_slice(bytes).map_err(|e| RuleBookError(format!("invalid JSON: {e}")))?;
         if book.schema != RULES_SCHEMA {
@@ -188,9 +163,6 @@ impl RuleBook {
         text
     }
 
-    /// Merges one review's rules. A rule counts once per commit, so re-reviewing a commit changes nothing but
-    /// the example. Then sorts (severity, hits, recency, text) and keeps at most `max` rules, dropping the
-    /// least severe, least recently seen first.
     pub fn merge(&self, candidates: &[RuleCandidate], seen: &Sighting, max: usize) -> MergeOutcome {
         let mut rules = self.rules.clone();
         let mut added = Vec::new();
@@ -233,7 +205,6 @@ fn cap(mut rules: Vec<LearnedRule>, max: usize) -> Vec<LearnedRule> {
     if rules.len() <= max {
         return rules;
     }
-    // Most valuable first: severity, then recency, then hits; the tail is dropped.
     rules.sort_by_key(|r| (Reverse(r.severity), Reverse(r.last_seen.at), Reverse(r.hits), r.text.clone()));
     rules.truncate(max);
     rules

@@ -1,9 +1,6 @@
-//! User-level directories for qgate's own configuration and data.
-
 use std::path::{Path, PathBuf};
 
 const APP_DIR: &str = "qgate";
-/// Overrides used in the container image (`/config`, `/data`).
 pub const ENV_CONFIG_DIR: &str = "QGATE_CONFIG_DIR";
 pub const ENV_DATA_DIR: &str = "QGATE_DATA_DIR";
 const SERVER_CONFIG_FILE: &str = "qgate.toml";
@@ -16,7 +13,6 @@ pub struct AppPathsError {
     var: &'static str,
 }
 
-/// Where qgate keeps user-level files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
     pub config_dir: PathBuf,
@@ -24,12 +20,10 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
-    /// `QGATE_CONFIG_DIR` / `QGATE_DATA_DIR` when set, else `<os config dir>/qgate` and `<os data dir>/qgate`.
     pub fn discover() -> Result<Self, AppPathsError> {
         Self::resolve(|name| std::env::var(name).ok(), dirs::config_dir(), dirs::data_dir())
     }
 
-    /// Explicit directories (tests, `--config-dir` style flags). Used as-is, no `qgate` suffix.
     pub fn with_dirs(config_dir: impl Into<PathBuf>, data_dir: impl Into<PathBuf>) -> Self {
         Self { config_dir: config_dir.into(), data_dir: data_dir.into() }
     }
@@ -46,12 +40,10 @@ impl AppPaths {
         Ok(Self { config_dir, data_dir })
     }
 
-    /// `<config_dir>/qgate.toml`.
     pub fn server_config_file(&self) -> PathBuf {
         self.config_dir.join(SERVER_CONFIG_FILE)
     }
 
-    /// `<config_dir>/credentials.toml`.
     pub fn credentials_file(&self) -> PathBuf {
         self.config_dir.join(CREDENTIALS_FILE)
     }

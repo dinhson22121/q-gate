@@ -1,5 +1,3 @@
-//! `qgate runner`: the isolated runner daemon (Docker service `qgate-runner`), and its health check.
-
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -35,7 +33,6 @@ pub async fn runner(args: &RunnerArgs) -> Result<ExitCode> {
         args.max_jobs.max(1)
     );
     let served = RunnerServer::new(Arc::new(use_case), args.max_jobs).serve(listener, wait_for_termination()).await;
-    // Best effort: a stale socket is replaced on the next start anyway.
     let _ = std::fs::remove_file(&args.socket);
     served.map(|()| ExitCode::from(EXIT_OK))
 }

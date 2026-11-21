@@ -1,5 +1,3 @@
-//! `ChangeSource` backed by the local `git` executable.
-
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Output, Stdio};
@@ -12,12 +10,8 @@ use super::unified_diff::parse_unified_diff;
 use crate::review::application::ports::{ChangeSource, SourceError};
 use crate::review::domain::change_set::{ChangeSet, ChangeStatus, DiffLine, FileChange, Hunk};
 
-/// Object id of the empty tree, used as the base when there is no parent commit.
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT: &str = "git";
-/// Config overrides for every git call on a possibly untrusted repository (repos are mounted with
-/// `safe.directory '*'`, so their `.git/config` must not get to run programs): no fsmonitor daemon or
-/// hook, no hooks, and no transport (which also rules out `core.sshCommand`).
 pub const GIT_HARDENING_ARGS: &[&str] = &[
     "-c",
     "core.fsmonitor=false",
@@ -28,13 +22,9 @@ pub const GIT_HARDENING_ARGS: &[&str] = &[
     "-c",
     "core.sshCommand=false",
 ];
-/// Environment for every git call: never prompt, never take optional locks, never page.
-/// `GIT_CONFIG_NOSYSTEM` is deliberately not set: the Docker image relies on the system `safe.directory`.
 pub const GIT_HARDENING_ENV: &[(&str, &str)] =
     &[("GIT_TERMINAL_PROMPT", "0"), ("GIT_OPTIONAL_LOCKS", "0"), ("GIT_PAGER", "cat")];
-/// Options placed before every subcommand so paths are reported verbatim.
 const GLOBAL_ARGS: &[&str] = &["-c", "core.quotepath=off"];
-/// Diff options that keep the output stable regardless of user configuration.
 const DIFF_ARGS: &[&str] = &[
     "diff",
     "--no-color",
@@ -45,60 +35,42 @@ const DIFF_ARGS: &[&str] = &[
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
-/// Same file selection as [`DIFF_ARGS`], as a NUL-separated path list used to cross-check the parser.
 const NAME_ONLY_ARGS: &[&str] = &["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--name-only", "-z"];
-/// Exit status git uses for "not found" answers to `--quiet` queries.
 const GIT_QUIET_MISS: i32 = 1;
-/// How many file contents are loaded concurrently.
 const CONTENT_CONCURRENCY: usize = 8;
-/// Largest working-tree file read into memory. A larger untracked file is reported as binary (no
-/// content, no hunks); a larger tracked file keeps its diff hunks but gets no full content.
 pub const MAX_WORKING_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
-/// What to compare.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffTarget {
-    /// Uncommitted changes (staged, unstaged and untracked) against `HEAD`.
     WorkingTree,
-    /// Working tree against the merge base of the given ref and `HEAD`.
     Base(String),
-    /// The changes introduced by a single commit.
     Commit(String),
-    /// The combined changes of `base..head` (e.g. several new commits at once); content is read from `head`.
     Range { base: String, head: String },
 }
 
-/// A git repository on the local disk.
 #[derive(Debug, Clone)]
 pub struct LocalGit {
     root: PathBuf,
     target: DiffTarget,
 }
 
-/// Where the full new version of a file is read from.
 enum ContentOrigin<'a> {
-    /// The working tree below this canonical root.
     WorkingTree(&'a Path),
     Commit(&'a str),
 }
 
-/// Result of reading a working-tree file.
 enum WorkingFile {
-    /// Missing, not a regular file (symlink, directory) or resolving outside the repository.
     Absent,
-    /// Larger than [`MAX_WORKING_FILE_BYTES`].
     Oversized,
     Content(Vec<u8>),
 }
 
-/// Returns the top-level directory of the repository containing `cwd`.
 pub async fn discover_root(cwd: &Path) -> Result<PathBuf, SourceError> {
     let stdout = git_stdout(cwd, &["rev-parse", "--show-toplevel"]).await?;
     Ok(PathBuf::from(stdout.trim()))
 }
 
 impl LocalGit {
-    /// Creates a source for `root`. Rejects refs that could be mistaken for git options.
     pub fn new(root: PathBuf, target: DiffTarget) -> Result<Self, SourceError> {
         match &target {
             DiffTarget::WorkingTree => {}
@@ -111,17 +83,14 @@ impl LocalGit {
         Ok(Self { root, target })
     }
 
-    /// Full sha of `HEAD`, or `None` when the repository has no commits yet.
     pub async fn head_commit(&self) -> Result<Option<String>, SourceError> {
         self.quiet_query(&["rev-parse", "--verify", "--quiet", "HEAD"]).await
     }
 
-    /// Short name of the checked-out branch, or `None` when `HEAD` is detached.
     pub async fn current_branch(&self) -> Result<Option<String>, SourceError> {
         self.quiet_query(&["symbolic-ref", "--quiet", "--short", "HEAD"]).await
     }
 
-    /// Full message (subject and body) of the given commit.
     pub async fn commit_message(&self, sha: &str) -> Result<String, SourceError> {
         validate_rev(sha)?;
         let commit = self.resolve_commit(sha).await?;
@@ -129,7 +98,6 @@ impl LocalGit {
         Ok(stdout.trim_end().to_string())
     }
 
-    /// Full sha of the first parent of `sha`, or `None` for a root commit.
     pub async fn parent_of(&self, sha: &str) -> Result<Option<String>, SourceError> {
         validate_rev(sha)?;
         let commit = self.resolve_commit(sha).await?;
@@ -137,7 +105,6 @@ impl LocalGit {
         Ok(stdout.split_whitespace().nth(1).map(str::to_string))
     }
 
-    /// Best common ancestor of `a` and `b`, or `None` when they share no history.
     pub async fn merge_base(&self, a: &str, b: &str) -> Result<Option<String>, SourceError> {
         validate_rev(a)?;
         validate_rev(b)?;
@@ -151,7 +118,6 @@ impl LocalGit {
         Err(git_error(&output))
     }
 
-    /// Whether `ancestor` is an ancestor of (or equal to) `descendant`.
     pub async fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool, SourceError> {
         validate_rev(ancestor)?;
         validate_rev(descendant)?;
@@ -163,16 +129,12 @@ impl LocalGit {
         }
     }
 
-    /// Content-addressed object id of `path` at `rev` (a blob for a file, a tree for a directory),
-    /// via `git rev-parse <rev>:<path>`. `None` when the path does not exist there.
     pub async fn object_id_at(&self, rev: &str, path: &str) -> Result<Option<String>, SourceError> {
         validate_rev(rev)?;
         validate_repo_path(path)?;
         self.quiet_query(&["rev-parse", "--verify", "--quiet", &format!("{rev}:{path}")]).await
     }
 
-    /// Object id of the tree at `dir` in `rev` (the root tree for an empty `dir` or `.`). `None`
-    /// when `dir` does not exist there or is not a directory.
     pub async fn tree_id_at(&self, rev: &str, dir: &str) -> Result<Option<String>, SourceError> {
         validate_rev(rev)?;
         if dir.is_empty() || dir == "." {
@@ -182,10 +144,6 @@ impl LocalGit {
         if self.git(&["cat-file", "-t", &object]).await?.trim() == "tree" { Ok(Some(object)) } else { Ok(None) }
     }
 
-    /// Text of `path` at revision `rev` (a commit or tree, e.g. the empty tree).
-    ///
-    /// `Ok(None)` when the path does not exist there, is not a file, or is not UTF-8 text. An unknown
-    /// revision or a file above [`MAX_WORKING_FILE_BYTES`] is an error.
     pub async fn read_file_at(&self, rev: &str, path: &str) -> Result<Option<String>, SourceError> {
         validate_rev(rev)?;
         validate_repo_path(path)?;
@@ -218,7 +176,6 @@ impl LocalGit {
         Ok(decode_text(output.stdout))
     }
 
-    /// Runs a `--quiet` query whose miss is reported by exit status 1 without output.
     async fn quiet_query(&self, args: &[&str]) -> Result<Option<String>, SourceError> {
         let output = run_git(&self.root, args).await?;
         if output.status.success() {
@@ -239,12 +196,10 @@ impl LocalGit {
         Ok(self.git(&["rev-parse", "--verify", &spec]).await?.trim().to_string())
     }
 
-    /// First parent of `commit`, or the empty tree for a root commit.
     async fn parent_or_empty_tree(&self, commit: &str) -> Result<String, SourceError> {
         Ok(self.parent_of(commit).await?.unwrap_or_else(|| EMPTY_TREE.to_string()))
     }
 
-    /// Base to compare the working tree against for `WorkingTree` and `Base` targets.
     async fn working_tree_base(&self) -> Result<String, SourceError> {
         match &self.target {
             DiffTarget::Base(rev) => {
@@ -255,8 +210,6 @@ impl LocalGit {
         }
     }
 
-    /// Parses the unified diff, keeping only entries whose path also appears in the NUL-separated
-    /// name list, so an oddly named file can never desynchronise the parser into inventing a path.
     async fn diff(&self, revs: &[&str]) -> Result<Vec<FileChange>, SourceError> {
         let with_revs = |base: &[&'static str]| {
             let mut args: Vec<&str> = base.to_vec();
@@ -301,7 +254,6 @@ impl LocalGit {
         Ok(loaded.into_iter().flatten().collect())
     }
 
-    /// Builds an all-added change for an untracked file; `None` for symlinks and vanished files.
     async fn untracked_file(&self, root: &Path, path: &str) -> Result<Option<FileChange>, SourceError> {
         let content = match self.read_working_file(root, path).await? {
             WorkingFile::Absent => return Ok(None),
@@ -340,12 +292,10 @@ impl LocalGit {
         };
         match decode_text(bytes) {
             Some(text) => Ok(FileChange { new_content: Some(text), ..file }),
-            // Not text after all (e.g. Latin-1): the lossily decoded hunks would only mislead.
             None => Ok(FileChange { is_binary: true, hunks: Vec::new(), ..file }),
         }
     }
 
-    /// Reads a regular file that resolves below the canonical `root`, at most [`MAX_WORKING_FILE_BYTES`].
     async fn read_working_file(&self, root: &Path, path: &str) -> Result<WorkingFile, SourceError> {
         let full = self.root.join(path);
         let metadata = match tokio::fs::symlink_metadata(&full).await {
@@ -359,7 +309,6 @@ impl LocalGit {
         if metadata.len() > MAX_WORKING_FILE_BYTES {
             return Ok(WorkingFile::Oversized);
         }
-        // A symlinked parent directory could point anywhere: only read what really lives in the repo.
         let canonical = match tokio::fs::canonicalize(&full).await {
             Ok(canonical) => canonical,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(WorkingFile::Absent),
@@ -370,7 +319,6 @@ impl LocalGit {
         }
         let file = tokio::fs::File::open(&canonical).await?;
         let mut bytes = Vec::new();
-        // The file may grow between the size check and the read: never read more than the cap + 1.
         file.take(MAX_WORKING_FILE_BYTES + 1).read_to_end(&mut bytes).await?;
         if bytes.len() as u64 > MAX_WORKING_FILE_BYTES {
             return Ok(WorkingFile::Oversized);
@@ -398,7 +346,6 @@ impl ChangeSource for LocalGit {
     }
 }
 
-/// Rejects empty refs, refs that git would parse as options, and refs with whitespace or control characters.
 fn validate_rev(rev: &str) -> Result<(), SourceError> {
     let reason = if rev.is_empty() {
         "ref must not be empty"
@@ -412,7 +359,6 @@ fn validate_rev(rev: &str) -> Result<(), SourceError> {
     Err(SourceError::InvalidInput(format!("{reason}: {rev:?}")))
 }
 
-/// Accepts only a relative, normalised path inside the repository (no `..`, no leading '-').
 fn validate_repo_path(path: &str) -> Result<(), SourceError> {
     let is_plain = |c: Component<'_>| matches!(c, Component::Normal(_));
     let reason = if path.is_empty() {
@@ -429,13 +375,11 @@ fn validate_repo_path(path: &str) -> Result<(), SourceError> {
     Err(SourceError::InvalidInput(format!("{reason}: {path:?}")))
 }
 
-/// Drops parsed entries whose path is missing from the NUL-separated `names` list.
 fn retain_listed(files: Vec<FileChange>, names: &str) -> Vec<FileChange> {
     let listed: HashSet<&str> = names.split('\0').filter(|n| !n.is_empty()).collect();
     files.into_iter().filter(|f| listed.contains(f.path.as_str())).collect()
 }
 
-/// Text content, or `None` when the bytes contain NUL or are not valid UTF-8.
 fn decode_text(bytes: Vec<u8>) -> Option<String> {
     if bytes.contains(&0) {
         return None;
@@ -443,7 +387,6 @@ fn decode_text(bytes: Vec<u8>) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// One hunk adding every line of `content`; `None` for an empty file.
 fn all_added_hunk(content: &str) -> Option<Hunk> {
     let lines: Vec<DiffLine> = (1u32..)
         .zip(content.lines())
@@ -455,7 +398,6 @@ fn all_added_hunk(content: &str) -> Option<Hunk> {
     Some(Hunk { header: format!("@@ -0,0 +1,{} @@", lines.len()), new_start: 1, lines })
 }
 
-/// Appends untracked files; one that shadows a tracked entry (e.g. after `git rm --cached`) replaces it.
 fn merge_untracked(tracked: Vec<FileChange>, untracked: Vec<FileChange>) -> Vec<FileChange> {
     let mut merged: Vec<FileChange> =
         tracked.into_iter().filter(|t| !untracked.iter().any(|u| u.path == t.path)).collect();
@@ -463,7 +405,6 @@ fn merge_untracked(tracked: Vec<FileChange>, untracked: Vec<FileChange>) -> Vec<
     merged
 }
 
-/// Awaits the futures in order, at most `CONTENT_CONCURRENCY` at a time, stopping at the first error.
 async fn run_bounded<T, F>(pending: Vec<F>) -> Result<Vec<T>, SourceError>
 where
     F: Future<Output = Result<T, SourceError>>,
@@ -940,7 +881,6 @@ mod tests {
         let dir = init_repo();
         write(&dir, "a", b"a\n");
         let first = commit_all(&dir, "first");
-        // An orphan branch shares no history with the first commit.
         sh_git(dir.path(), &["checkout", "-q", "--orphan", "other"]);
         sh_git(dir.path(), &["rm", "-rfq", "--cached", "."]);
         write(&dir, "z", b"z\n");
@@ -960,13 +900,11 @@ mod tests {
         let second = commit_all(&dir, "second");
         let git = source(&dir, DiffTarget::WorkingTree);
 
-        // Unchanged file keeps its blob id across commits; a new file is absent from the first commit.
         let blob_first = git.object_id_at(&first, "same.txt").await.unwrap();
         assert!(blob_first.is_some());
         assert_eq!(git.object_id_at(&second, "same.txt").await.unwrap(), blob_first);
         assert_eq!(git.object_id_at(&first, "other.txt").await.unwrap(), None);
 
-        // Directory object ids are trees; a file is not a tree; the root tree resolves for an empty path.
         let dir_tree = git.tree_id_at(&first, "pkg").await.unwrap();
         assert_eq!(git.object_id_at(&first, "pkg").await.unwrap(), dir_tree);
         assert!(dir_tree.is_some());

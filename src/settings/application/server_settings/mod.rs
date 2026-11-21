@@ -1,5 +1,3 @@
-//! Server settings use cases: load at startup, view/update/rollback from the settings page, and secrets.
-
 mod fields;
 mod load;
 mod ports;
@@ -25,20 +23,16 @@ use super::SharedServerConfig;
 use super::credentials::CredentialStore;
 use crate::settings::domain::ServerConfig;
 
-/// Everything the settings-page use cases need. Build once per process and share it (`Arc`).
 pub struct SettingsDeps {
     store: Arc<dyn ServerConfigStore>,
     credentials: Arc<dyn CredentialStore>,
     shared: SharedServerConfig,
     env: EnvLookup,
-    /// Effective config the process started with: restart-only fields keep these values until restart.
     boot: ServerConfig,
-    /// Serializes read-modify-write sequences (two tabs saving at once).
     write_lock: Mutex<()>,
 }
 
 impl SettingsDeps {
-    /// `shared` must already hold the effective config loaded at startup (it is taken as the boot snapshot).
     pub fn new(
         store: Arc<dyn ServerConfigStore>,
         credentials: Arc<dyn CredentialStore>,

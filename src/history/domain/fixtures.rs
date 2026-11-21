@@ -1,5 +1,3 @@
-//! Test builders shared by the history context's tests.
-
 use chrono::{DateTime, TimeZone, Utc};
 
 use super::report_view::*;
@@ -8,7 +6,6 @@ use crate::review::application::{
     AcceptanceCriterion, Category, CheckOutcome, CheckResult, Confidence, CriterionStatus, Finding, PreventionRule,
     Requirements, RequirementsReport, ReviewReport, Severity, SkipReason, TokenUsage,
 };
-// Test-only: the review application layer does not re-export these report parts.
 use crate::review::domain::finding::FindingSource;
 use crate::review::domain::gate::GateDecision;
 use crate::review::domain::report::SkippedFile;
@@ -81,8 +78,6 @@ pub fn report_view(findings: Vec<FindingView>, criteria: &[CriterionStatus], fai
     }
 }
 
-/// A report whose requirements (keyed `requirements_key`) list and assess `criteria`
-/// (`text of <id>` as text).
 pub fn with_criteria(requirements_key: &str, criteria: &[(&str, CriterionStatus)]) -> ReportView {
     let mut report = report_view(Vec::new(), &[], 0);
     report.requirements = Some(RequirementsView {
@@ -146,7 +141,6 @@ fn live_finding(title: &str) -> Finding {
     }
 }
 
-/// A fully populated live report, as the review context produces it.
 pub fn review_report() -> ReviewReport {
     ReviewReport {
         files_reviewed: vec!["src/<script>.rs".into()],

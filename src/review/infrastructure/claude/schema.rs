@@ -1,14 +1,9 @@
-//! Structured-output JSON schemas and the strict types the model's JSON is parsed into.
-//!
-//! Enum values come from the domain's `ALL`/`as_str()` so the schema never drifts from the model.
-
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::review::domain::finding::{Category, Confidence, Finding, FindingSource, PreventionRule, Severity};
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, EvidenceRef};
 
-/// Schema of the `review` answer: `{findings: [...]}`.
 pub fn review_schema() -> Value {
     let finding = strict_object(json!({
         "file": string("Path exactly as given in the changed_file path attribute."),
@@ -29,7 +24,6 @@ pub fn review_schema() -> Value {
     strict_object(json!({ "findings": array(finding) }))
 }
 
-/// Schema of the `assess_requirements` answer: `{assessments: [...]}`.
 pub fn assessment_schema() -> Value {
     let evidence = strict_object(json!({
         "file": string("Path exactly as given in the changed_file path attribute."),
@@ -45,7 +39,6 @@ pub fn assessment_schema() -> Value {
     strict_object(json!({ "assessments": array(assessment) }))
 }
 
-/// Object schema with every property required and no extra properties (structured-output rules).
 fn strict_object(properties: Value) -> Value {
     let required: Vec<&String> = properties.as_object().map(|p| p.keys().collect()).unwrap_or_default();
     json!({
@@ -73,7 +66,6 @@ fn array(items: Value) -> Value {
     json!({ "type": "array", "items": items })
 }
 
-/// The model's `review` answer.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewAnswer {
@@ -84,7 +76,6 @@ pub struct ReviewAnswer {
 #[serde(deny_unknown_fields)]
 struct RawFinding {
     file: String,
-    /// Signed and wide on purpose: one bad number must not invalidate the whole answer.
     line: i64,
     severity: Severity,
     category: Category,
@@ -93,7 +84,6 @@ struct RawFinding {
     explanation: String,
     evidence: String,
     suggestion: String,
-    /// Defaulted so an answer without a rule still parses; the schema asks for both.
     #[serde(default)]
     prevention_rule: String,
     #[serde(default)]
@@ -101,7 +91,6 @@ struct RawFinding {
 }
 
 impl ReviewAnswer {
-    /// Converts into domain findings (still unverified).
     pub fn into_findings(self) -> Vec<Finding> {
         self.findings.into_iter().map(RawFinding::into_finding).collect()
     }
@@ -125,7 +114,6 @@ impl RawFinding {
     }
 }
 
-/// The model's `assess_requirements` answer.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssessmentAnswer {
@@ -150,7 +138,6 @@ struct RawEvidence {
 }
 
 impl AssessmentAnswer {
-    /// Converts into domain assessments (still unverified).
     pub fn into_assessments(self) -> Vec<CriterionAssessment> {
         self.assessments
             .into_iter()
@@ -172,7 +159,6 @@ impl AssessmentAnswer {
     }
 }
 
-/// Out-of-range line numbers become 0, which the verifier rejects like any other wrong location.
 fn to_line_number(raw: i64) -> u32 {
     u32::try_from(raw).unwrap_or(0)
 }
@@ -185,7 +171,6 @@ fn non_empty(value: String) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Walks a schema and asserts the structured-output rules on every object.
     fn assert_strict(schema: &Value) {
         if schema["type"] == "object" {
             assert_eq!(schema["additionalProperties"], false);

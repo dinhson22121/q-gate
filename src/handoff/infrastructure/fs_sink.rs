@@ -1,5 +1,3 @@
-//! Review files on the local filesystem, confined to one root folder.
-
 use std::fs;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
@@ -13,15 +11,12 @@ const DIR_MODE: u32 = 0o755;
 const TEMP_PREFIX: &str = ".qgate-";
 const TEMP_SUFFIX: &str = ".tmp";
 
-/// Writes inside `root` only: relative paths with plain components, no symlinks anywhere below the root,
-/// atomic replace (temp file + rename), files 0644 and folders 0755.
 #[derive(Debug, Clone)]
 pub struct FsReviewFileSink {
     root: PathBuf,
 }
 
 impl FsReviewFileSink {
-    /// Creates `root` when missing. The root itself may be reached through a symlink (e.g. a mount).
     pub fn new(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = root.as_ref();
         if !root.exists() {
@@ -38,7 +33,6 @@ impl FsReviewFileSink {
         &self.root
     }
 
-    /// Validated components of a relative path (empty for the root itself).
     fn components(rel: &str) -> Result<Vec<&str>, SinkError> {
         let reject = || SinkError(format!("refusing path '{rel}': must be relative, '/'-separated, without '..'"));
         if rel.is_empty() {
@@ -53,8 +47,6 @@ impl FsReviewFileSink {
         if parts.iter().all(plain) && parts.iter().all(|p| *p != "." && *p != "..") { Ok(parts) } else { Err(reject()) }
     }
 
-    /// Walks `dirs` below the root, refusing symlinks and non-folders. `None` when a folder is missing and
-    /// `create` is false.
     fn folder(&self, dirs: &[&str], create: bool) -> Result<Option<PathBuf>, SinkError> {
         let mut path = self.root.clone();
         for dir in dirs {
@@ -79,7 +71,6 @@ impl FsReviewFileSink {
         Ok(Some(resolved))
     }
 
-    /// Folder and file name of `rel`, refusing an existing target that is not a regular file.
     fn target(&self, rel: &str, create: bool) -> Result<Option<(PathBuf, PathBuf)>, SinkError> {
         let parts = Self::components(rel)?;
         let Some((name, dirs)) = parts.split_last() else {
@@ -116,7 +107,6 @@ impl ReviewFileSink for FsReviewFileSink {
         let fail = |e: io::Error| SinkError(format!("cannot read {}: {e}", file.display()));
         let mut options = fs::OpenOptions::new();
         options.read(true);
-        // The target was checked to be a regular file; refuse a symlink swapped in since then.
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc::O_NOFOLLOW);
         let opened = match options.open(&file) {
@@ -141,7 +131,6 @@ impl ReviewFileSink for FsReviewFileSink {
         let mut files = Vec::new();
         for entry in fs::read_dir(&folder).map_err(fail)? {
             let entry = entry.map_err(fail)?;
-            // `file_type` does not follow symlinks: links are never listed, so never pruned.
             if !entry.file_type().map_err(fail)?.is_file() {
                 continue;
             }
@@ -173,7 +162,6 @@ fn create_dirs(path: &Path) -> io::Result<()> {
     set_mode(path, true)
 }
 
-/// 0755 for folders, 0644 for files (independent of the umask); no-op on other platforms.
 fn set_mode(path: &Path, is_dir: bool) -> io::Result<()> {
     #[cfg(unix)]
     {

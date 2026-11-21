@@ -21,7 +21,6 @@ struct TestServer {
 }
 
 impl TestServer {
-    /// The real dashboard router (Host check, security headers, fallback) behind [`protect`].
     async fn start() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let repository = Arc::new(SqliteRunRepository::open(dir.path().join("q.db")).unwrap());
@@ -91,7 +90,6 @@ async fn a_valid_session_cookie_passes_among_other_cookies() {
     assert_eq!(page.status(), StatusCode::OK);
     assert_eq!(server.get("/api/summary", Some(&cookie)).await.status(), StatusCode::OK);
     assert_eq!(server.get("/missing", Some(&cookie)).await.status(), StatusCode::NOT_FOUND);
-    // The login secret itself is not a session.
     let raw = format!("{SESSION_COOKIE}={}", server.secret.expose());
     assert_eq!(server.get("/api/summary", Some(&raw)).await.status(), StatusCode::UNAUTHORIZED);
 }

@@ -1,6 +1,3 @@
-//! SQLite implementation of `RunRepository`. Reports are stored as JSON and read
-//! back into the `ReportView` read model.
-
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -14,7 +11,6 @@ use crate::history::domain::{ReportView, ReviewRun, RunStatus, StoredRun, Ticket
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const UNREADABLE_REPORT: &str = "stored report could not be read";
 
-/// Ordered schema migrations; index + 1 is the schema version.
 const MIGRATIONS: &[&str] = &["
     CREATE TABLE runs (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +43,6 @@ fn storage(err: impl std::fmt::Display) -> HistoryError {
 }
 
 impl SqliteRunRepository {
-    /// Opens (creating parent directories and the file if needed) and migrates the database.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HistoryError> {
         let path = path.as_ref();
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -61,7 +56,6 @@ impl SqliteRunRepository {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    /// Current schema version (number of applied migrations).
     pub fn schema_version(&self) -> Result<u32, HistoryError> {
         let conn = self.lock()?;
         current_version(&conn)
@@ -111,7 +105,6 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<StoredRun> {
     let status: String = row.get(8)?;
     let mut error: Option<String> = row.get(9)?;
     let report_json: Option<String> = row.get(10)?;
-    // A report that no longer parses must not hide the run itself.
     let report = report_json.and_then(|json| match serde_json::from_str::<ReportView>(&json) {
         Ok(report) => Some(report),
         Err(_) => {
@@ -191,8 +184,6 @@ impl RunRepository for SqliteRunRepository {
     }
 
     fn for_ticket(&self, key: &TicketKey, limit: u32) -> Result<Vec<StoredRun>, HistoryError> {
-        // Keys and criterion ids are JSON strings `"KEY"` / `"KEY/AC-n"`; a key quoted inside free
-        // text is escaped (`\"KEY\"`) and does not match. Full scan: fine for a local history.
         let sql = format!(
             "SELECT {COLUMNS} FROM runs WHERE ticket_key = ?1 OR instr(report_json, ?2) > 0 OR instr(report_json, ?3) > 0 \
              ORDER BY created_at_ms DESC, id DESC LIMIT ?4"
@@ -365,7 +356,7 @@ mod tests {
         for day in 1..=5 {
             ids.push(repo.insert(&ReviewRun { ticket_key: None, ..live_run("api", at(day, 0)) }).unwrap());
         }
-        let by_column = repo.insert(&live_run("api", at(6, 0))).unwrap(); // ticket_key QG-7
+        let by_column = repo.insert(&live_run("api", at(6, 0))).unwrap();
         set_json(ids[0], r#"{"gate":{"passed":true},"ticket":{"keys":["SHOP-7"]}}"#);
         set_json(
             ids[1],

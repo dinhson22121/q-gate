@@ -1,18 +1,7 @@
-//! Content-addressed cache key: a namespace, a schema version and the content hashes of the
-//! inputs a cached result was derived from. Two keys with the same inputs always share a
-//! [`ContentKey::fingerprint`], so a result can be reused only when every input is unchanged.
-
 use sha2::{Digest, Sha256};
 
-/// Domain-separation tag; bump it to invalidate every fingerprint of a previous layout.
 const FINGERPRINT_TAG: &[u8] = b"qgate.cache.content-key.v1";
 
-/// A cache key built from the hashes of the inputs that produced a result.
-///
-/// `kind` namespaces the key (and is stored as the cache row's namespace column); `schema_version`
-/// lets a producer invalidate its own entries when its output format changes. `inputs` are
-/// `(label, content-hash)` pairs (for example `("file:src/a.rs", "<blob-oid>")`); their order does
-/// not affect the fingerprint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentKey {
     kind: String,
@@ -21,19 +10,16 @@ pub struct ContentKey {
 }
 
 impl ContentKey {
-    /// A key in namespace `kind` for producer schema version `schema_version`, with no inputs yet.
     pub fn new(kind: impl Into<String>, schema_version: u32) -> Self {
         Self { kind: kind.into(), schema_version, inputs: Vec::new() }
     }
 
-    /// Adds one `(label, content-hash)` input. Builder style; order is irrelevant to the fingerprint.
     #[must_use]
     pub fn with_input(mut self, label: impl Into<String>, content_hash: impl Into<String>) -> Self {
         self.inputs.push((label.into(), content_hash.into()));
         self
     }
 
-    /// Adds every `(label, content-hash)` pair from `inputs`.
     #[must_use]
     pub fn with_inputs<L, H>(mut self, inputs: impl IntoIterator<Item = (L, H)>) -> Self
     where
@@ -44,18 +30,14 @@ impl ContentKey {
         self
     }
 
-    /// The namespace, stored as the cache row's `kind` column.
     pub fn kind(&self) -> &str {
         &self.kind
     }
 
-    /// The producer schema version baked into the fingerprint.
     pub fn schema_version(&self) -> u32 {
         self.schema_version
     }
 
-    /// Stable, lowercase-hex SHA-256 over the kind, schema version and the inputs sorted by
-    /// `(label, hash)`. Each field is length-prefixed so no concatenation can collide with another.
     pub fn fingerprint(&self) -> String {
         let mut sorted = self.inputs.clone();
         sorted.sort();
@@ -73,7 +55,6 @@ impl ContentKey {
     }
 }
 
-/// Feeds `bytes` into `hasher` prefixed by its length, so adjacent fields cannot be confused.
 fn write_field(hasher: &mut Sha256, bytes: &[u8]) {
     hasher.update((bytes.len() as u64).to_be_bytes());
     hasher.update(bytes);

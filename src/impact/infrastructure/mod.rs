@@ -1,5 +1,3 @@
-//! Go adapter: `go list` / `go test -json` run through the sandbox backend.
-
 mod cached_base_runs;
 mod go_cli;
 mod go_list;

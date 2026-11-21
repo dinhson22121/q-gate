@@ -1,6 +1,3 @@
-//! Policy assistant page and JSON API. Merged into the dashboard router (`history::api::router_with`) so its
-//! Host check and security headers apply; mutating routes add CSRF and API-token checks ([`guard`]).
-
 mod guard;
 mod handlers;
 
@@ -16,7 +13,6 @@ use crate::web::{ApiToken, MutationGuard};
 
 pub use guard::{REQUEST_HEADER, REQUEST_HEADER_VALUE};
 
-/// Request bodies above this are rejected with 413 (a description is at most 8 000 characters).
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
@@ -26,17 +22,12 @@ pub struct PolicyApiState {
 }
 
 impl PolicyApiState {
-    /// `allowed_hosts`: the dashboard's `dashboard.allowed_hosts`; an `Origin` header must name one of them.
-    /// `token`: the per-instance API token, injected into the page and required on mutating routes.
     pub fn new(service: Arc<PolicyService>, allowed_hosts: Vec<String>, token: ApiToken) -> Self {
         let guard = Arc::new(MutationGuard::new(guard::REQUEST_HEADER_VALUE, &allowed_hosts, token));
         Self { service, guard }
     }
 }
 
-/// `GET /policy`, `GET /api/policy/repos`, `GET|POST /api/policy/proposals`, `GET /api/policy/proposals/{id}`,
-/// `GET /api/policy/proposals/{id}/dry-run?limit=`, `POST /api/policy/proposals/{id}/{approve|reject|repreview}`,
-/// `GET /api/policy/prefill?run=&finding=`. No fallback (the dashboard has it).
 pub fn router(state: PolicyApiState) -> Router {
     Router::new()
         .route("/policy", get(handlers::page))

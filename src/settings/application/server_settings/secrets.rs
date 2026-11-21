@@ -1,5 +1,3 @@
-//! Write-only secret management for the settings page: status, set and clear. Values never leave here.
-
 use serde::Serialize;
 
 use super::SettingsDeps;
@@ -10,11 +8,8 @@ use crate::settings::domain::CredentialName;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecretSource {
-    /// `<NAME>` environment variable.
     Env,
-    /// File named by `<NAME>_FILE` (Docker secret).
     EnvFile,
-    /// qgate's credential store (keychain or 0600 credentials file).
     Store,
     Missing,
 }
@@ -24,9 +19,7 @@ pub struct SecretStatus {
     pub name: &'static str,
     pub configured: bool,
     pub source: SecretSource,
-    /// The variable providing the secret, or the one to set when it comes from the store / is missing.
     pub env_var: &'static str,
-    /// The credential store could not be read (message never contains the secret).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -51,7 +44,6 @@ pub(super) fn secret_status(deps: &SettingsDeps, name: CredentialName) -> Secret
     }
 }
 
-/// A secret set through the environment cannot be changed here (the env would keep winning).
 fn refuse_env_secret(deps: &SettingsDeps, name: CredentialName) -> Result<(), SettingsError> {
     for var in [name.env_var(), name.file_env_var()] {
         if non_empty(deps, var) {
@@ -68,7 +60,6 @@ fn map_credential_error(error: CredentialError) -> SettingsError {
     }
 }
 
-/// `SetSecret`: stores a secret typed on the settings page.
 pub struct SetSecret<'a> {
     deps: &'a SettingsDeps,
 }
@@ -87,7 +78,6 @@ impl<'a> SetSecret<'a> {
     }
 }
 
-/// `ClearSecret`: removes a stored secret.
 pub struct ClearSecret<'a> {
     deps: &'a SettingsDeps,
 }

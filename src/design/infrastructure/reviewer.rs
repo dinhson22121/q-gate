@@ -1,5 +1,3 @@
-//! The review context's `DesignReviewer`, backed by the `ReviewDesign` use case.
-
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -9,7 +7,7 @@ use super::i18n_fs::FsI18nSource;
 use crate::design::application::{
     DesignCache, DesignCheckKind, DesignOutcome, DesignRequest, FigmaSource, I18nSource, ReviewDesign, StatesJudge,
 };
-use crate::llm::ClaudeClient;
+use crate::llm::StructuredModel;
 use crate::review::application::agent_ports::{AgentError, AgentInput, DesignReviewer};
 use crate::review::application::{DesignMismatch, TicketBrief};
 
@@ -18,18 +16,16 @@ pub struct FigmaDesignReviewer {
 }
 
 impl FigmaDesignReviewer {
-    /// `llm` is only needed for the `States` check; without it that check is skipped with a note.
     pub fn new(
         source: Arc<dyn FigmaSource>,
         cache: Arc<dyn DesignCache>,
-        llm: Option<Arc<ClaudeClient>>,
+        llm: Option<Arc<dyn StructuredModel>>,
         checks: Vec<DesignCheckKind>,
     ) -> Self {
         let states = llm.map(|llm| Arc::new(ClaudeStatesJudge::new(llm)) as Arc<dyn StatesJudge>);
         Self::with_ports(source, cache, Arc::new(FsI18nSource), states, checks)
     }
 
-    /// Same as `new` with every port injectable (tests, alternative i18n readers or judges).
     pub fn with_ports(
         source: Arc<dyn FigmaSource>,
         cache: Arc<dyn DesignCache>,
@@ -40,7 +36,6 @@ impl FigmaDesignReviewer {
         Self { use_case: ReviewDesign::new(source, cache, i18n, states, checks) }
     }
 
-    /// Mismatches plus notes (what was skipped and why), for callers that can show notes directly.
     pub async fn review_with_notes(&self, input: &AgentInput<'_>, brief: Option<&TicketBrief>) -> DesignOutcome {
         let links = input.ticket.map(|t| t.design_links.as_slice()).unwrap_or_default();
         let request = DesignRequest {
@@ -53,8 +48,6 @@ impl FigmaDesignReviewer {
     }
 }
 
-/// Notes without any mismatch become the agent error (shown as a review note); with mismatches they are
-/// logged so partial results still reach the gate.
 fn into_result(outcome: DesignOutcome) -> Result<Vec<DesignMismatch>, AgentError> {
     if outcome.mismatches.is_empty() && !outcome.notes.is_empty() {
         return Err(AgentError(outcome.notes.join("; ")));

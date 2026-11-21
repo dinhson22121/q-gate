@@ -1,8 +1,5 @@
-//! A deterministic finding and how it is graded for the gate.
-
 use serde::Serialize;
 
-/// Languages the quality checks know about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Language {
@@ -31,7 +28,6 @@ pub enum QualityTool {
 impl QualityTool {
     pub const ALL: [Self; 4] = [Self::Gitleaks, Self::OsvScanner, Self::Govulncheck, Self::Depguard];
 
-    /// Name shown to people (and recorded as the finding's source).
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Gitleaks => "gitleaks",
@@ -60,7 +56,6 @@ impl QualityCategory {
     }
 }
 
-/// Ordered from least to most severe. CVSS buckets for vulnerabilities; secrets are always critical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualitySeverity {
@@ -80,7 +75,6 @@ impl QualitySeverity {
         }
     }
 
-    /// Bucket of a CVSS base score (<4 low, <7 medium, <9 high, else critical).
     pub fn from_cvss(score: f64) -> Self {
         if score >= 9.0 {
             Self::Critical
@@ -93,7 +87,6 @@ impl QualitySeverity {
         }
     }
 
-    /// Advisory-database label (GitHub: LOW/MODERATE/HIGH/CRITICAL); `None` when unrecognised.
     pub fn from_label(label: &str) -> Option<Self> {
         match label.trim().to_ascii_lowercase().as_str() {
             "low" => Some(Self::Low),
@@ -105,7 +98,6 @@ impl QualitySeverity {
     }
 }
 
-/// What the gate should do with a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
@@ -113,21 +105,16 @@ pub enum Verdict {
     Warn,
 }
 
-/// A general rule for the developer's coding agent that would have prevented the finding (same shape as the
-/// review's prevention rules: one imperative line and an optional file glob).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QualityRule {
     pub text: String,
     pub scope: Option<String>,
 }
 
-/// The package a vulnerability is in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DependencyRef {
-    /// Go module path or Maven `group:artifact`.
     pub name: String,
     pub version: String,
-    /// Manifest or lockfile the dependency comes from (repo-relative); `None` when the tool does not say.
     pub manifest: Option<String>,
     pub fixed_version: Option<String>,
 }
@@ -137,28 +124,19 @@ pub struct QualityFinding {
     pub tool: QualityTool,
     pub category: QualityCategory,
     pub severity: QualitySeverity,
-    /// Repo-relative path.
     pub file: String,
-    /// 1-based; 0 when the finding has no line (a dependency in a manifest).
     pub line: u32,
-    /// CVE/GHSA/GO id, gitleaks rule id, or the architecture rule id.
     pub identifier: String,
-    /// Other ids of the same vulnerability (used to merge the reports of several tools).
     pub aliases: Vec<String>,
     pub title: String,
-    /// What was found, never a secret's value.
     pub evidence: String,
-    /// Introduced by the diff; everything else is shown for reference and never blocks.
     pub is_new: bool,
-    /// Architecture findings only: the violated rule is an approved Rulebook/team rule.
     pub approved_rule: bool,
     pub dependency: Option<DependencyRef>,
     pub prevention_rule: QualityRule,
 }
 
 impl QualityFinding {
-    /// Blocks only when introduced by the diff: any secret, a vulnerability of at least high severity, a violation
-    /// of an approved architecture rule. Everything else warns.
     pub fn gate_verdict(&self) -> Verdict {
         if !self.is_new {
             return Verdict::Warn;
@@ -175,7 +153,6 @@ impl QualityFinding {
         self.gate_verdict() == Verdict::Block
     }
 
-    /// Every id this finding is known by.
     pub fn all_ids(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.identifier.as_str()).chain(self.aliases.iter().map(String::as_str))
     }

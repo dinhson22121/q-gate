@@ -1,15 +1,10 @@
-//! The outcome of regression detection and the evidence behind each regression.
-
 use super::impacted::ImpactedSet;
 use super::test_run::TestOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evidence {
-    /// Tail of the failing output on head (from the confirming re-run).
     pub head_output_tail: String,
-    /// What the test did on base; always `Pass` for a regression.
     pub base_outcome: TestOutcome,
-    /// Command that reproduces the failure, run from the repo root on the head commit.
     pub reproduce_command: String,
 }
 
@@ -18,7 +13,6 @@ pub struct Regression {
     pub package: String,
     pub test: String,
     pub evidence: Evidence,
-    /// Text for the handoff rules file.
     pub prevention_rule: String,
 }
 
@@ -41,7 +35,6 @@ impl Regression {
     }
 }
 
-/// `go test` invocation reproducing one test (the whole package for a package-level failure).
 pub fn reproduce_command(package: &str, test: &str) -> String {
     if test.is_empty() {
         return format!("go test -count=1 {package}");
@@ -63,14 +56,10 @@ fn regex_escape(text: &str) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RegressionReport {
     pub regressions: Vec<Regression>,
-    /// Why the check was partial or skipped, pre-existing failures, flaky tests, cap, new-test failures...
     pub notes: Vec<String>,
     pub impacted: ImpactedSet,
-    /// Packages whose tests ran on both commits.
     pub packages_tested: Vec<String>,
-    /// Impacted packages that were not compared (no tests, new package, over the cap).
     pub packages_skipped: Vec<String>,
-    /// Set when detection did not run at all (not a Go module, no toolchain...).
     pub skipped_reason: Option<String>,
 }
 
@@ -84,7 +73,6 @@ impl RegressionReport {
         }
     }
 
-    /// The gate should block: at least one confirmed regression.
     pub fn blocks(&self) -> bool {
         !self.regressions.is_empty()
     }

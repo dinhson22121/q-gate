@@ -1,23 +1,16 @@
-//! Use case: which dashboard secret is in effect. `QGATE_DASHBOARD_TOKEN` wins; otherwise the persisted
-//! one (created on first use).
-
 use crate::access::domain::{DashboardSecret, InvalidSecret};
 
-/// Environment variable that overrides the persisted secret.
 pub const ENV_DASHBOARD_TOKEN: &str = "QGATE_DASHBOARD_TOKEN";
 
 #[derive(Debug, thiserror::Error)]
 pub enum AccessError {
     #[error("{ENV_DASHBOARD_TOKEN} is invalid: {0}")]
     InvalidEnv(InvalidSecret),
-    /// Storage failure; the message names the file, never the secret.
     #[error("{0}")]
     Storage(String),
 }
 
-/// Port: where the generated secret lives between restarts.
 pub trait SecretStore: Send + Sync {
-    /// The stored secret, or a freshly generated and stored one when there is none yet.
     fn load_or_create(&self) -> Result<DashboardSecret, AccessError>;
 }
 
@@ -30,8 +23,6 @@ impl<'a> ResolveDashboardSecret<'a> {
         Self { store }
     }
 
-    /// `env_value`: the value of [`ENV_DASHBOARD_TOKEN`]; blank counts as unset. The store is not touched
-    /// when the environment supplies the secret.
     pub fn execute(&self, env_value: Option<&str>) -> Result<DashboardSecret, AccessError> {
         match env_value.map(str::trim).filter(|v| !v.is_empty()) {
             Some(value) => DashboardSecret::parse(value).map_err(AccessError::InvalidEnv),

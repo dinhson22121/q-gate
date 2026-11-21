@@ -5,21 +5,15 @@ use super::checks::CheckResult;
 use super::finding::{Category, Confidence, Finding, Severity};
 use super::requirements::RequirementsReport;
 
-/// Decides which verified findings block a merge/push. The model never decides this.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatePolicy {
     pub fail_on: Severity,
     pub categories: Vec<Category>,
     pub min_confidence: Confidence,
-    /// Fail when an acceptance criterion is assessed as not met.
     pub fail_on_unmet_criteria: bool,
-    /// Fail when some files could not be reviewed (API outage, refusal...): an unreviewed change is not a pass.
     pub fail_on_incomplete: bool,
-    /// Fail on a generated test that failed with complete evidence (server `agents.tests.on_fail = block`).
     pub fail_on_test_failure: bool,
-    /// Fail on a violation of an APPROVED rule (server `agents.architecture.on_violation = block`).
     pub fail_on_rule_violation: bool,
-    /// Design mismatch kinds that fail the gate (server `figma.block_on`). `States` is never honoured.
     pub fail_on_design: Vec<DesignMismatchKind>,
 }
 
@@ -47,32 +41,23 @@ impl Default for GatePolicy {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct GateDecision {
     pub passed: bool,
-    /// Indexes into the report's finding list.
     pub blocking: Vec<usize>,
-    /// Ids of acceptance criteria assessed as not met (blocking only when the policy says so).
     pub unmet_criteria: Vec<String>,
-    /// Names of required checks that did not pass.
     pub failed_checks: Vec<String>,
-    /// Some files could not be reviewed.
     #[serde(default)]
     pub incomplete: bool,
-    /// Scenario ids of generated tests that failed with complete evidence (blocking only per policy).
     #[serde(default)]
     pub failed_tests: Vec<String>,
-    /// Ids of approved rules the change violates (blocking only per policy).
     #[serde(default)]
     pub rule_violations: Vec<String>,
-    /// `kind:node_id` of design mismatches whose kind blocks per policy.
     #[serde(default)]
     pub design_mismatches: Vec<String>,
 }
 
-/// Everything the gate looks at.
 pub struct GateInput<'a> {
     pub findings: &'a [Finding],
     pub requirements: Option<&'a RequirementsReport>,
     pub checks: &'a [CheckResult],
-    /// True when some changed files could not be reviewed.
     pub incomplete: bool,
     pub agents: Option<&'a AgentReport>,
 }
@@ -110,7 +95,6 @@ impl GatePolicy {
         }
     }
 
-    /// Failed tests and approved-rule violations are always reported; design mismatches only for blocking kinds.
     fn agent_failures(&self, agents: &AgentReport) -> (Vec<String>, Vec<String>, Vec<String>) {
         let failed_tests = agents
             .tests

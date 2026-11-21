@@ -1,7 +1,3 @@
-//! Read model of a stored review report. Mirrors the JSON written from
-//! `ReviewReport` (which is serialize-only); every collection defaults to empty
-//! so reports written by older versions still load.
-
 use serde::{Deserialize, Serialize};
 
 use super::agent_view::{AgentReportView, TicketContextView};
@@ -26,10 +22,8 @@ pub struct ReportView {
     pub usage: UsageView,
     #[serde(default)]
     pub estimated_cost_usd: Option<f64>,
-    /// Ticket-agent results (scenarios, generated tests, rule and design checks); absent in older runs.
     #[serde(default)]
     pub agents: Option<AgentReportView>,
-    /// Ticket context the review used (keys incl. parent Story, Figma links); absent in older runs.
     #[serde(default)]
     pub ticket: Option<TicketContextView>,
 }
@@ -61,7 +55,6 @@ pub struct FindingView {
     pub evidence: String,
     #[serde(default)]
     pub suggestion: Option<String>,
-    /// Rule for the developer's coding agent; absent in older runs and for tool findings.
     #[serde(default)]
     pub prevention_rule: Option<PreventionRuleView>,
     #[serde(default)]
@@ -161,13 +154,10 @@ pub struct GateView {
     pub failed_checks: Vec<String>,
     #[serde(default)]
     pub incomplete: bool,
-    /// Scenario ids of generated tests that failed with complete evidence.
     #[serde(default)]
     pub failed_tests: Vec<String>,
-    /// Ids of approved rules the change violates.
     #[serde(default)]
     pub rule_violations: Vec<String>,
-    /// `kind:node_id` of design mismatches whose kind blocks per policy.
     #[serde(default)]
     pub design_mismatches: Vec<String>,
 }

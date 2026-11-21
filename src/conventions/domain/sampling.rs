@@ -1,18 +1,11 @@
-//! Picks a small, representative sample of source code per language for deriving inferred rules.
-
 use std::collections::{BTreeMap, HashMap};
 
 use super::sources::is_ignored_path;
 
-/// Files kept per language.
 pub const SAMPLES_PER_LANGUAGE: usize = 12;
-/// Bytes kept per sampled file.
 pub const SAMPLE_FILE_CAP: usize = 4 * 1024;
-/// Bytes of sampled code sent in total.
 pub const SAMPLE_TOTAL_CAP: usize = 80 * 1024;
-/// Files read per (language, top directory) to rank by imports; bounds I/O on huge repositories.
 const CANDIDATES_PER_GROUP: usize = 6;
-/// Files read in total for ranking.
 const MAX_CANDIDATES: usize = 300;
 
 const LANGUAGES: [(&str, &[&str]); 12] = [
@@ -32,14 +25,12 @@ const LANGUAGES: [(&str, &[&str]); 12] = [
 
 const IMPORT_PREFIXES: [&str; 7] = ["use ", "import ", "from ", "require ", "#include", "using ", "package "];
 
-/// A code file read for ranking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeCandidate {
     pub path: String,
     pub import_count: usize,
 }
 
-/// Language name by file extension, for code files worth sampling.
 pub fn code_language(path: &str) -> Option<&'static str> {
     let ext = path.rsplit_once('.')?.1;
     LANGUAGES.iter().find(|(_, exts)| exts.contains(&ext)).map(|(name, _)| *name)
@@ -49,12 +40,10 @@ fn top_dir(path: &str) -> &str {
     path.split_once('/').map_or("", |(top, _)| top)
 }
 
-/// Generated or minified files tell nothing about conventions.
 fn is_noise(path: &str) -> bool {
     path.contains(".min.") || path.contains(".generated.") || path.ends_with(".d.ts") || path.contains("/generated/")
 }
 
-/// Code files to read for ranking: a few per (language, top dir), bounded overall.
 pub fn candidate_paths(paths: &[String]) -> Vec<String> {
     let mut groups: BTreeMap<(&str, &str), Vec<&String>> = BTreeMap::new();
     for path in paths.iter().filter(|p| !is_ignored_path(p) && !is_noise(p)) {
@@ -71,13 +60,10 @@ pub fn candidate_paths(paths: &[String]) -> Vec<String> {
     picked
 }
 
-/// Import/use statements, a cheap proxy for how much of the codebase's structure a file shows.
 pub fn count_imports(text: &str) -> usize {
     text.lines().map(str::trim_start).filter(|l| IMPORT_PREFIXES.iter().any(|p| l.starts_with(p))).count()
 }
 
-/// Up to [`SAMPLES_PER_LANGUAGE`] files per language, spread across top directories (most imports
-/// first within a directory), interleaved across languages so a size budget cut keeps every language.
 pub fn choose_samples(candidates: &[CodeCandidate]) -> Vec<String> {
     let mut by_language: BTreeMap<&str, BTreeMap<&str, Vec<&CodeCandidate>>> = BTreeMap::new();
     for candidate in candidates {
@@ -86,7 +72,6 @@ pub fn choose_samples(candidates: &[CodeCandidate]) -> Vec<String> {
         }
     }
     let mut per_language: Vec<Vec<String>> = by_language.into_values().map(spread_across_dirs).collect();
-    // Biggest language first.
     per_language.sort_by_key(|files| std::cmp::Reverse(files.len()));
     let mut out = Vec::new();
     for round in 0..SAMPLES_PER_LANGUAGE {
@@ -113,7 +98,6 @@ fn spread_across_dirs(mut dirs: BTreeMap<&str, Vec<&CodeCandidate>>) -> Vec<Stri
     out
 }
 
-/// Cuts `text` to at most `cap` bytes on a line boundary when possible (never inside a char).
 pub fn truncate_text(text: &str, cap: usize) -> &str {
     if text.len() <= cap {
         return text;
@@ -126,7 +110,6 @@ pub fn truncate_text(text: &str, cap: usize) -> &str {
     cut.rfind('\n').map_or(cut, |nl| &cut[..=nl])
 }
 
-/// Keeps samples in order until the total budget is used up.
 pub fn within_budget<T>(items: Vec<(T, usize)>, budget: usize) -> Vec<T> {
     let mut used = 0;
     let mut out = Vec::new();
@@ -140,7 +123,6 @@ pub fn within_budget<T>(items: Vec<(T, usize)>, budget: usize) -> Vec<T> {
     out
 }
 
-/// Number of files per language, for the prompt's overview.
 pub fn language_counts(paths: &[String]) -> HashMap<&'static str, usize> {
     let mut counts = HashMap::new();
     for language in paths.iter().filter(|p| !is_ignored_path(p)).filter_map(|p| code_language(p)) {

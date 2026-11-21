@@ -8,7 +8,6 @@ use crate::review::application::{EvidenceRef, TestEvidence};
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::change_set::fixtures::{added, file};
 
-/// Object ids by path; every path not listed does not exist. Tree ids are `tree:<dir>` lookups too.
 #[derive(Default)]
 struct FakeIds {
     ids: Mutex<HashMap<String, String>>,
@@ -43,7 +42,6 @@ impl ContentIds for FakeIds {
     }
 }
 
-/// Returns a canned result and counts calls.
 struct CannedAgent {
     result: TestResult,
     calls: Mutex<u32>,

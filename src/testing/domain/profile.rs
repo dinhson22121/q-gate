@@ -1,31 +1,19 @@
-//! Language profiles: where a module starts, where a generated test may be written and the exact
-//! command that runs that ONE test. Nothing here is chosen by the model; it can only pick one of
-//! the [`TestTarget`]s computed from the changed files.
-
 use super::language::TestLanguage;
 use super::paths::{join, parent_dir, strip_dir};
 
-/// Read-only probes of the snapshot that the profiles need (implemented by the workspace adapter).
 pub trait ProbeFs {
-    /// True when the snapshot-relative path exists inside the snapshot.
     fn has_path(&self, rel: &str) -> bool;
-    /// Names of the entries of a snapshot-relative directory (empty when missing).
     fn entries(&self, rel: &str) -> Vec<String>;
 }
 
-/// One allowed place for the scenario's test, with the command that runs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestTarget {
     pub language: TestLanguage,
-    /// Module root (go.mod / pom.xml / build.gradle / pyproject.toml / Cargo.toml dir); "" = snapshot root.
     pub module_dir: String,
-    /// Snapshot-relative path of the new test file.
     pub test_file: String,
-    /// Program and arguments, run in `module_dir` without a shell.
     pub command: Vec<String>,
 }
 
-/// Name parts derived from a scenario id ("S1" -> `s1` / `S1`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScenarioName {
     pub snake: String,
@@ -33,7 +21,6 @@ pub struct ScenarioName {
 }
 
 impl ScenarioName {
-    /// Keeps ASCII letters and digits only, so the id can never inject path or regex syntax.
     pub fn from_id(id: &str) -> Self {
         let clean: String = id.chars().filter(char::is_ascii_alphanumeric).collect();
         let clean = if clean.is_empty() { "scenario".to_string() } else { clean };
@@ -51,7 +38,6 @@ const PYTHON_MARKERS: &[&str] = &["pyproject.toml", "setup.cfg", "pytest.ini"];
 const RUST_MARKERS: &[&str] = &["Cargo.toml"];
 const JAVA_SOURCE_ROOTS: &[&str] = &["src/main/java/", "src/test/java/"];
 
-/// Every allowed target for the scenario, one per distinct location, in change order.
 pub fn test_targets(
     language: TestLanguage,
     changed: &[String],
@@ -87,7 +73,6 @@ fn targets_for_file(language: TestLanguage, file: &str, name: &ScenarioName, fs:
     }
 }
 
-/// Nearest directory at or above `start` containing one of `markers`.
 fn find_module(fs: &impl ProbeFs, start: &str, markers: &[&str]) -> Option<String> {
     let mut dir = start.to_string();
     loop {
@@ -143,7 +128,6 @@ fn java_target(module_dir: &str, file: &str, name: &ScenarioName, fs: &impl Prob
     })
 }
 
-/// The build wrapper in `module_dir` or an ancestor, as a path relative to `module_dir`.
 fn wrapper(fs: &impl ProbeFs, module_dir: &str, script: &str) -> Option<String> {
     let mut dir = module_dir.to_string();
     let mut ups = 0;
@@ -159,7 +143,6 @@ fn wrapper(fs: &impl ProbeFs, module_dir: &str, script: &str) -> Option<String> 
     }
 }
 
-/// `<module>/tests/`, plus directories that already hold pytest files (next to existing tests).
 fn python_targets(module_dir: &str, file: &str, name: &ScenarioName, fs: &impl ProbeFs) -> Vec<TestTarget> {
     let file_dir = parent_dir(file);
     let mut dirs = vec![join(module_dir, "tests")];
@@ -203,7 +186,6 @@ pub(crate) mod fixtures {
 
     use super::ProbeFs;
 
-    /// In-memory snapshot: a set of file paths.
     pub struct FakeFs(pub BTreeSet<String>);
 
     impl FakeFs {

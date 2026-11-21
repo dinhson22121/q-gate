@@ -1,6 +1,3 @@
-//! Tickets adapters: Jira REST (default) and Jira MCP (optional), ADF conversion, the SQLite
-//! ticket/brief cache and the Claude-backed Ticket Analyst.
-
 pub mod adf;
 pub mod any_source;
 pub mod claude_analyst;

@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 const BIN_DIR: &str = "current/bin";
 
-/// Where the tool binaries are. `None` = not installed (the check is skipped with a note).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolchainPaths {
     pub gitleaks: Option<PathBuf>,
@@ -12,8 +11,6 @@ pub struct ToolchainPaths {
 }
 
 impl ToolchainPaths {
-    /// Looks for `<toolchains_dir>/<tool>/current/bin/<tool>` (what `docker/toolchains/*.sh` installs), then on
-    /// the directories of `path_var` (a native install).
     pub fn discover(toolchains_dir: &Path, path_var: Option<&str>) -> Self {
         let find = |tool: &str| locate(tool, toolchains_dir, path_var);
         Self {

@@ -1,7 +1,3 @@
-//! Policy use cases: propose (describe → structured plan), preview, dry-run on history, approve/reject,
-//! re-preview, and the "prevent this" prefill. Nothing is applied before an explicit approval, and every
-//! change goes through the settings and conventions use cases.
-
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -23,14 +19,12 @@ use crate::policy::domain::{
 };
 use crate::review::application::GatePolicy;
 
-/// `changed_by` prefix of settings versions written on approval.
 pub const CHANGED_BY_PREFIX: &str = "policy-assistant:p";
 pub const DEFAULT_DRY_RUN_RUNS: u32 = 50;
 pub const MAX_DRY_RUN_RUNS: u32 = 200;
 const RECENT_PROPOSALS: u32 = 20;
 const PREFILL_EVIDENCE_CHARS: usize = 1_500;
 
-/// Everything the use cases need. Build once per process.
 pub struct PolicyDeps {
     pub model: Arc<dyn PolicyModel>,
     pub settings: Arc<dyn SettingsGateway>,
@@ -41,14 +35,12 @@ pub struct PolicyDeps {
     pub now: fn() -> DateTime<Utc>,
 }
 
-/// A proposal with its rendered preview and whether it can still be approved.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProposalView {
     pub proposal: Proposal,
     pub preview: Vec<PreviewSection>,
     pub repo_patch: Option<String>,
     pub expired: bool,
-    /// The settings changed since the proposal was made: approve is refused until it is re-previewed.
     pub stale: bool,
     pub current_settings_version: i64,
 }
@@ -88,7 +80,6 @@ fn approval_error(err: ApprovalError) -> PolicyError {
     }
 }
 
-/// `config` with every change applied.
 fn patched(config: &Value, changes: impl IntoIterator<Item = (String, Value)>) -> Value {
     let mut next = config.clone();
     for (path, value) in changes {
@@ -99,7 +90,6 @@ fn patched(config: &Value, changes: impl IntoIterator<Item = (String, Value)>) -
 
 pub struct PolicyService {
     deps: PolicyDeps,
-    /// One approval at a time: the stale check and the writes happen under it.
     approve_lock: AsyncMutex<()>,
 }
 
@@ -120,8 +110,6 @@ impl PolicyService {
             .ok_or_else(|| PolicyError::NotFound(format!("proposal {id} does not exist")))
     }
 
-    /// Repositories a proposal may target: those with a rulebook or a recorded run. Repository paths
-    /// are never taken from the request as-is, so no arbitrary path is read.
     pub async fn repos(&self) -> Result<Vec<String>, PolicyError> {
         let history = self.deps.history.clone();
         let mut repos: BTreeSet<String> = blocking(move || history.repo_paths()).await?.into_iter().collect();
@@ -138,7 +126,6 @@ impl PolicyService {
         }
     }
 
-    /// Describe → structured proposal (stored as a draft). Applies nothing.
     pub async fn propose(&self, description: &str, repo: Option<String>) -> Result<ProposalView, PolicyError> {
         let description = description.trim();
         if description.is_empty() {
@@ -243,8 +230,6 @@ impl PolicyService {
             .collect())
     }
 
-    /// Validates the stored draft again against the current settings and rulebook, as a new proposal (no
-    /// model call). The old draft is marked rejected.
     pub async fn repreview(&self, id: i64) -> Result<ProposalView, PolicyError> {
         let old = self.load(id).await?;
         if old.status == ProposalStatus::Applied {
@@ -273,7 +258,6 @@ impl PolicyService {
         Ok(self.view(rejected, &snapshot))
     }
 
-    /// Replays the deterministic gate over the newest `limit` runs with the current and the proposed policy.
     pub async fn dry_run(&self, id: i64, limit: Option<u32>) -> Result<DryRunReport, PolicyError> {
         let proposal = self.load(id).await?;
         let limit = limit.unwrap_or(DEFAULT_DRY_RUN_RUNS).clamp(1, MAX_DRY_RUN_RUNS);
@@ -306,8 +290,6 @@ impl PolicyService {
         .await
     }
 
-    /// Applies the selected items: settings as one new version, rules into the rulebook. Refused when the
-    /// proposal is not a draft, expired, or the settings changed since it was made.
     pub async fn approve(&self, id: i64, request: ApprovalRequest) -> Result<ProposalView, PolicyError> {
         let _guard = self.approve_lock.lock().await;
         let mut proposal = self.load(id).await?;
@@ -352,7 +334,6 @@ impl PolicyService {
         Ok(self.view(proposal, &snapshot))
     }
 
-    /// "Prevent this": a description pre-filled with a stored finding's context.
     pub async fn prefill(&self, run_id: i64, index: usize) -> Result<Prefill, PolicyError> {
         let history = self.deps.history.clone();
         let finding = blocking(move || history.finding(run_id, index))
@@ -377,7 +358,6 @@ impl PolicyService {
     }
 }
 
-/// Runs the settings validation on each change alone and on all of them together; failures become rejected items.
 fn check_settings(settings: &dyn SettingsGateway, config: &Value, mut content: ProposalContent) -> ProposalContent {
     let mut kept = Vec::new();
     for change in std::mem::take(&mut content.settings) {

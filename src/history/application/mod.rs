@@ -1,6 +1,3 @@
-//! History use cases and the `RunRepository` port. Other contexts (CLI, daemon)
-//! use the history context only through here.
-
 pub mod ports;
 pub mod use_cases;
 

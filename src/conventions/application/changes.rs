@@ -1,17 +1,10 @@
-//! Translates the review context's changed files into the conventions model.
-//!
-//! The review context does not re-export its change-set types through `review::application`, so
-//! this one adapter reads them from `review::domain::change_set` directly.
-
 use std::fmt::Write as _;
 
 use crate::conventions::domain::evidence::{ChangedFile, NewLine};
 use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange};
 
-/// Diff text sent for one check, in characters; later files are left out beyond it.
 pub const DIFF_CHAR_LIMIT: usize = 120_000;
 
-/// Reviewable files (text, not deleted) with a numbered diff, up to [`DIFF_CHAR_LIMIT`].
 pub fn changed_files(files: &[FileChange]) -> Vec<ChangedFile> {
     let mut used = 0;
     let mut out = Vec::new();
@@ -45,7 +38,6 @@ fn new_lines(file: &FileChange) -> Vec<NewLine> {
         .collect()
 }
 
-/// `<line> + code` for added, `<line>   code` for context, `      - code` for removed lines.
 fn render_diff(file: &FileChange) -> String {
     let mut out = String::new();
     for hunk in &file.hunks {

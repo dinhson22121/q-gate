@@ -1,5 +1,3 @@
-//! Test fixtures: a failing review with every kind of result, and a clean passing one.
-
 use chrono::{TimeZone, Utc};
 
 use super::document::RunMeta;
@@ -14,7 +12,6 @@ use crate::review::domain::gate::GateDecision;
 use crate::review::domain::requirements::CriterionAssessment;
 
 pub const SHA: &str = "3f9c2ab7d1e04c5b8a6f9e2d1c0b3a4f5e6d7c8b";
-/// Evidence with a code fence inside, to prove fences cannot be broken.
 pub const FENCED_EVIDENCE: &str = "query := \"SELECT * FROM t WHERE id=\" + id // see ```sql``` docs\n````";
 
 pub fn meta() -> RunMeta {

@@ -1,12 +1,9 @@
-//! Runs one tool through the sandbox and turns every way it can go wrong into a note.
-
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::sandbox::application::{ExecBackend, ExecRequest, ExecResult, MAX_OUTPUT_BYTES};
 
 const MILLIS_PER_SEC: u64 = 1000;
-/// Last output lines quoted in a failure note.
 const NOTE_LINES: usize = 3;
 
 #[derive(Clone)]
@@ -20,7 +17,6 @@ impl ToolRunner {
         Self { backend, timeout_ms: timeout_secs.max(1).saturating_mul(MILLIS_PER_SEC) }
     }
 
-    /// Runs `argv` in `cwd` (the snapshot). `Err` is a ready-to-show note when the tool could not run or timed out.
     pub async fn run(&self, name: &str, argv: Vec<String>, cwd: &Path) -> Result<ExecResult, String> {
         let request = ExecRequest {
             argv,
@@ -40,7 +36,6 @@ impl ToolRunner {
     }
 }
 
-/// Note for a run whose output held no usable report.
 pub fn unreadable_note(name: &str, result: &ExecResult) -> String {
     let lines: Vec<&str> = result.output_tail.lines().filter(|l| !l.trim().is_empty()).collect();
     let tail = lines[lines.len().saturating_sub(NOTE_LINES)..].join(" | ");

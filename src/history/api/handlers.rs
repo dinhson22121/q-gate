@@ -48,7 +48,6 @@ impl IntoResponse for ApiError {
 
 type ApiResult = Result<Json<Value>, ApiError>;
 
-/// Runs a synchronous use case off the async runtime and serializes its result.
 async fn blocking<T, F>(work: F) -> ApiResult
 where
     T: serde::Serialize + Send + 'static,
@@ -104,7 +103,6 @@ pub(super) async fn get_run(State(state): State<DashboardState>, Path(id): Path<
     if run.0.is_null() { Err(ApiError::NotFound) } else { Ok(run) }
 }
 
-/// All runs concerning a Jira ticket plus per-criterion progress; 400 on a malformed key.
 pub(super) async fn get_ticket(State(state): State<DashboardState>, Path(key): Path<String>) -> ApiResult {
     blocking(move || TicketHistory::new(state.repository).execute(&key)).await
 }

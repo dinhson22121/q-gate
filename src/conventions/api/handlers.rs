@@ -1,5 +1,3 @@
-//! Thin handlers: parse, call one service operation, map the result.
-
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
@@ -19,7 +17,6 @@ pub(super) fn error_response(status: StatusCode, message: &str) -> Response<Body
     (status, Json(json!({ "error": message }))).into_response()
 }
 
-/// Boxed: a `Response` is large and this is the `Err` side of every handler.
 pub(super) struct ApiError(Box<Response<Body>>);
 
 impl ApiError {
@@ -53,7 +50,6 @@ fn to_json(rulebook: &Rulebook) -> Result<Value, ApiError> {
     serde_json::to_value(rulebook).map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))
 }
 
-/// The page with this instance's API token in its `qgate-token` meta tag (served `Cache-Control: no-store`).
 pub(super) async fn page(State(state): State<RulebookApiState>) -> Html<String> {
     Html(state.guard.token().inject(RULEBOOK_HTML))
 }

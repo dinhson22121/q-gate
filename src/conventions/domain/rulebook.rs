@@ -1,29 +1,20 @@
-//! The rulebook: conventions derived once per repository, approved by humans, checked per commit.
-
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Upper bound on rules kept in one rulebook.
 pub const MAX_RULES: usize = 40;
-/// Examples kept per rule.
 pub const MAX_EXAMPLES: usize = 3;
 
-/// Where a rule comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuleKind {
-    /// Written down in the repository (CLAUDE.md, ADRs, lint configs...).
     Explicit,
-    /// Observed in the code but not written down.
     Inferred,
-    /// Written by the team (Policy assistant). Never derived by the model; kept across rebuilds.
     Team,
 }
 
 impl RuleKind {
-    /// Kinds the rule model may produce (`Team` rules come only from people).
     pub const ALL: [Self; 2] = [Self::Explicit, Self::Inferred];
 
     pub fn as_str(self) -> &'static str {
@@ -34,7 +25,6 @@ impl RuleKind {
         }
     }
 
-    /// Status of a rule nobody has decided on yet.
     pub fn default_status(self) -> RuleStatus {
         match self {
             Self::Explicit => RuleStatus::Approved,
@@ -43,7 +33,6 @@ impl RuleKind {
     }
 }
 
-/// Human decision on a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuleStatus {
@@ -71,7 +60,6 @@ impl RuleStatus {
     }
 }
 
-/// A verbatim quote at a file location.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileLine {
     pub file: String,
@@ -81,21 +69,17 @@ pub struct FileLine {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
-    /// "R1", "R2"... stable within one rulebook.
     pub id: String,
     pub title: String,
     pub description: String,
     pub kind: RuleKind,
     pub status: RuleStatus,
-    /// Paths the rule applies to; empty means every file.
     pub scope_globs: Vec<String>,
     pub examples: Vec<FileLine>,
-    /// A lint rule that could enforce this mechanically, when one exists.
     pub lint_suggestion: Option<String>,
 }
 
 impl Rule {
-    /// Whether a review should check this rule.
     pub fn is_usable(&self, use_inferred_rules: bool) -> bool {
         match self.status {
             RuleStatus::Approved => true,
@@ -105,7 +89,6 @@ impl Rule {
     }
 }
 
-/// A rule as proposed by the model, before validation and id assignment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleDraft {
     pub title: String,
@@ -116,14 +99,12 @@ pub struct RuleDraft {
     pub lint_suggestion: Option<String>,
 }
 
-/// Names an existing rule: its id and the title it had when the change was prepared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleRef {
     pub id: String,
     pub title: String,
 }
 
-/// A rule written by the team. `replaces` is the rule it supersedes (an edit), if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamRule {
     pub replaces: Option<RuleRef>,
@@ -143,7 +124,6 @@ pub enum TeamRuleError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rulebook {
-    /// Repository key (its root path as the reviewer sees it).
     pub repo: String,
     pub fingerprint: String,
     pub rules: Vec<Rule>,
@@ -151,8 +131,6 @@ pub struct Rulebook {
 }
 
 impl Rulebook {
-    /// Assembles a rulebook from validated drafts: ids in order, statuses from earlier human
-    /// decisions (keyed by [`normalize_title`]) or the kind's default. Duplicate titles keep the first.
     pub fn assemble(
         repo: String,
         fingerprint: String,
@@ -188,19 +166,16 @@ impl Rulebook {
         self.rules.iter().find(|r| r.id == id)
     }
 
-    /// Copy with one rule's status changed; `None` when the id is unknown.
     pub fn with_status(&self, id: &str, status: RuleStatus) -> Option<Self> {
         self.rule(id)?;
         let rules = self.rules.iter().map(|r| if r.id == id { Rule { status, ..r.clone() } } else { r.clone() });
         Some(Self { rules: rules.collect(), ..self.clone() })
     }
 
-    /// A rulebook with no rules yet. Its empty fingerprint makes the next review build it (keeping team rules).
     pub fn empty(repo: String, created_at: DateTime<Utc>) -> Self {
         Self { repo, fingerprint: String::new(), rules: Vec::new(), created_at }
     }
 
-    /// The team rules as drafts, so a rebuild keeps them (they have no examples to verify).
     pub fn team_drafts(&self) -> Vec<RuleDraft> {
         self.rules
             .iter()
@@ -216,9 +191,6 @@ impl Rulebook {
             .collect()
     }
 
-    /// Copy with `writes` applied: a replaced rule is removed (its title becomes a rejected decision unless
-    /// the new rule keeps it), a rule with the same normalized title is updated in place, others are appended
-    /// with new ids. Returns the decisions to record (normalized title → status) so statuses survive rebuilds.
     pub fn with_team_rules(&self, writes: &[TeamRule]) -> Result<(Self, Vec<(String, RuleStatus)>), TeamRuleError> {
         let mut rules = self.rules.clone();
         let mut decisions = Vec::new();
@@ -264,13 +236,11 @@ impl Rulebook {
         Ok((Self { rules, ..self.clone() }, decisions))
     }
 
-    /// Needs a rebuild: rule sources or layout changed, or it is older than `refresh_days`.
     pub fn is_stale(&self, current_fingerprint: &str, now: DateTime<Utc>, refresh_days: u32) -> bool {
         self.fingerprint != current_fingerprint || now - self.created_at >= Duration::days(i64::from(refresh_days))
     }
 }
 
-/// Title key used to carry decisions across rebuilds: lowercase alphanumeric words separated by one space.
 pub fn normalize_title(title: &str) -> String {
     title
         .split(|c: char| !c.is_alphanumeric())

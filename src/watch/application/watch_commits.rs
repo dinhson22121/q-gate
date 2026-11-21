@@ -1,7 +1,3 @@
-//! `WatchCommits`: polls watched repositories for pushed branches and reviews each whole branch in
-//! the background, without ever blocking polling on a review. The trigger is a local `git push`
-//! (a remote-tracking ref moving by `update by push`/`forced-update`), never a plain commit.
-
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -20,26 +16,17 @@ use crate::watch::domain::message::review_notification;
 use crate::watch::domain::recent::{DEFAULT_RECENT_CAPACITY, RecentCommits};
 use crate::watch::domain::repo::short_sha;
 
-/// Note attached when a ref has no reflog and the push cannot be confirmed.
 const NO_REFLOG_NOTE: &str = "push not confirmed (reflog unavailable)";
-/// Note attached when there is no merge base with the base branch.
 const NO_MERGE_BASE_NOTE: &str = "no merge-base; reviewing whole branch";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchConfig {
-    /// Delay between two polls.
     pub poll_interval: Duration,
-    /// Maximum number of reviews running at the same time (clamped to at least 1).
     pub max_concurrent_reviews: usize,
-    /// How long shutdown waits for running reviews before aborting them.
     pub shutdown_grace: Duration,
-    /// How many handled pushes are remembered for deduplication.
     pub dedup_capacity: usize,
-    /// Pushes older than this (reflog entry time) are not reviewed.
     pub max_commit_age: Duration,
-    /// Git remote whose tracking refs are watched.
     pub remote: String,
-    /// Base branch for merge-base; empty = auto-resolve `main` then `master`. A push to it is skipped.
     pub base_branch: String,
 }
 
@@ -57,12 +44,9 @@ impl Default for WatchConfig {
     }
 }
 
-/// What happened during a `run`, returned after shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WatchReport {
-    /// Reviews that finished (passed, failed or errored) and were notified.
     pub reviews_completed: usize,
-    /// Reviews still running when the shutdown grace period expired.
     pub reviews_aborted: usize,
 }
 
@@ -74,8 +58,6 @@ pub struct WatchCommits<I, C, N, S> {
     config: WatchConfig,
 }
 
-/// Per-branch review slots: a key exists while a review task runs for that `(repo, branch)`; the
-/// value is the push waiting for it (a later push of the same branch is coalesced into it).
 type Slots = Mutex<HashMap<RefId, Option<CommitEvent>>>;
 
 struct Shared<C, N> {
@@ -87,20 +69,14 @@ struct Shared<C, N> {
     completed: AtomicUsize,
 }
 
-/// Mutable state of the polling loop.
 struct PollState {
     repos: Vec<WatchedRepo>,
-    /// Last observed sha per watched ref.
     baseline: HashMap<RefId, String>,
-    /// Repositories seen in an earlier poll: a new ref of one of them is a push; a new repo is only
-    /// baselined, so its existing branches are never reviewed as if just pushed.
     observed_repos: HashSet<PathBuf>,
     recent: RecentCommits,
-    /// Last error logged per subject, so a persistent failure is logged once.
     last_errors: HashMap<String, String>,
 }
 
-/// A repository's remote-tracking refs for one poll, used to resolve its base branch.
 type RepoRefs = HashMap<PathBuf, Vec<(String, String)>>;
 
 impl<I, C, N, S> WatchCommits<I, C, N, S>
@@ -120,8 +96,6 @@ where
         }
     }
 
-    /// Watches until `shutdown` completes, then waits up to `shutdown_grace` for running
-    /// reviews (queued ones are dropped) and aborts the rest.
     pub async fn run(&self, shutdown: impl Future<Output = ()>) -> WatchReport {
         let shared = Arc::new(Shared {
             reviewer: Arc::clone(&self.reviewer),
@@ -163,7 +137,6 @@ where
         drain(&shared, tasks, self.config.shutdown_grace).await
     }
 
-    /// Polls every repository once and returns the pushed branches to review.
     async fn poll_once(&self, state: &mut PollState) -> Vec<CommitEvent> {
         match self.source.list().await {
             Ok(repos) => {
@@ -191,7 +164,6 @@ where
                 }
                 Err(error) => {
                     log_error(state, &subject, &error.to_string());
-                    // Keep the baseline so a transient failure does not hide (or replay) a push.
                     for (id, sha) in &state.baseline {
                         if id.0 == repo.path {
                             carried.insert(id.clone(), sha.clone());
@@ -210,7 +182,7 @@ where
         let mut events = Vec::new();
         for (id, sha, old) in detect_ref_moves(&previous, &current) {
             if !known_before.contains(&id.0) {
-                continue; // newly observed repository: baseline only, never reviewed as a push
+                continue;
             }
             let Some(repo) = by_path.get(&id.0).cloned() else { continue };
             let Some(refs) = repo_refs.get(&id.0) else { continue };
@@ -232,7 +204,6 @@ where
         events
     }
 
-    /// `watch.base_branch` from the repository's `.qgate.toml` at the tip of `default_base`, if it declares one.
     async fn repo_override(
         &self,
         repo: &WatchedRepo,
@@ -243,8 +214,6 @@ where
         self.inspector.repo_base_branch(&repo.path, trusted_tip).await
     }
 
-    /// Decides what to do with a moved ref. A `(repo, branch, sha)` is remembered as handled only
-    /// once the answer is definitive; inspection errors ask for a retry.
     async fn examine_push(
         &self,
         state: &mut PollState,
@@ -261,9 +230,8 @@ where
         let default_base = resolve_base_branch(&branch_names, &self.config.base_branch);
         if default_base.as_deref() == Some(branch) {
             state.recent.insert(repo.path, branch.to_owned(), sha.to_owned());
-            return Move::Skip; // never review a push to the base branch
+            return Move::Skip;
         }
-        // The repository's own base branch wins; it is read from the default base's tip (trusted), not from the push.
         let base_branch = match self.repo_override(&repo, default_base.as_deref(), refs).await {
             Some(own) => Some(own),
             None => default_base,
@@ -319,7 +287,6 @@ where
 
         state.recent.insert(repo.path.clone(), branch.to_owned(), sha.to_owned());
         if base.as_deref() == Some(sha) {
-            // Branch tip is an ancestor of the base branch: nothing new to review.
             return Move::Skip;
         }
         Move::Review(CommitEvent {
@@ -332,12 +299,9 @@ where
     }
 }
 
-/// Outcome of examining one moved ref.
 enum Move {
     Review(CommitEvent),
-    /// Definitively not worth a review (or already handled).
     Skip,
-    /// Inspection failed; examine the move again on the next poll.
     Retry,
 }
 
@@ -346,7 +310,6 @@ fn unix_now() -> i64 {
     i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
 }
 
-/// Slot key for a push: its repository and branch.
 fn slot_key(event: &CommitEvent) -> RefId {
     (event.repo.path.clone(), event.branch.clone().unwrap_or_default())
 }
@@ -355,8 +318,6 @@ fn lock(slots: &Slots) -> MutexGuard<'_, HashMap<RefId, Option<CommitEvent>>> {
     slots.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Starts a review task for the branch, or queues the push behind the review already running for
-/// that `(repo, branch)`, coalescing with any push already waiting (the newer push wins).
 fn schedule<C: CommitReviewer, N: Notifier>(shared: &Arc<Shared<C, N>>, tasks: &mut JoinSet<()>, event: CommitEvent) {
     let key = slot_key(&event);
     {
@@ -374,12 +335,10 @@ fn schedule<C: CommitReviewer, N: Notifier>(shared: &Arc<Shared<C, N>>, tasks: &
     tasks.spawn(review_repo(Arc::clone(shared), key, event));
 }
 
-/// Reviews `first`, then any push queued for the same branch meanwhile.
 async fn review_repo<C: CommitReviewer, N: Notifier>(shared: Arc<Shared<C, N>>, key: RefId, first: CommitEvent) {
     let mut slot = SlotGuard { slots: &shared.slots, key: &key, armed: true };
     let mut event = first;
     loop {
-        // Fails only when shutdown closed the semaphore: the review never started.
         let Ok(permit) = shared.permits.acquire().await else { return };
         let outcome = shared.reviewer.review_commit(&event).await.map_err(|e| e.to_string());
         drop(permit);
@@ -397,8 +356,6 @@ async fn review_repo<C: CommitReviewer, N: Notifier>(shared: Arc<Shared<C, N>>, 
     }
 }
 
-/// Takes the push queued for `key`, or releases the slot when there is none (or when shutting
-/// down). Both happen under one lock so a concurrent `schedule` never loses a push.
 fn take_queued<C, N>(shared: &Shared<C, N>, key: &RefId) -> Option<CommitEvent> {
     let mut slots = lock(&shared.slots);
     let queued = if shared.stopping.load(Ordering::SeqCst) { None } else { slots.get_mut(key).and_then(Option::take) };
@@ -408,8 +365,6 @@ fn take_queued<C, N>(shared: &Shared<C, N>, key: &RefId) -> Option<CommitEvent> 
     queued
 }
 
-/// Frees the branch slot if the review task ends abnormally (panic or abort), so later pushes of
-/// that branch are still reviewed.
 struct SlotGuard<'a> {
     slots: &'a Slots,
     key: &'a RefId,

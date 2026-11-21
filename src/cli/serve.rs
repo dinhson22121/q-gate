@@ -1,6 +1,4 @@
-//! `qgate serve`: commit watcher + dashboard in one process (the Docker container's main command).
-
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,9 +19,12 @@ use crate::policy::{PolicyApiState, router as policy_router};
 use crate::review::application::NoProgress;
 use crate::review::infrastructure::local_git::DiffTarget;
 use crate::settings::api::{SettingsApiState, router as settings_router};
+use crate::settings::domain::ReposConfig;
+use crate::watch::api::{ReposApiState, router as repos_router};
 use crate::watch::application::ports::{CommitEvent, CommitReviewer, CommitVerdict, Notifier, WatchError};
 use crate::watch::application::watch_commits::{WatchCommits, WatchConfig};
 use crate::watch::infrastructure::composite_registry::CompositeRegistry;
+use crate::watch::infrastructure::fs_browser::repos_root_from_env;
 use crate::watch::infrastructure::git_inspector::GitRepoInspector;
 use crate::watch::infrastructure::instance_guard::InstanceGuard;
 use crate::watch::infrastructure::log_notifier::{LogNotifier, TeeNotifier};
@@ -43,10 +44,8 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     sweep_stale_snapshots(&context.work_dir());
     let server = context.server();
     let addr = server.dashboard.bind_addr()?;
-    // Before binding: a bad QGATE_DASHBOARD_TOKEN or unwritable data dir stops the service, never an open dashboard.
     let secret = dashboard_secret(&context)?;
     let login_link = login_url(&context, &secret)?;
-    // Bind before watching, so a busy port fails the service at once instead of running without a dashboard.
     let listener = TcpListener::bind(addr).await.with_context(|| format!("cannot listen on {addr}"))?;
 
     let stop_tx = Arc::new(watch::channel(false).0);
@@ -59,23 +58,25 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
 
     let state = DashboardState::with_allowed_hosts(history.clone(), server.dashboard.allowed_hosts.clone());
     let hosts = server.dashboard.allowed_hosts.clone();
-    // One settings dependency set: the settings page and the policy assistant share its write lock.
     let settings_deps = context.settings_deps();
     let rulebooks = rulebook_service(context.clone())?;
     let policy = policy_service(context.clone(), settings_deps.clone(), rulebooks.clone(), history.clone())?;
-    // One token per process, required on every mutating dashboard route; a restart invalidates open pages.
     let token = ApiToken::generate().context("cannot generate the dashboard API token")?;
     let settings_page = settings_router(SettingsApiState::new(settings_deps, hosts.clone(), token.clone()))
         .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
+        .merge(repos_router(ReposApiState::new(
+            TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
+            repos_root_from_env(),
+            hosts.clone(),
+            token.clone(),
+        )))
         .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
     let dashboard_shutdown = stopped(stop_rx.clone());
-    // Every route needs the session cookie from the login link (except /login and /healthz).
     let access = AccessState::new(secret);
     let app = router_guarded(state, settings_page, |routes| protect(routes, access));
     let dashboard = async move {
         let result = serve_router(listener, app, dashboard_shutdown).await;
-        // If the dashboard dies, stop the watcher too, so the container restarts cleanly.
         let _ = dashboard_stop.send(true);
         result
     };
@@ -94,9 +95,8 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     );
     println!(
         "qgate: dashboard on http://{addr} · settings on http://{addr}/settings · watching {}",
-        server.repos.roots.join(", ")
+        watched_description(&server.repos)
     );
-    // The only place the login token is printed (also: `qgate login-url`).
     println!("Dashboard: {login_link}");
     let (dashboard_result, report) = tokio::join!(dashboard, watcher.run(stopped(stop_rx)));
     println!("qgate: stopped after {} review(s), {} aborted", report.reviews_completed, report.reviews_aborted);
@@ -104,23 +104,34 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
 }
 
 pub fn repo_source(context: &AppContext) -> CompositeRegistry<TomlRepoRegistry, ScanRepoRegistry> {
-    let repos = context.server().repos;
-    let roots = repos.roots.iter().map(PathBuf::from).collect();
+    imported_repo_source(&context.paths.config_dir.join(REPOS_FILE), &context.server().repos)
+}
+
+fn imported_repo_source(
+    imported_file: &Path,
+    repos: &ReposConfig,
+) -> CompositeRegistry<TomlRepoRegistry, ScanRepoRegistry> {
+    let scanned_roots = repos.scanned_roots().iter().map(PathBuf::from).collect();
     CompositeRegistry::new(
-        TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
-        ScanRepoRegistry::new(roots).with_max_depth(repos.scan_depth as usize),
+        TomlRepoRegistry::new(imported_file.to_path_buf()),
+        ScanRepoRegistry::new(scanned_roots).with_max_depth(repos.scan_depth as usize),
     )
 }
 
-/// Adapter: the watcher's `CommitReviewer` port backed by the full review pipeline.
+fn watched_description(repos: &ReposConfig) -> String {
+    if repos.auto_scan {
+        format!("imported repositories and every repository under {}", repos.roots.join(", "))
+    } else {
+        "imported repositories only".into()
+    }
+}
+
 struct PipelineReviewer {
     pipeline: ReviewPipeline,
 }
 
 impl CommitReviewer for PipelineReviewer {
     async fn review_commit(&self, event: &CommitEvent) -> Result<CommitVerdict, WatchError> {
-        // Read from the base (merge-base) commit, like the rest of the config: a branch cannot opt
-        // itself out of review.
         let enabled = load_review_config(&event.repo.path, &review_target(event))
             .await
             .map(|c| c.watch.enabled && c.watch.review_on_push)
@@ -138,7 +149,6 @@ impl CommitReviewer for PipelineReviewer {
             target: review_target(event),
             trigger: Trigger::Push,
             explicit_ticket: None,
-            // The pipeline detects a [WIP] tip from the range's commit messages.
             ticket_in_progress: false,
         };
         let outcome =
@@ -154,8 +164,6 @@ impl CommitReviewer for PipelineReviewer {
     }
 }
 
-/// The whole pushed branch is reviewed as one diff: `base..head` from the merge base with the base
-/// branch, or the pushed tip alone when there is no merge base (orphan/unrelated history).
 fn review_target(event: &CommitEvent) -> DiffTarget {
     match &event.base {
         Some(base) => DiffTarget::Range { base: base.clone(), head: event.sha.clone() },
@@ -177,7 +185,6 @@ fn summarize_report(report: &crate::review::application::ReviewReport) -> String
     format!("{} finding(s){criteria}, {} check(s)", report.findings.len(), report.checks.len())
 }
 
-/// Log line always; Slack-compatible webhook too when configured.
 enum AnyNotifier {
     Log(LogNotifier),
     LogAndWebhook(TeeNotifier<LogNotifier, WebhookNotifier>),
@@ -204,8 +211,6 @@ async fn stopped(mut stop: watch::Receiver<bool>) {
     let _ = stop.wait_for(|stopped| *stopped).await;
 }
 
-/// Marks the process non-dumpable on Linux, so repository checks running as the same user cannot
-/// read its memory or `/proc/<pid>/environ` (which holds the API keys).
 fn harden_process() {
     #[cfg(target_os = "linux")]
     {
@@ -217,7 +222,6 @@ fn harden_process() {
     }
 }
 
-/// Ctrl-C, or SIGTERM from `docker stop`.
 pub(super) async fn wait_for_termination() {
     #[cfg(unix)]
     {
@@ -243,6 +247,7 @@ pub(super) async fn wait_for_termination() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::watch::application::ports::{RepoRegistry, RepoSource};
 
     #[test]
     fn notifier_uses_webhook_only_when_configured() {
@@ -279,5 +284,64 @@ mod tests {
         let report = crate::review::application::ReviewReport::default();
         assert!(summarize(&report, Some("no merge-base; reviewing whole branch")).starts_with("no merge-base;"));
         assert!(!summarize(&report, None).starts_with(';'));
+    }
+
+    fn init_git_repo(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let status = std::process::Command::new("git").args(["init", "-q"]).current_dir(path).status().unwrap();
+        assert!(status.success());
+    }
+
+    struct Folder {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+        imported_file: PathBuf,
+    }
+
+    fn folder_with_imported_and_sibling_repo() -> Folder {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap().join("repos");
+        init_git_repo(&root.join("imported"));
+        init_git_repo(&root.join("sibling"));
+        let imported_file = dir.path().join("config").join(REPOS_FILE);
+        Folder { _dir: dir, root, imported_file }
+    }
+
+    async fn watched_names(folder: &Folder, auto_scan: bool) -> Vec<String> {
+        let registry = TomlRepoRegistry::new(folder.imported_file.clone());
+        registry.add(&folder.root.join("imported")).await.unwrap();
+        let repos = ReposConfig { roots: vec![folder.root.display().to_string()], auto_scan, ..ReposConfig::default() };
+        let mut names: Vec<String> = imported_repo_source(&folder.imported_file, &repos)
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|repo| repo.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn a_repository_that_was_not_imported_is_never_watched_by_default() {
+        let folder = folder_with_imported_and_sibling_repo();
+
+        assert_eq!(watched_names(&folder, false).await, vec!["imported".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn auto_scan_also_watches_every_repository_under_the_roots() {
+        let folder = folder_with_imported_and_sibling_repo();
+
+        assert_eq!(watched_names(&folder, true).await, vec!["imported".to_string(), "sibling".to_string()]);
+    }
+
+    #[test]
+    fn watched_description_says_what_is_watched() {
+        let imported_only = ReposConfig::default();
+        let scanning = ReposConfig { auto_scan: true, ..ReposConfig::default() };
+
+        assert_eq!(watched_description(&imported_only), "imported repositories only");
+        assert!(watched_description(&scanning).contains("/repos"));
     }
 }

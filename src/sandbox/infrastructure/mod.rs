@@ -1,5 +1,3 @@
-//! Adapters: local process execution, the runner socket client and server, and backend selection.
-
 mod local;
 #[cfg(unix)]
 mod remote;
@@ -19,13 +17,10 @@ pub use server::{RunnerServer, bind_socket};
 
 use crate::sandbox::application::ExecBackend;
 
-/// Socket of the isolated runner. When set, untrusted commands only ever run there.
 pub const ENV_RUNNER_SOCKET: &str = "QGATE_RUNNER_SOCKET";
-/// Parent of the commit snapshots; must be shared with the runner (same path in both containers).
 pub const ENV_WORK_DIR: &str = "QGATE_WORK_DIR";
 const DEFAULT_WORK_SUBDIR: &str = "work";
 
-/// The backend for untrusted commands: the runner when `QGATE_RUNNER_SOCKET` is set, else this process.
 pub fn backend_from_env(env: impl Fn(&str) -> Option<String>) -> Arc<dyn ExecBackend> {
     match runner_socket(env) {
         Some(socket) => remote_backend(socket),
@@ -33,12 +28,10 @@ pub fn backend_from_env(env: impl Fn(&str) -> Option<String>) -> Arc<dyn ExecBac
     }
 }
 
-/// `QGATE_RUNNER_SOCKET`, when set to a non-empty value.
 pub fn runner_socket(env: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     env(ENV_RUNNER_SOCKET).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-/// `QGATE_WORK_DIR`, or `<data_dir>/work`.
 pub fn work_dir(env: impl Fn(&str) -> Option<String>, data_dir: &Path) -> PathBuf {
     env(ENV_WORK_DIR)
         .map(|v| v.trim().to_string())
@@ -51,7 +44,6 @@ fn remote_backend(socket: PathBuf) -> Arc<dyn ExecBackend> {
     Arc::new(RemoteBackend::new(socket))
 }
 
-/// Runner sockets need Unix: refuse to run anything rather than fall back to local execution.
 #[cfg(not(unix))]
 fn remote_backend(_socket: PathBuf) -> Arc<dyn ExecBackend> {
     use futures::future::BoxFuture;

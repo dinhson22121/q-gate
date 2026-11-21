@@ -1,5 +1,3 @@
-//! Thin handlers: parse, run one use case off the async runtime, map the result. Never echo secrets.
-
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -22,7 +20,6 @@ pub(super) fn error_response(status: StatusCode, message: &str, field: Option<&s
     (status, Json(json!({ "error": message, "field": field }))).into_response()
 }
 
-/// Boxed: a `Response` is large and this is the `Err` side of every handler.
 pub(super) struct ApiError(Box<Response>);
 
 impl ApiError {
@@ -63,7 +60,6 @@ impl From<SettingsError> for ApiError {
 
 type ApiResult = Result<Json<Value>, ApiError>;
 
-/// Runs a use case on the blocking pool (it touches SQLite and the credential store).
 async fn blocking<F>(state: &SettingsApiState, work: F) -> ApiResult
 where
     F: FnOnce(&SettingsDeps) -> Result<Value, SettingsError> + Send + 'static,
@@ -114,12 +110,10 @@ fn secret_name(raw: &str) -> Result<CredentialName, ApiError> {
         .ok_or_else(|| ApiError::new(error_response(StatusCode::NOT_FOUND, "unknown secret", None)))
 }
 
-/// The use case result plus the refreshed view, so the page re-renders without another request.
 fn applied_with_view(deps: &SettingsDeps, applied: impl serde::Serialize) -> Result<Value, SettingsError> {
     Ok(json!({ "applied": to_value(applied)?, "settings": to_value(GetSettings::new(deps).execute()?)? }))
 }
 
-/// The page with this instance's API token in its `qgate-token` meta tag (served `Cache-Control: no-store`).
 pub(super) async fn page(State(state): State<SettingsApiState>) -> Html<String> {
     Html(state.guard.token().inject(SETTINGS_HTML))
 }
@@ -164,7 +158,6 @@ pub(super) async fn put_secret(
     body: Bytes,
 ) -> ApiResult {
     let name = secret_name(&name)?;
-    // Deliberately no serde details: they could quote part of the value.
     let request: SecretRequest = serde_json::from_slice(&body).map_err(|_| unprocessable(SECRET_BODY_HINT.into()))?;
     blocking(&state, move |deps| {
         Ok(json!({ "secret": to_value(SetSecret::new(deps).execute(name, &request.value)?)? }))

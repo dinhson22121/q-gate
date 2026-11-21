@@ -1,10 +1,7 @@
-//! Notifiers writing to the process output (container logs), plus a fan-out combinator.
-
 use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::watch::application::ports::Notifier;
 
-/// Prints one line per notification on stdout (`docker logs` shows it).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LogNotifier;
 
@@ -20,14 +17,12 @@ impl Notifier for LogNotifier {
     }
 }
 
-/// `<timestamp> <title> | <body on one line>`.
 fn log_line(now: DateTime<Utc>, title: &str, body: &str) -> String {
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let time = now.to_rfc3339_opts(SecondsFormat::Secs, true);
     if body.is_empty() { format!("{time} {title}") } else { format!("{time} {title} | {body}") }
 }
 
-/// Delivers every notification to both notifiers, `first` then `second`.
 #[derive(Debug, Clone)]
 pub struct TeeNotifier<A, B> {
     first: A,

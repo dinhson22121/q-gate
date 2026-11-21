@@ -1,7 +1,3 @@
-//! Typed, async access to a [`ResultCache`] for callers that cache serializable values: JSON
-//! encoding, the blocking SQLite call moved off the async runtime, the `no_cache` opt-out and the
-//! rule that a cache problem is a miss, never a failure of the review.
-
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -10,7 +6,6 @@ use sha2::{Digest, Sha256};
 
 use super::ports::{ContentKey, ResultCache};
 
-/// Hex SHA-256 of `parts`, each length-prefixed so no concatenation can collide with another.
 pub fn digest<S: AsRef<[u8]>>(parts: impl IntoIterator<Item = S>) -> String {
     let mut hasher = Sha256::new();
     for part in parts {
@@ -21,20 +16,15 @@ pub fn digest<S: AsRef<[u8]>>(parts: impl IntoIterator<Item = S>) -> String {
     hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Everything besides the code that changes what a model-backed step produces. All of it goes into
-/// the key, so changing any one of them is a miss.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheTags {
     pub model: String,
     pub effort: String,
-    /// Fingerprint of the prompts in use (see the `prompt_fingerprint` of the producing context).
     pub prompt: String,
-    /// Toolchain / environment version (qgate version, language toolchains...).
     pub toolchain: String,
 }
 
 impl CacheTags {
-    /// Adds the tags to `key` as inputs.
     #[must_use]
     pub fn apply(&self, key: ContentKey) -> ContentKey {
         key.with_input("tag:model", &self.model)
@@ -44,7 +34,6 @@ impl CacheTags {
     }
 }
 
-/// A [`ResultCache`] plus the `no_cache` switch. Cheap to clone.
 #[derive(Clone)]
 pub struct CacheStore {
     cache: Arc<dyn ResultCache>,
@@ -52,7 +41,6 @@ pub struct CacheStore {
 }
 
 impl CacheStore {
-    /// With `no_cache` set, [`get`](Self::get) always misses and [`put`](Self::put) does nothing.
     pub fn new(cache: Arc<dyn ResultCache>, no_cache: bool) -> Self {
         Self { cache, no_cache }
     }
@@ -61,7 +49,6 @@ impl CacheStore {
         self.no_cache
     }
 
-    /// The cached value, or `None` on a miss, a bypass, a storage error or an undecodable payload.
     pub async fn get<T: DeserializeOwned + Send + 'static>(&self, key: &ContentKey) -> Option<T> {
         if self.no_cache {
             return None;
@@ -88,7 +75,6 @@ impl CacheStore {
         }
     }
 
-    /// Stores `value`; failures are reported on stderr and otherwise ignored.
     pub async fn put<T: Serialize>(&self, key: &ContentKey, value: &T) {
         if self.no_cache {
             return;
@@ -116,7 +102,6 @@ pub(crate) mod fakes {
 
     use super::super::ports::{CacheError, ContentKey, ResultCache};
 
-    /// In-memory cache counting reads and writes; can be told to fail.
     #[derive(Default)]
     pub struct MemoryCache {
         pub map: Mutex<HashMap<String, Vec<u8>>>,

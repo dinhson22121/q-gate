@@ -1,6 +1,3 @@
-//! "Every repeated review comment is a candidate for a deterministic lint rule":
-//! group accepted findings across runs by (category, normalized title).
-
 use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Utc};
@@ -18,15 +15,11 @@ pub struct RecurringIssue {
     pub occurrences: u64,
     pub repos: Vec<String>,
     pub last_seen: DateTime<Utc>,
-    /// Original title of the most recent occurrence.
     pub example_title: String,
     pub example_file: String,
     pub example_evidence: String,
 }
 
-/// Lowercase; drop `code spans`, quoted strings and digits; collapse whitespace
-/// and trim trailing punctuation, so "Unwrap on `foo` at line 12" and
-/// "unwrap on `bar` at line 7" fall into the same group.
 pub fn normalize_title(title: &str) -> String {
     let mut out = String::with_capacity(title.len());
     let mut closing: Option<char> = None;
@@ -60,8 +53,6 @@ fn matching_quote(open: char) -> char {
     }
 }
 
-/// Groups with at least `threshold` occurrences, most frequent first
-/// (ties: most recently seen first).
 pub fn find_recurring(runs: &[StoredRun], threshold: u64) -> Vec<RecurringIssue> {
     let mut groups: HashMap<(Category, String), (RecurringIssue, BTreeSet<String>)> = HashMap::new();
     for run in runs {
@@ -137,7 +128,6 @@ mod tests {
                 RunStatus::Failed,
                 Some(report_view(
                     vec![
-                        // same title, different category: separate group
                         finding(Severity::Major, Category::Correctness, "SQL built from `x`"),
                         finding(Severity::Minor, Category::Testing, "missing test"),
                         finding(Severity::Minor, Category::Testing, "Missing test"),

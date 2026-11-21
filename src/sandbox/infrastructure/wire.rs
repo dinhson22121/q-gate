@@ -1,40 +1,27 @@
-//! Runner protocol over a Unix socket: one request per connection, each message one line of JSON.
-
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::sandbox::domain::{ExecRequest, ExecResult, MAX_OUTPUT_BYTES};
 
-/// Largest request line (argv + env are bounded far below this).
 pub const MAX_REQUEST_BYTES: usize = 1024 * 1024;
-/// Largest response line: the output tail is JSON-escaped (up to 6 bytes per byte) plus small fields.
 pub const MAX_RESPONSE_BYTES: usize = MAX_OUTPUT_BYTES * 6 + 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunnerRequest {
-    /// Health check: answered with [`RunnerResponse::Pong`].
     Ping,
-    Exec {
-        request: ExecRequest,
-    },
+    Exec { request: ExecRequest },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RunnerResponse {
     Pong,
-    Done {
-        result: ExecResult,
-    },
-    /// The message could not be parsed.
-    Invalid {
-        reason: String,
-    },
+    Done { result: ExecResult },
+    Invalid { reason: String },
 }
 
-/// Writes `message` as one JSON line and flushes.
 pub async fn write_message<W: AsyncWrite + Unpin, T: Serialize>(writer: &mut W, message: &T) -> std::io::Result<()> {
     let mut line = serde_json::to_vec(message).map_err(std::io::Error::other)?;
     line.push(b'\n');
@@ -42,7 +29,6 @@ pub async fn write_message<W: AsyncWrite + Unpin, T: Serialize>(writer: &mut W, 
     writer.flush().await
 }
 
-/// Reads one JSON line of at most `max_bytes`. `Ok(None)` at a clean end of stream.
 pub async fn read_message<R: AsyncBufRead + Unpin, T: DeserializeOwned>(
     reader: &mut R,
     max_bytes: usize,

@@ -1,11 +1,7 @@
-//! Text normalisation, placeholder detection and similarity for the copy check.
-
 use std::collections::HashSet;
 
-/// Copy shorter than this (in characters) must have at least `MIN_WORDS` words to be checked.
 const MIN_CHARS: usize = 8;
 const MIN_WORDS: usize = 2;
-/// Words that only make up placeholder copy ("Label", "Button text", "Lorem ipsum").
 const PLACEHOLDER_WORDS: [&str; 22] = [
     "lorem",
     "ipsum",
@@ -33,7 +29,6 @@ const PLACEHOLDER_WORDS: [&str; 22] = [
 const HTML_ENTITIES: [(&str, &str); 6] =
     [("&apos;", "'"), ("&#39;", "'"), ("&quot;", "\""), ("&amp;", "&"), ("&nbsp;", " "), ("&#x27;", "'")];
 
-/// Lowercase, typographic quotes and dashes unified, entities decoded, whitespace collapsed.
 pub fn normalize(text: &str) -> String {
     let mut decoded = text.replace("\\'", "'").replace("\\\"", "\"");
     for (entity, plain) in HTML_ENTITIES {
@@ -54,16 +49,14 @@ pub fn normalize(text: &str) -> String {
     unified.replace("...", ".").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Words (alphanumeric runs) of a text, lowercased.
 pub fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect()
 }
 
-/// True for copy worth comparing: real words, long enough, not placeholder, numbers or icons.
 pub fn is_meaningful_copy(text: &str) -> bool {
     let normalized = normalize(text);
     if normalized.starts_with("lorem") || !normalized.chars().any(char::is_alphabetic) {
-        return false; // filler text, numbers, prices, times, icons, punctuation
+        return false;
     }
     let all_words = words(&normalized);
     if all_words.len() < MIN_WORDS && normalized.chars().count() < MIN_CHARS {
@@ -74,7 +67,6 @@ pub fn is_meaningful_copy(text: &str) -> bool {
     !all_words.iter().all(is_placeholder_word)
 }
 
-/// Jaccard overlap of the word sets of two texts (0.0..=1.0).
 pub fn similarity(a: &str, b: &str) -> f64 {
     let a: HashSet<String> = words(a).into_iter().collect();
     let b: HashSet<String> = words(b).into_iter().collect();
@@ -85,8 +77,6 @@ pub fn similarity(a: &str, b: &str) -> f64 {
     shared / a.union(&b).count() as f64
 }
 
-/// String-ish pieces of one source line: quoted literals and JSX/HTML text between tags.
-/// Falls back to the whole trimmed line (multi-line JSX text has no delimiters).
 pub fn text_candidates(line: &str) -> Vec<String> {
     let mut found = quoted_literals(line);
     found.extend(tag_texts(line));

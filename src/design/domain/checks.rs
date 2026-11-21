@@ -1,5 +1,3 @@
-//! Entry point of the deterministic design checks.
-
 use crate::review::application::{DesignMismatch, DesignMismatchKind};
 use crate::review::domain::change_set::FileChange;
 
@@ -8,16 +6,11 @@ use super::text::normalize;
 use super::ui::{changed_ui_files, is_style_file, reviewable};
 use super::{component_check, copy_check, token_check};
 
-/// The design checks a server can enable; same variants as the review's mismatch kinds.
 pub type DesignCheckKind = DesignMismatchKind;
 
-/// Every check, in a stable order.
 pub const ALL_CHECKS: [DesignCheckKind; 4] =
     [DesignCheckKind::Copy, DesignCheckKind::Component, DesignCheckKind::Token, DesignCheckKind::States];
 
-/// Runs the enabled deterministic checks (copy, token, component) of one frame against the change.
-/// `States` is judged by the model elsewhere and ignored here. `i18n_texts` are the repository's
-/// translation strings (or raw resource contents).
 pub fn detect_mismatches(
     spec: &DesignSpec,
     files: &[FileChange],
@@ -41,7 +34,6 @@ pub fn detect_mismatches(
     found
 }
 
-/// Builds one mismatch for `spec`'s frame.
 pub(super) fn mismatch(
     kind: DesignMismatchKind,
     spec: &DesignSpec,

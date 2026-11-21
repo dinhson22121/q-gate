@@ -3,14 +3,10 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
-/// Random bytes in a generated secret (hex-encoded: 64 characters).
 pub const SECRET_BYTES: usize = 32;
-/// Shortest secret accepted from `QGATE_DASHBOARD_TOKEN` or the token file.
 pub const MIN_SECRET_LEN: usize = 32;
-/// Domain separation: the session cookie value is never the login secret itself.
 const SESSION_DERIVATION_TAG: &[u8] = b"qgate-dashboard-session-v1\0";
 
-/// Why a configured secret was refused. Never contains the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidSecret {
     #[error("must be at least {MIN_SECRET_LEN} characters (generate one with `openssl rand -hex 32`)")]
@@ -19,13 +15,10 @@ pub enum InvalidSecret {
     BadCharacters,
 }
 
-/// The installation's dashboard login secret. Only URL-safe characters, so it can travel in a query string
-/// without encoding. `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DashboardSecret(Arc<str>);
 
 impl DashboardSecret {
-    /// Validates a configured value (surrounding whitespace ignored).
     pub fn parse(raw: &str) -> Result<Self, InvalidSecret> {
         let value = raw.trim();
         if value.len() < MIN_SECRET_LEN {
@@ -37,24 +30,19 @@ impl DashboardSecret {
         Ok(Self(value.into()))
     }
 
-    /// A new secret from CSPRNG output (hex-encoded).
     pub fn from_random(bytes: &[u8; SECRET_BYTES]) -> Self {
         Self(hex(bytes).into())
     }
 
-    /// Constant-time comparison with a presented login token.
     pub fn verify(&self, presented: &str) -> bool {
         constant_time_eq(self.0.as_bytes(), presented.as_bytes())
     }
 
-    /// The value of the session cookie: SHA-256 over a fixed tag and the secret. Stable across restarts
-    /// (sessions survive them) and changes with the secret (rotating the secret logs everyone out).
     pub fn session_key(&self) -> SessionKey {
         let digest = Sha256::new().chain_update(SESSION_DERIVATION_TAG).chain_update(self.0.as_bytes()).finalize();
         SessionKey(hex(&digest).into())
     }
 
-    /// The raw value: for the login link and the token file only. Never log it anywhere else.
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -66,17 +54,14 @@ impl fmt::Debug for DashboardSecret {
     }
 }
 
-/// Value of the session cookie. `Debug` never shows it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SessionKey(Arc<str>);
 
 impl SessionKey {
-    /// Constant-time comparison with a presented cookie value.
     pub fn verify(&self, presented: &str) -> bool {
         constant_time_eq(self.0.as_bytes(), presented.as_bytes())
     }
 
-    /// The raw value, for the `Set-Cookie` header.
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -88,7 +73,6 @@ impl fmt::Debug for SessionKey {
     }
 }
 
-/// Runs in time independent of where the inputs differ. Lengths are not secret.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

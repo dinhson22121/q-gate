@@ -1,8 +1,5 @@
-//! Languages the test agent supports and which one a review's changes are written in.
-
 use std::fmt;
 
-/// Backend languages the test agent can write and run tests for. Frontend (JS/TS) comes later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TestLanguage {
     Go,
@@ -12,7 +9,6 @@ pub enum TestLanguage {
 }
 
 impl TestLanguage {
-    /// Also the tie-break order of [`select_language`].
     pub const ALL: [Self; 4] = [Self::Go, Self::Java, Self::Python, Self::Rust];
 
     pub fn as_str(self) -> &'static str {
@@ -24,17 +20,14 @@ impl TestLanguage {
         }
     }
 
-    /// Parses the lowercase name used in settings (`go`, `java`, `python`, `rust`).
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|l| l.as_str() == name.trim().to_ascii_lowercase())
     }
 
-    /// The `QGATE_TOOLCHAINS` entry that provides this language's toolchain.
     pub fn toolchain(self) -> &'static str {
         self.as_str()
     }
 
-    /// The language of a source file, by extension.
     pub fn of_path(path: &str) -> Option<Self> {
         let extension = path.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase())?;
         match extension.as_str() {
@@ -53,19 +46,15 @@ impl fmt::Display for TestLanguage {
     }
 }
 
-/// The language chosen for a scenario and its changed files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageChoice {
     pub language: TestLanguage,
-    /// Changed files of that language, in change order.
     pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SelectionError {
-    /// No changed Go, Java, Python or Rust file.
     NoBackendFiles,
-    /// The majority language is not enabled in the settings.
     NotEnabled(TestLanguage),
 }
 
@@ -78,8 +67,6 @@ impl fmt::Display for SelectionError {
     }
 }
 
-/// Picks the language most changed backend files are written in (ties: [`TestLanguage::ALL`] order).
-/// Vendored code is ignored.
 pub fn select_language(changed: &[String], enabled: &[TestLanguage]) -> Result<LanguageChoice, SelectionError> {
     let relevant: Vec<(TestLanguage, &String)> = changed
         .iter()

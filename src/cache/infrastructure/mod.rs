@@ -1,5 +1,5 @@
-//! Adapters of the cache context: the SQLite-backed result store.
-
 pub mod sqlite_cache;
+pub mod unavailable_cache;
 
 pub use sqlite_cache::SqliteResultCache;
+pub use unavailable_cache::UnavailableCache;

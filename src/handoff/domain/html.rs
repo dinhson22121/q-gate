@@ -1,7 +1,3 @@
-//! HTML rendering of a whole review: one self-contained file (inline CSS, no scripts, fonts or images) meant to be
-//! attached to a Jira ticket as evidence and printed to PDF from the browser. Every interpolated string is
-//! HTML-escaped: repository, model, tool and ticket content is untrusted.
-
 use std::fmt::Write as _;
 
 use super::document::{HandoffDocument, HandoffInput};
@@ -33,7 +29,6 @@ pre{background:#f3f4f6;border:1px solid var(--line);border-radius:4px;padding:8p
 @media print{body{max-width:none;padding:0;font-size:12px}.verdict,.tag,.reasons,.rule,pre{-webkit-print-color-adjust:exact;print-color-adjust:exact}\
 h2{break-after:avoid}a{color:inherit;text-decoration:none}}";
 
-/// Escapes `text` for HTML text and double-quoted attribute values.
 pub fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -49,7 +44,6 @@ pub fn escape(text: &str) -> String {
     out
 }
 
-/// A link only for http(s) URLs (never `javascript:` and friends); plain escaped text otherwise.
 fn link(url: &str, label: &str) -> String {
     let url = url.trim();
     if url.starts_with("https://") || url.starts_with("http://") {
@@ -628,7 +622,6 @@ mod tests {
         for forbidden in ["src=", "<link", "<script", "@import", "url(", "<iframe", "<img"] {
             assert!(!html.contains(forbidden), "external reference {forbidden}");
         }
-        // Every http(s) occurrence is a visible hyperlink the user clicks, never a resource the page loads.
         for (at, _) in html.match_indices("http") {
             assert!(
                 html[..at].ends_with("href=\"") || html[..at].ends_with("\">"),

@@ -1,5 +1,3 @@
-//! Use cases and ports of the design context. Other contexts use it only through here.
-
 pub mod ports;
 pub mod review_design;
 

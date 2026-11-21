@@ -1,5 +1,3 @@
-//! Pure rules: which packages a change impacts, how test results compare, and the report.
-
 mod compare;
 mod impacted;
 mod report;

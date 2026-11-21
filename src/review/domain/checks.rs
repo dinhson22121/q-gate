@@ -1,14 +1,9 @@
-//! Deterministic verification commands (tests, linters, builds) declared by the repository.
-//! These are the strongest layer: a failing required check fails the gate regardless of the LLM.
-
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CheckSpec {
     pub name: String,
-    /// Program and arguments, executed without a shell.
     pub command: Vec<String>,
-    /// A failing required check fails the gate; optional checks are informational.
     pub required: bool,
     pub timeout_secs: u64,
 }
@@ -19,7 +14,6 @@ pub enum CheckOutcome {
     Passed,
     Failed,
     TimedOut,
-    /// The program could not be started (not installed, bad path...).
     Error,
 }
 
@@ -30,7 +24,6 @@ pub struct CheckResult {
     pub outcome: CheckOutcome,
     pub exit_code: Option<i32>,
     pub duration_ms: u64,
-    /// Last lines of combined stdout/stderr, for diagnosis.
     pub output_tail: String,
 }
 

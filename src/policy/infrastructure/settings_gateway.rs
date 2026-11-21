@@ -1,6 +1,3 @@
-//! `SettingsGateway` on the settings context's use cases: every change is validated, env-locked fields are
-//! refused and an approval becomes a new, versioned settings entry (rollback works from Settings → History).
-
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -16,7 +13,6 @@ pub struct SettingsUseCases {
 }
 
 impl SettingsUseCases {
-    /// Share the settings page's `deps` so both serialize their writes on the same lock.
     pub fn new(deps: Arc<SettingsDeps>) -> Self {
         Self { deps }
     }
@@ -116,10 +112,10 @@ mod tests {
 
     #[test]
     fn snapshot_validate_and_apply_go_through_the_settings_use_cases() {
-        let (gateway, store) = gateway(&[("QGATE_LLM_BASE_URL", "http://127.0.0.1:4000")]);
+        let (gateway, store) = gateway(&[("QGATE_CLAUDE_BIN", "/opt/claude/bin/claude")]);
         let snapshot = gateway.snapshot().unwrap();
         assert_eq!(snapshot.version, 1);
-        assert_eq!(snapshot.locked, vec!["llm.base_url".to_string()]);
+        assert_eq!(snapshot.locked, vec!["llm.claude_bin".to_string()]);
         assert!(!snapshot.webhook_configured);
         assert!(snapshot.restart_required.contains(&"output.dir".to_string()));
 
@@ -150,8 +146,8 @@ mod tests {
         assert_eq!(cleared.version, Some(4));
         assert!(!gateway.snapshot().unwrap().webhook_configured);
         assert!(matches!(gateway.apply(&[("nope.x".into(), json!(1))], "p", 4), Err(PolicyError::Invalid(_))));
-        let admin_only = gateway.apply(&[("llm.base_url".into(), json!("https://other.example"))], "p", 4);
-        assert!(matches!(admin_only, Err(PolicyError::Invalid(m)) if m.contains("QGATE_LLM_BASE_URL")));
+        let admin_only = gateway.apply(&[("llm.claude_bin".into(), json!("/tmp/other"))], "p", 4);
+        assert!(matches!(admin_only, Err(PolicyError::Invalid(m)) if m.contains("QGATE_CLAUDE_BIN")));
         let invalid = gateway.apply(&[("agents.max_parallel".into(), json!(0))], "p", 4);
         assert!(matches!(invalid, Err(PolicyError::Invalid(_))));
         assert!(matches!(
@@ -169,7 +165,7 @@ mod tests {
             (SettingsError::Storage("disk".into()), "storage"),
             (SettingsError::InvalidSecret("bad"), "invalid"),
             (SettingsError::SecretFromEnv { name: "x", env_var: "Y" }, "invalid"),
-            (SettingsError::AdminOnly { field: "llm.base_url".into(), env_var: "Y" }, "invalid"),
+            (SettingsError::AdminOnly { field: "llm.claude_bin".into(), env_var: "Y" }, "invalid"),
         ];
         for (err, kind) in cases {
             let mapped = policy_error(err);

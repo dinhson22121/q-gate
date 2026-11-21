@@ -1,5 +1,3 @@
-//! gitleaks: `gitleaks dir . --redact --report-format json --report-path -` prints an array of leaks.
-
 use std::path::Path;
 
 use serde_json::Value;
@@ -29,7 +27,6 @@ fn finding(leak: &Value, root: &Path) -> Option<QualityFinding> {
         identifier: rule_id.to_string(),
         aliases: vec![],
         title: format!("Possible leaked secret ({rule_id})"),
-        // Never the matched value: gitleaks runs with --redact and this is the rule's description only.
         evidence: description,
         is_new: false,
         approved_rule: false,

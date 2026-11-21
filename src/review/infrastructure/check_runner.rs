@@ -1,6 +1,3 @@
-//! Runs the repository's deterministic checks (no shell) through the sandbox's execution backend:
-//! in the isolated runner container under Docker, as child processes natively.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,15 +8,11 @@ use crate::review::application::ports::CheckRunner;
 use crate::review::domain::checks::{CheckOutcome, CheckResult, CheckSpec};
 use crate::sandbox::application::{ExecBackend, ExecRequest, ExecResult};
 
-/// Checks run at the same time unless configured otherwise.
 pub const DEFAULT_MAX_PARALLEL: usize = 2;
-/// Lines of output kept for diagnosis.
 const TAIL_MAX_LINES: usize = 40;
-/// Bytes of output kept for diagnosis.
 const TAIL_MAX_BYTES: usize = 8 * 1024;
 const MILLIS_PER_SEC: u64 = 1000;
 
-/// Executes each [`CheckSpec`] in `root` with its timeout, at most `max_parallel` at a time.
 #[derive(Clone)]
 pub struct ProcessCheckRunner {
     root: PathBuf,
@@ -32,7 +25,6 @@ impl ProcessCheckRunner {
         Self { root: root.into(), max_parallel: DEFAULT_MAX_PARALLEL, backend }
     }
 
-    /// Sets the parallelism (values below 1 are treated as 1).
     pub fn with_max_parallel(mut self, max_parallel: usize) -> Self {
         self.max_parallel = max_parallel.max(1);
         self
@@ -68,8 +60,6 @@ impl ProcessCheckRunner {
 
 impl CheckRunner for ProcessCheckRunner {
     async fn run(&self, checks: &[CheckSpec]) -> Vec<CheckResult> {
-        // `buffered` keeps results in spec order while running up to `max_parallel` at once.
-        // Futures are created eagerly (they are lazy, nothing runs yet) to keep the stream `Send`.
         let runs: Vec<_> = checks.iter().map(|spec| self.run_one(spec)).collect();
         stream::iter(runs).buffered(self.max_parallel).collect().await
     }
@@ -87,7 +77,6 @@ fn outcome_of(result: ExecResult, timeout_secs: u64) -> (CheckOutcome, Option<i3
     (outcome, result.exit_code, tail)
 }
 
-/// The last [`TAIL_MAX_LINES`] lines.
 fn last_lines(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let start = lines.len().saturating_sub(TAIL_MAX_LINES);

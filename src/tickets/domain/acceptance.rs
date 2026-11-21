@@ -1,22 +1,10 @@
-//! Extraction of acceptance criteria from free-form ticket text (Markdown, Jira wiki markup,
-//! plain text converted from ADF, Gherkin).
-
-/// Section titles (lowercase, without punctuation) that introduce acceptance criteria.
 const AC_TITLES: &[&str] =
     &["acceptance criteria", "acceptance criterion", "acceptance criterias", "ac", "acs", "definition of done", "dod"];
-/// Gherkin keywords that open a scenario (one criterion per scenario).
 const SCENARIO_KEYWORDS: &[&str] = &["scenario outline:", "scenario template:", "scenario:", "example:"];
-/// Gherkin keywords that continue a scenario without being a step.
 const SCENARIO_CONTINUATIONS: &[&str] = &["examples:", "scenarios:"];
-/// Separator used when joining the lines of one Gherkin scenario into one criterion.
 const GHERKIN_JOINER: &str = "; ";
-/// Maximum Markdown heading / Jira wiki heading level.
 const MAX_HEADING_LEVEL: usize = 6;
 
-/// Finds the acceptance-criteria section ("Acceptance Criteria", "AC", "Definition of Done" as a
-/// Markdown `#` heading, Jira wiki `h3.`, `*bold*` line or plain line ending with `:`) and returns
-/// its list items until the next heading. Gherkin scenarios count as one criterion each.
-/// Without such a section, Gherkin scenarios anywhere in the text are used; otherwise empty.
 pub fn parse_acceptance_criteria(text: &str) -> Vec<String> {
     let lines = classify_all(text);
     let section = lines
@@ -27,9 +15,6 @@ pub fn parse_acceptance_criteria(text: &str) -> Vec<String> {
     if section.is_empty() { collect_scenarios(&lines) } else { section }
 }
 
-/// Treats the whole text as an acceptance-criteria section: every list item, Gherkin scenario
-/// (or, without any of those, every paragraph line) becomes a criterion. Used for dedicated
-/// "Acceptance Criteria" fields where no heading is expected.
 pub fn parse_criteria_list(text: &str) -> Vec<String> {
     let section = parse_acceptance_criteria(text);
     if !section.is_empty() {
@@ -46,11 +31,7 @@ enum Line {
     Heading(String),
     ListItem(String),
     Scenario(String),
-    Step {
-        text: String,
-        step: Step,
-    },
-    /// `Examples:` and table rows inside a scenario.
+    Step { text: String, step: Step },
     ScenarioDetail(String),
     Text(String),
 }
@@ -60,7 +41,6 @@ enum Step {
     Given,
     When,
     Then,
-    /// `And` / `But`: only continues an existing scenario.
     Conjunction,
 }
 
@@ -69,8 +49,6 @@ fn classify_all(text: &str) -> Vec<Line> {
     text.lines().map(|line| classify(line.trim(), is_wiki)).collect()
 }
 
-/// Classifies one trimmed line. In Jira wiki documents `# item` is a numbered list item;
-/// elsewhere it is a Markdown heading.
 fn classify(line: &str, is_wiki: bool) -> Line {
     if line.is_empty() {
         return Line::Blank;
@@ -110,7 +88,6 @@ fn markdown_heading(line: &str, is_wiki: bool) -> Option<String> {
         .then(|| title.trim().trim_end_matches('#').trim().to_string())
 }
 
-/// A whole line in bold: `*Title*`, `**Title**`, `__Title__`, optionally followed by `:`.
 fn bold_heading(line: &str) -> Option<String> {
     let line = line.strip_suffix(':').unwrap_or(line).trim_end();
     ["**", "__", "*"].iter().find_map(|marker| {
@@ -120,8 +97,6 @@ fn bold_heading(line: &str) -> Option<String> {
     })
 }
 
-/// Returns the item text for bullets (`-`, `*`, `+`, nested `**`; `#` in wiki documents),
-/// ordered items (`1.`, `1)`) and checkboxes (`[ ]`, `[x]`), or `None` if not a list item.
 fn list_item(line: &str, is_wiki: bool) -> Option<String> {
     let rest = strip_bullet(line, is_wiki).or_else(|| strip_ordinal(line)).or_else(|| strip_checkbox(line))?;
     let rest = strip_checkbox(rest).unwrap_or(rest);
@@ -173,7 +148,6 @@ fn is_ac_title(title: &str) -> bool {
     AC_TITLES.contains(&without_suffix)
 }
 
-/// A Gherkin scenario being accumulated into one criterion.
 #[derive(Debug, Default)]
 struct Scenario {
     lines: Vec<String>,
@@ -187,21 +161,17 @@ impl Scenario {
         self.lines.join(GHERKIN_JOINER)
     }
 
-    /// Whether this looks like a real scenario rather than prose that happens to start with "Given".
     fn is_complete(&self) -> bool {
         self.has_scenario_line || (self.has_action && self.has_then)
     }
 }
 
-/// Accumulates criteria from a sequence of classified lines.
 #[derive(Debug)]
 struct Collector {
-    /// When set, only Gherkin scenarios are collected (fallback mode).
     scenarios_only: bool,
     items: Vec<String>,
     paragraphs: Vec<String>,
     scenario: Option<Scenario>,
-    /// Whether a plain text line may continue the last list item.
     continues_item: bool,
 }
 
@@ -244,7 +214,6 @@ impl Collector {
         }
     }
 
-    /// Starts a new scenario, opened either by a `Scenario:` line or implicitly by a step.
     fn start_scenario(&mut self, scenario_line: Option<&str>) {
         self.flush_scenario();
         self.scenario = Some(Scenario {
@@ -293,14 +262,12 @@ impl Collector {
     }
 }
 
-/// Collects criteria from the lines following an AC heading, up to the next heading.
 fn collect_section(lines: &[Line]) -> Vec<String> {
     let mut collector = Collector::new(false);
     lines.iter().take_while(|l| !matches!(l, Line::Heading(_))).for_each(|l| collector.feed(l));
     collector.finish()
 }
 
-/// Fallback: complete Gherkin scenarios anywhere in the text.
 fn collect_scenarios(lines: &[Line]) -> Vec<String> {
     let mut collector = Collector::new(true);
     lines.iter().for_each(|l| collector.feed(l));

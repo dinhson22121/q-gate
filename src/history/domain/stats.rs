@@ -13,7 +13,6 @@ pub struct CriteriaCounts {
     pub unclear: u64,
 }
 
-/// Aggregates over the runs created at or after `since`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PeriodStats {
     pub since: DateTime<Utc>,
@@ -21,13 +20,10 @@ pub struct PeriodStats {
     pub passed: u64,
     pub failed: u64,
     pub errored: u64,
-    /// passed / (passed + failed); errored runs never reached the gate. `None` with no gated runs.
     pub pass_rate: Option<f64>,
     pub findings_by_severity: SeverityCounts,
-    /// Every category is present (zero when unseen), keyed by its snake_case name.
     pub findings_by_category: BTreeMap<&'static str, u64>,
     pub criteria: CriteriaCounts,
-    /// Number of check executions that did not pass.
     pub failed_checks: u64,
     pub estimated_cost_usd: f64,
 }

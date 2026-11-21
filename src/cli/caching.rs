@@ -1,20 +1,13 @@
-//! Composition of the result cache: one SQLite cache per review, the `qgate: no-cache` trailer and the key tags.
-//! Caching is transparent: a cache that cannot be opened degrades to "never hits" and never fails the review.
-
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::cache::application::{CacheError, CacheTags, ContentIds, ContentKey, ResultCache};
-use crate::cache::infrastructure::SqliteResultCache;
+use crate::cache::application::{CacheTags, ContentIds, ResultCache};
+use crate::cache::infrastructure::{SqliteResultCache, UnavailableCache};
 use crate::impact::application::BaseRunStore;
 use crate::impact::infrastructure::CachedBaseRuns;
 use crate::review::application::AgentSuite;
 use crate::testing::CachingTestAgent;
 
-const TRAILER_KEY: &str = "qgate";
-const TRAILER_VALUE: &str = "no-cache";
-
-/// The cache to use and whether it must be bypassed (explicit request or storage unavailable).
 pub struct ReviewCache {
     pub cache: Arc<dyn ResultCache>,
     pub no_cache: bool,
@@ -33,42 +26,16 @@ impl ReviewCache {
 }
 
 impl ReviewCache {
-    /// Store for the base commit's test run; `None` when caching is bypassed so the base tests always re-run.
     pub fn base_runs(&self) -> Option<Arc<dyn BaseRunStore>> {
         (!self.no_cache).then(|| Arc::new(CachedBaseRuns::new(self.cache.clone())) as Arc<dyn BaseRunStore>)
     }
 }
 
-/// Stand-in used when the cache database cannot be opened: always misses, stores nothing.
-struct UnavailableCache;
-
-impl ResultCache for UnavailableCache {
-    fn get(&self, _key: &ContentKey) -> Result<Option<Vec<u8>>, CacheError> {
-        Ok(None)
-    }
-
-    fn put(&self, _key: &ContentKey, _value: &[u8]) -> Result<(), CacheError> {
-        Ok(())
-    }
-}
-
-/// Puts the cache in front of the suite's test agent (when there is one).
 pub fn wrap_test_agent(suite: &mut AgentSuite, cache: &ReviewCache, ids: Arc<dyn ContentIds>, tags: CacheTags) {
     suite.tests = suite
         .tests
         .take()
         .map(|inner| Arc::new(CachingTestAgent::new(inner, cache.cache.clone(), ids, tags, cache.no_cache)) as _);
-}
-
-/// Whether any commit message carries a `qgate: no-cache` trailer (case-insensitive, one per line).
-pub fn has_no_cache_trailer(messages: &[String]) -> bool {
-    messages.iter().flat_map(|m| m.lines()).any(is_no_cache_line)
-}
-
-fn is_no_cache_line(line: &str) -> bool {
-    line.split_once(':').is_some_and(|(key, value)| {
-        key.trim().eq_ignore_ascii_case(TRAILER_KEY) && value.trim().eq_ignore_ascii_case(TRAILER_VALUE)
-    })
 }
 
 pub fn cache_tags(model: &str, effort: &str, prompt: String) -> CacheTags {
@@ -83,28 +50,7 @@ pub fn cache_tags(model: &str, effort: &str, prompt: String) -> CacheTags {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn msgs(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn trailer_is_found_case_insensitively_in_any_message() {
-        assert!(has_no_cache_trailer(&msgs(&["feat: x\n\nqgate: no-cache"])));
-        assert!(has_no_cache_trailer(&msgs(&["fix: y", "feat: x\n\nQGate:   No-Cache  \n"])));
-    }
-
-    #[test]
-    fn other_text_is_not_a_trailer() {
-        assert!(!has_no_cache_trailer(&[]));
-        assert!(!has_no_cache_trailer(&msgs(&[
-            "feat: no-cache layer",
-            "qgate: cache",
-            "qgate no-cache",
-            "x-qgate: no-cache"
-        ])));
-        assert!(!has_no_cache_trailer(&msgs(&["qgate: no-cache please"])));
-    }
+    use crate::cache::application::{CacheError, ContentKey};
 
     struct Stub;
 
@@ -162,7 +108,6 @@ mod tests {
     #[test]
     fn unopenable_database_degrades_to_a_bypassed_cache() {
         let dir = tempfile::tempdir().unwrap();
-        // A directory where the database file should be.
         let cache = ReviewCache::open(dir.path(), false);
         assert!(cache.no_cache);
         let key = ContentKey::new("k", 1);

@@ -1,5 +1,3 @@
-//! `qgate doctor`: explains what is and is not set up, without printing secrets.
-
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -10,7 +8,6 @@ use crate::settings::application::CredentialName;
 use crate::settings::infrastructure::resolve_credential;
 use crate::watch::application::ports::RepoSource;
 
-/// Toolchain programs checks commonly need, with the flag that prints their version.
 const TOOLCHAINS: &[(&str, &str)] = &[
     ("git", "--version"),
     ("go", "version"),
@@ -39,8 +36,8 @@ pub async fn doctor(context: &AppContext) -> ExitCode {
     let mut lines = vec![
         Line { level: Level::Ok, text: format!("config dir {}", context.paths.config_dir.display()) },
         Line { level: Level::Ok, text: format!("data dir {}", context.paths.data_dir.display()) },
-        credential_line(context, CredentialName::AnthropicApiKey, Level::Fail),
     ];
+    lines.push(claude_line(context).await);
     if context.server().jira.enabled {
         lines.push(credential_line(context, CredentialName::JiraApiToken, Level::Fail));
     }
@@ -72,7 +69,27 @@ fn credential_line(context: &AppContext, name: CredentialName, missing: Level) -
     }
 }
 
-/// Missing toolchains are warnings: only the ones your `[[checks]]` use matter.
+async fn claude_line(context: &AppContext) -> Line {
+    probe_claude(&context.cli_config("", "").claude_bin).await
+}
+
+async fn probe_claude(bin: &std::path::Path) -> Line {
+    let run = tokio::process::Command::new(bin).arg("--version").kill_on_drop(true).output();
+    match tokio::time::timeout(PROBE_TIMEOUT, run).await {
+        Ok(Ok(output)) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Line {
+                level: Level::Ok,
+                text: format!("claude CLI {version} (log in with `claude login` or set CLAUDE_CODE_OAUTH_TOKEN)"),
+            }
+        }
+        _ => Line {
+            level: Level::Fail,
+            text: format!("claude CLI not found at `{}` (install Claude Code or set llm.claude_bin)", bin.display()),
+        },
+    }
+}
+
 async fn probe(program: &str, flag: &str) -> Line {
     let run = tokio::process::Command::new(program).arg(flag).kill_on_drop(true).output();
     match tokio::time::timeout(PROBE_TIMEOUT, run).await {
@@ -99,6 +116,20 @@ fn print_lines(lines: &[Line]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn claude_probe_fails_for_a_missing_binary_and_passes_for_a_working_one() {
+        let missing = probe_claude(std::path::Path::new("/definitely/missing/claude")).await;
+        assert_eq!(missing.level, Level::Fail);
+        assert!(missing.text.contains("llm.claude_bin"));
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("claude");
+        std::fs::write(&fake, "#!/bin/sh\necho '9.9.9 (Claude Code)'\n").unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let found = probe_claude(&fake).await;
+        assert_eq!(found.level, Level::Ok);
+        assert!(found.text.contains("9.9.9") && found.text.contains("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
 
     #[tokio::test]
     async fn probe_reports_installed_and_missing_programs() {

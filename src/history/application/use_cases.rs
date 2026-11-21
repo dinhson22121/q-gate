@@ -12,12 +12,10 @@ use crate::history::domain::{
 pub const DEFAULT_PAGE_SIZE: u32 = 50;
 pub const MAX_PAGE_SIZE: u32 = 200;
 pub const RECURRING_WINDOW_DAYS: i64 = 90;
-/// Most recent runs considered for one ticket.
 pub const MAX_TICKET_RUNS: u32 = 200;
 const SHORT_PERIOD_DAYS: i64 = 7;
 const LONG_PERIOD_DAYS: i64 = 30;
 
-/// Persist a finished (or failed) review run.
 pub struct RecordRun {
     repository: Arc<dyn RunRepository>,
 }
@@ -55,7 +53,6 @@ impl ListRuns {
         Self { repository }
     }
 
-    /// `limit` defaults to [`DEFAULT_PAGE_SIZE`] and is clamped to 1..=[`MAX_PAGE_SIZE`].
     pub fn execute(
         &self,
         repo: Option<String>,
@@ -79,7 +76,6 @@ impl ListRuns {
     }
 }
 
-/// The newest runs with their full reports, newest first (e.g. to replay a gate policy over them).
 pub struct RecentRuns {
     repository: Arc<dyn RunRepository>,
 }
@@ -89,7 +85,6 @@ impl RecentRuns {
         Self { repository }
     }
 
-    /// `limit` is clamped to 1..=[`MAX_PAGE_SIZE`].
     pub fn execute(&self, limit: u32) -> Result<Vec<StoredRun>, HistoryError> {
         self.repository.list(&RunFilter { limit: limit.clamp(1, MAX_PAGE_SIZE), ..RunFilter::default() })
     }
@@ -138,7 +133,6 @@ impl DashboardSummary {
     }
 }
 
-/// Recurring findings over the last [`RECURRING_WINDOW_DAYS`] days.
 pub struct RecurringIssues {
     repository: Arc<dyn RunRepository>,
 }
@@ -154,8 +148,6 @@ impl RecurringIssues {
     }
 }
 
-/// Every run concerning a ticket (its own key, or as parent Story of a reviewed Sub-task) and the
-/// latest status of each of its acceptance criteria.
 pub struct TicketHistory {
     repository: Arc<dyn RunRepository>,
 }
@@ -185,7 +177,6 @@ mod tests {
     use crate::history::domain::fixtures::{at, finding, live_run, report_view, stored};
     use crate::review::application::{Category, CriterionStatus, Severity};
 
-    /// In-memory port double; records the last filter it was asked for.
     #[derive(Default)]
     struct FakeRepo {
         runs: Vec<StoredRun>,

@@ -1,5 +1,3 @@
-//! Which rules apply to a change.
-
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::rulebook::Rule;
@@ -19,7 +17,6 @@ fn globset(patterns: &[String]) -> Option<GlobSet> {
     builder.build().ok()
 }
 
-/// Whether the rule's scope covers any of `paths`. No (valid) globs means the rule applies everywhere.
 pub fn rule_applies(rule: &Rule, paths: &[&str]) -> bool {
     match globset(&rule.scope_globs) {
         None => true,
@@ -27,7 +24,6 @@ pub fn rule_applies(rule: &Rule, paths: &[&str]) -> bool {
     }
 }
 
-/// Usable rules (see [`Rule::is_usable`]) whose scope matches a changed path, in rulebook order.
 pub fn select_rules<'a>(rules: &'a [Rule], paths: &[&str], use_inferred_rules: bool) -> Vec<&'a Rule> {
     rules.iter().filter(|r| r.is_usable(use_inferred_rules) && rule_applies(r, paths)).collect()
 }

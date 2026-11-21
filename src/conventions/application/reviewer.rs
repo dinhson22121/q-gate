@@ -1,5 +1,3 @@
-//! `RulebookReviewer`: checks one change against the repository's current rulebook.
-
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -21,8 +19,6 @@ pub struct RulebookReviewer {
 }
 
 impl RulebookReviewer {
-    /// `use_inferred_rules`: also check rules nobody has approved yet (reported with `approved = false`).
-    /// `refresh_days`: rebuild a rulebook older than this even if no rule source changed.
     pub fn with_service(service: Arc<RulebookService>, use_inferred_rules: bool, refresh_days: u32) -> Self {
         Self { service, use_inferred_rules, refresh_days }
     }
@@ -52,7 +48,6 @@ impl RulebookReviewer {
     }
 }
 
-/// Keeps violations of selected rules whose evidence is verbatim new code; fills title and approval.
 fn ground_violations(
     rulebook: &Rulebook,
     selected: &[&str],

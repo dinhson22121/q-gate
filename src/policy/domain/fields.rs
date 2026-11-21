@@ -1,23 +1,15 @@
-//! Which server settings the Policy assistant may change, and which changes need an extra confirmation.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::json::leaf_paths;
 
-/// Why a change needs the user's separate, explicit confirmation before it is applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Sensitivity {
-    /// Decides where code, tickets or credentials are sent.
     Endpoint,
-    /// Chooses a program qgate runs with Jira credentials.
     McpCommand,
-    /// Running repository-controlled `[[checks]]` commands.
     RepoChecks,
-    /// Review results are posted to this URL.
     Webhook,
-    /// Fewer problems would block a commit.
     GateLoosening,
 }
 
@@ -33,18 +25,14 @@ impl Sensitivity {
     }
 }
 
-/// How the assistant may treat one settings path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldAccess {
     Settable(Option<Sensitivity>),
-    /// Endpoints and commands: only an administrator sets them (environment / qgate.env), never over HTTP.
     AdminOnly,
-    /// Credentials are never set through the assistant (use the Settings page).
     Credential,
     NotAllowed,
 }
 
-/// Exact paths the assistant may change, with the confirmation they need.
 const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
     ("agents.enabled", None),
     ("agents.model", None),
@@ -76,21 +64,15 @@ const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
     ("watch.run_repo_checks", Some(Sensitivity::RepoChecks)),
 ];
 
-/// Where code, tickets or credentials go, or which program runs with them: admin-only (the settings use
-/// cases refuse them too). `jira.mcp.env_passthrough` is admin-only as well but classified as a credential.
-/// `Sensitivity::Endpoint` / `McpCommand` stay for proposals stored before this rule.
 const ADMIN_ONLY_FIELDS: &[&str] =
-    &["llm.base_url", "jira.base_url", "jira.mcp.command", "figma.api_base_url", "figma.mcp_url"];
+    &["llm.claude_bin", "llm.timeout_secs", "jira.base_url", "jira.mcp.command", "figma.api_base_url", "figma.mcp_url"];
 
-/// May be turned off by the assistant, never on (admin-only: `QGATE_RUN_REPO_CHECKS`).
 pub const RUN_REPO_CHECKS_FIELD: &str = "watch.run_repo_checks";
 pub const ADMIN_ONLY_REASON: &str =
     "admin-only: set via environment (qgate.env) and restart qgate; it cannot be changed over HTTP";
 
-/// Every existing leaf under these sections is settable (review-file output).
 const SETTABLE_SECTIONS: &[&str] = &["output."];
 
-/// Path fragments that name credentials or pass them on.
 const CREDENTIAL_MARKERS: &[&str] =
     &["secret", "token", "password", "api_key", "apikey", "credential", "env_passthrough", "private_key"];
 
@@ -113,7 +95,6 @@ pub fn classify(path: &str) -> FieldAccess {
     FieldAccess::NotAllowed
 }
 
-/// The settable leaf paths present in `settings`, for the model's context.
 pub fn settable_paths(settings: &Value) -> Vec<String> {
     leaf_paths(settings).into_iter().filter(|p| matches!(classify(p), FieldAccess::Settable(_))).collect()
 }
@@ -127,12 +108,12 @@ mod tests {
     #[test]
     fn classifies_paths_by_allow_list() {
         assert_eq!(classify("agents.tests.on_fail"), FieldAccess::Settable(None));
-        assert_eq!(classify("llm.base_url"), FieldAccess::AdminOnly);
+        assert_eq!(classify("llm.claude_bin"), FieldAccess::AdminOnly);
         assert_eq!(classify("jira.mcp.command"), FieldAccess::AdminOnly);
         assert_eq!(classify("figma.mcp_url"), FieldAccess::AdminOnly);
         assert_eq!(classify("watch.run_repo_checks"), FieldAccess::Settable(Some(Sensitivity::RepoChecks)));
         assert_eq!(classify("output.formats"), FieldAccess::Settable(None));
-        assert_eq!(classify("secrets.anthropic_api_key"), FieldAccess::Credential);
+        assert_eq!(classify("secrets.jira_api_token"), FieldAccess::Credential);
         assert_eq!(classify("jira.mcp.env_passthrough"), FieldAccess::Credential);
         assert_eq!(classify("figma.token"), FieldAccess::Credential);
         assert_eq!(classify("dashboard.allowed_hosts"), FieldAccess::NotAllowed);

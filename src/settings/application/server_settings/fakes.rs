@@ -1,5 +1,3 @@
-//! In-memory fakes of the settings ports, for unit tests.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

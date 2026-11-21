@@ -1,5 +1,3 @@
-//! Wires the policy context ("Policy assistant", `/policy`) to the live settings, rulebook and history.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -7,11 +5,10 @@ use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use serde_json::Value;
 
-use super::agents::{apply_agent_policy, claude_config};
+use super::agents::{apply_agent_policy, effort_name};
 use super::pipeline::{AppContext, HISTORY_DB_FILE};
 use crate::conventions::application::RulebookService;
 use crate::history::application::RunRepository;
-use crate::llm::{Budget, ClaudeClient};
 use crate::policy::application::{
     GatePolicySource, PolicyDeps, PolicyError, PolicyModel, PolicyPrompt, PolicyService, RepoGate,
 };
@@ -20,10 +17,9 @@ use crate::policy::infrastructure::{
     ClaudePolicyModel, HistoryUseCases, RulebookUseCases, SettingsUseCases, SqliteProposalStore,
 };
 use crate::review::application::GatePolicy;
-use crate::settings::application::{CredentialName, ServerConfig, SettingsDeps};
-use crate::settings::infrastructure::{load_config, resolve_credential};
+use crate::settings::application::{ServerConfig, SettingsDeps};
+use crate::settings::infrastructure::load_config;
 
-/// The policy service on the shared settings dependencies (one write lock with the settings page).
 pub fn policy_service(
     context: Arc<AppContext>,
     settings: Arc<SettingsDeps>,
@@ -43,8 +39,6 @@ pub fn policy_service(
     })))
 }
 
-/// `PolicyModel` that builds a Claude client from the live settings for every call, so the page works
-/// before an API key is configured and picks up a key set later on the Settings page.
 struct LivePolicyModel {
     context: Arc<AppContext>,
 }
@@ -52,16 +46,11 @@ struct LivePolicyModel {
 impl LivePolicyModel {
     fn model(&self) -> Result<ClaudePolicyModel, PolicyError> {
         let server = self.context.server();
-        let key = resolve_credential(CredentialName::AnthropicApiKey, self.context.store.as_ref())
-            .map_err(|e| PolicyError::ModelUnavailable(e.to_string()))?
-            .ok_or_else(|| PolicyError::ModelUnavailable("no Anthropic API key configured".into()))?;
-        let client = ClaudeClient::new(
-            key.expose().to_string(),
-            claude_config(&server),
-            Budget::new(server.agents.budget_usd_per_review),
-        )
-        .map_err(|e| PolicyError::ModelUnavailable(e.to_string()))?;
-        Ok(ClaudePolicyModel::new(Arc::new(client)))
+        let model = self
+            .context
+            .structured_model(&server.agents.model, effort_name(&server))
+            .map_err(|e| PolicyError::ModelUnavailable(e.to_string()))?;
+        Ok(ClaudePolicyModel::new(model))
     }
 }
 
@@ -71,7 +60,6 @@ impl PolicyModel for LivePolicyModel {
     }
 }
 
-/// Reads a repository's working-tree `.qgate.toml` (read-only); defaults when it is missing or invalid.
 struct RepoGates;
 
 impl GatePolicySource for RepoGates {
@@ -96,28 +84,25 @@ impl GatePolicySource for RepoGates {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
     use crate::history::infrastructure::SqliteRunRepository;
+    use crate::llm::{FakeModel, StructuredModel};
     use crate::policy::domain::{ApprovalRequest, ProposalStatus};
     use crate::review::application::Severity;
-    use crate::settings::application::{ServerLlmConfig, store_secret};
+    use crate::settings::application::EnvLookup;
     use crate::settings::infrastructure::{AppPaths, FileStore, SqliteServerConfigStore};
 
-    fn context(dir: &Path, base_url: &str, with_key: bool) -> Arc<AppContext> {
+    fn context(dir: &Path, model: Option<Arc<dyn StructuredModel>>, env: EnvLookup) -> Arc<AppContext> {
         let store = FileStore::new(dir.join("config/credentials.toml"));
-        if with_key {
-            store_secret(CredentialName::AnthropicApiKey, "sk-ant-test", &store).unwrap();
-        }
-        let server = ServerConfig { llm: ServerLlmConfig { base_url: base_url.into() }, ..ServerConfig::default() };
+        let server = ServerConfig::default();
         Arc::new(AppContext {
             paths: AppPaths::with_dirs(dir.join("config"), dir.join("data")),
             server: Arc::new(std::sync::RwLock::new(server)),
             store: Arc::new(store),
             settings_store: Arc::new(SqliteServerConfigStore::open(dir.join("data/qgate.db")).unwrap()),
-            env: Arc::new(|_: &str| None),
+            env,
+            model_override: model,
         })
     }
 
@@ -129,21 +114,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_model_proposes_with_the_configured_key_and_approval_writes_a_settings_version() {
-        let mock = MockServer::start().await;
+    async fn live_model_proposes_and_approval_writes_a_settings_version() {
         let answer = json!({
             "summary": "Block on failing generated tests",
             "settings_changes": [{"path": "agents.tests.on_fail", "value_json": "\"block\"", "reason": "asked"}],
             "rule_changes": [], "gate_changes": [], "check_suggestions": [], "unsupported": []
         });
-        let reply = ResponseTemplate::new(200).set_body_json(json!({
-            "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5",
-            "content": [{"type": "text", "text": answer.to_string()}], "stop_reason": "end_turn", "stop_details": null,
-            "usage": {"input_tokens": 10, "output_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-        }));
-        Mock::given(method("POST")).and(path("/v1/messages")).respond_with(reply).expect(1).mount(&mock).await;
         let dir = tempfile::tempdir().unwrap();
-        let context = context(dir.path(), &mock.uri(), true);
+        let fake: Arc<dyn StructuredModel> = Arc::new(FakeModel::answering(answer));
+        let context = context(dir.path(), Some(fake), Arc::new(|_: &str| None));
         let service = service(context.clone());
         let view = service.propose("Failing generated tests must block.", None).await.unwrap();
         assert_eq!(view.proposal.content.settings[0].path, "agents.tests.on_fail");
@@ -156,14 +135,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn without_an_api_key_propose_reports_model_unavailable() {
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() || std::env::var("ANTHROPIC_API_KEY_FILE").is_ok() {
-            return; // a developer key in the environment would be used instead
-        }
+    async fn a_missing_claude_binary_is_reported_as_a_model_error() {
         let dir = tempfile::tempdir().unwrap();
-        let service = service(context(dir.path(), "https://api.anthropic.com", false));
+        let context = context(dir.path(), None, Arc::new(|_: &str| None));
+        context.server.write().unwrap().llm.claude_bin = "/definitely/missing/claude".into();
+        let service = service(context);
         let result = service.propose("x", None).await;
-        assert!(matches!(result, Err(PolicyError::ModelUnavailable(m)) if m.contains("API key")));
+        assert!(matches!(result, Err(PolicyError::Model(ref m)) if m.contains("cannot start")), "{result:?}");
     }
 
     #[test]

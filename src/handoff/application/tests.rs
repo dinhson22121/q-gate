@@ -9,7 +9,6 @@ use crate::handoff::infrastructure::FsReviewFileSink;
 use crate::review::application::ReviewReport;
 use crate::settings::application::{OUTPUT_PLACEHOLDERS, OutputConfig, OutputFormat};
 
-/// In-memory sink; `fail_writes` makes every write fail.
 #[derive(Default)]
 struct MemorySink {
     files: Mutex<BTreeMap<String, (Vec<u8>, SystemTime)>>,
@@ -81,7 +80,6 @@ const DIR: &str = "shop-api/feature-SHOP-7-pay";
 const RULES_MD: &str = "shop-api/qgate-rules.md";
 const RULES_STATE: &str = "shop-api/.qgate-rules.json";
 
-/// The default config without the rules file, for tests about the per-commit files.
 fn no_rules() -> OutputConfig {
     OutputConfig { rules_enabled: false, ..OutputConfig::default() }
 }
@@ -168,7 +166,6 @@ fn current_run_is_kept_even_with_an_older_timestamp() {
     let sink = Arc::new(MemorySink::default());
     sink.put(&format!("{DIR}/aaaaaaa.md"), 0);
     let config = OutputConfig { keep_last: 1, write_latest: false, ..no_rules() };
-    // Pretend the clock went backwards: the existing file looks newer than the one we write.
     sink.files.lock().unwrap().get_mut(&format!("{DIR}/aaaaaaa.md")).unwrap().1 =
         SystemTime::UNIX_EPOCH + Duration::from_secs(9_000_000);
     let outcome = export(&sink, &config, &failing_report());
@@ -247,7 +244,6 @@ fn rules_are_merged_across_runs_and_only_new_ones_are_listed() {
     let rules = sink.text(RULES_MD);
     assert!(rules.contains("seen 1× (last `3f9c2ab`, 2026-11-20)"), "{rules}");
 
-    // The next commit hits the same rules: counted, but nothing new to add.
     let mut later = meta();
     later.commit = "bbbbbbb1".repeat(5);
     let report = failing_report();
@@ -296,7 +292,6 @@ fn rules_are_skipped_when_disabled_or_when_the_run_has_none() {
 #[test]
 fn pruning_never_deletes_the_rules_files() {
     let sink = Arc::new(MemorySink::default());
-    // A rules file name that looks like a generated per-commit file in the same folder.
     let config = OutputConfig {
         path_template: "{repo}/{sha7}.md".into(),
         keep_last: 1,
@@ -354,7 +349,6 @@ fn html_is_pruned_independently_of_markdown_and_rules_files() {
     for (index, sha) in ["aaaaaaa", "bbbbbbb", "ccccccc"].iter().enumerate() {
         sink.put(&format!("{DIR}/{sha}.md"), 10 + index as u64);
     }
-    // Only the two oldest runs have an html copy.
     sink.put(&format!("{DIR}/bbbbbbb.html"), 11);
     sink.put(&format!("{DIR}/ccccccc.html"), 12);
     sink.put("shop-api/qgate-rules.md", 100);

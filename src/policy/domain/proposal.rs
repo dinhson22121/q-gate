@@ -1,6 +1,3 @@
-//! A policy proposal: what the model suggested (`ProposalDraft`, untrusted), what survived validation
-//! (`ProposalContent`), and the persisted record with its lifecycle (`Proposal`).
-
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,16 +8,12 @@ use super::json::{get, same_kind};
 use crate::review::application::GatePolicy;
 
 pub const MAX_DESCRIPTION_CHARS: usize = 8_000;
-/// Items kept per list of a proposal; more are dropped (and reported).
 pub const MAX_ITEMS: usize = 20;
 const MAX_TITLE_CHARS: usize = 160;
 const MAX_TEXT_CHARS: usize = 2_000;
 const MAX_GLOBS: usize = 10;
 const MAX_CHECK_TIMEOUT_SECS: u64 = 6 * 60 * 60;
-/// Proposals older than this can no longer be approved.
 pub const PROPOSAL_TTL_HOURS: i64 = 24;
-
-// ---- What the model returns (untrusted; every field is re-validated) ----
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -30,7 +23,6 @@ pub struct ProposalDraft {
     pub rule_changes: Vec<DraftRule>,
     pub gate_changes: Vec<DraftGate>,
     pub check_suggestions: Vec<DraftCheck>,
-    /// Parts of the description that cannot be automated.
     pub unsupported: Vec<String>,
 }
 
@@ -38,7 +30,6 @@ pub struct ProposalDraft {
 #[serde(default)]
 pub struct DraftSetting {
     pub path: String,
-    /// The new value as JSON text (`"block"`, `true`, `["copy"]`).
     pub value_json: String,
     pub reason: String,
 }
@@ -55,7 +46,6 @@ pub enum RuleAction {
 #[serde(default)]
 pub struct DraftRule {
     pub action: RuleAction,
-    /// The edited rule's id; empty for `add`.
     pub rule_id: String,
     pub title: String,
     pub description: String,
@@ -81,12 +71,9 @@ pub struct DraftCheck {
     pub reason: String,
 }
 
-// ---- Validated content ----
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SettingChange {
     pub path: String,
-    /// Current effective value (the webhook URL is never shown: `null`).
     pub old: Value,
     pub new: Value,
     pub reason: String,
@@ -100,7 +87,6 @@ impl SettingChange {
     }
 }
 
-/// An existing rule the model may edit, as shown to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExistingRule {
     pub id: String,
@@ -113,7 +99,6 @@ pub struct ExistingRule {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleChange {
     pub action: RuleAction,
-    /// For an edit: the rule's id and title when the proposal was made (approval refuses if it changed).
     pub replaces: Option<(String, String)>,
     pub title: String,
     pub description: String,
@@ -141,7 +126,6 @@ pub struct CheckSuggestion {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RejectedItem {
-    /// `setting`, `rule`, `gate` or `check`.
     pub kind: String,
     pub subject: String,
     pub reason: String,
@@ -170,17 +154,12 @@ impl ProposalContent {
     }
 }
 
-/// What a draft is validated against.
 pub struct ProposalContext<'a> {
-    /// Effective server settings as JSON, the webhook URL masked as "".
     pub settings: &'a Value,
-    /// Fields set by environment variables (cannot change here).
     pub locked: &'a [String],
     pub restart_required: &'a [String],
-    /// The repository the proposal is for, if one was chosen.
     pub repo: Option<&'a str>,
     pub rules: &'a [ExistingRule],
-    /// The repository's current gate (`.qgate.toml`), when a repository was chosen.
     pub repo_gate: Option<&'a GatePolicy>,
     pub existing_checks: &'a [String],
 }
@@ -197,7 +176,6 @@ fn parse_json(raw: &str) -> Result<Value, String> {
     serde_json::from_str(raw.trim()).map_err(|_| "the value is not valid JSON".to_string())
 }
 
-/// Validates the model's draft. Never fails: anything unusable becomes a [`RejectedItem`] with the reason.
 pub fn validate_draft(draft: &ProposalDraft, ctx: &ProposalContext<'_>) -> ProposalContent {
     let mut rejected = Vec::new();
     let settings = validate_settings(&draft.settings_changes, ctx, &mut rejected);
@@ -260,7 +238,6 @@ fn validate_settings(
     out
 }
 
-/// `Ok(None)`: the value is already in effect (nothing to do).
 fn validate_setting(
     path: &str,
     draft: &DraftSetting,
@@ -287,7 +264,6 @@ fn validate_setting(
         return Err(format!("expected a value like {current}"));
     }
     let is_webhook = path == WEBHOOK_FIELD;
-    // The webhook URL carries a token and is write-only: it can be cleared here but only set on the Settings page.
     if is_webhook && new != "" {
         return Err(
             "webhook URLs contain a token: set them on the Settings page; the assistant can only clear one".into()
@@ -425,8 +401,6 @@ fn validate_checks(
     out
 }
 
-// ---- Lifecycle ----
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProposalStatus {
@@ -449,7 +423,6 @@ impl ProposalStatus {
     }
 }
 
-/// Status to give rules added on approval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuleApproval {
@@ -457,29 +430,23 @@ pub enum RuleApproval {
     Proposed,
 }
 
-/// What happened when a proposal was approved.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplyOutcome {
-    /// The settings version written, if settings changed.
     pub settings_version: Option<i64>,
     pub settings_applied: Vec<String>,
     pub restart_required: Vec<String>,
     pub rules_written: Vec<String>,
-    /// Steps that failed after others were applied.
     pub errors: Vec<String>,
 }
 
-/// A stored proposal.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Proposal {
-    /// 0 before it is stored.
     pub id: i64,
     pub status: ProposalStatus,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub description: String,
     pub repo: Option<String>,
-    /// Settings version the proposal was validated against; approval requires it to still be current.
     pub settings_version: i64,
     pub draft: ProposalDraft,
     pub content: ProposalContent,
@@ -514,18 +481,13 @@ impl Proposal {
     }
 }
 
-/// The user's choice on the preview page.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ApprovalRequest {
-    /// Indexes into `content.settings`.
     pub settings: Vec<usize>,
-    /// Indexes into `content.rules` with the status each gets.
     pub rules: Vec<(usize, RuleApproval)>,
-    /// The user ticked the separate confirmation for sensitive changes.
     pub confirm_sensitive: bool,
 }
 
-/// Why a proposal cannot be approved as asked.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApprovalError {
     #[error("this proposal is {0}; only a draft can be approved")]
@@ -544,7 +506,6 @@ pub enum ApprovalError {
     NeedsConfirmation(String),
 }
 
-/// The selected changes, checked and ready to apply.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApprovalPlan {
     pub settings: Vec<SettingChange>,

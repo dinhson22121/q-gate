@@ -1,5 +1,3 @@
-//! Settings adapters: config files, user directories and credential stores.
-
 pub mod config_file;
 pub mod fallback_store;
 pub mod file_store;
@@ -25,8 +23,6 @@ pub use templates::{CONFIG_TEMPLATE, SERVER_CONFIG_TEMPLATE};
 use crate::settings::application::credentials::{self, CredentialError, CredentialStore};
 use crate::settings::domain::credentials::{CredentialName, Secret};
 
-/// The platform's preferred store: OS keychain (falling back to the credentials file) on
-/// macOS/Windows, the credentials file elsewhere (Linux, containers).
 pub fn default_store(paths: &AppPaths) -> Box<dyn CredentialStore> {
     let file = FileStore::new(paths.credentials_file());
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -39,7 +35,6 @@ pub fn default_store(paths: &AppPaths) -> Box<dyn CredentialStore> {
     }
 }
 
-/// [`credentials::resolve`] wired to the process environment and file system.
 pub fn resolve_credential(
     name: CredentialName,
     store: &dyn CredentialStore,
@@ -55,7 +50,6 @@ mod tests {
     fn resolve_credential_reads_the_store() {
         let dir = tempfile::tempdir().unwrap();
         let store = FileStore::new(dir.path().join("credentials.toml"));
-        // The process env may hold a real key; only assert the call succeeds without panicking.
         assert!(resolve_credential(CredentialName::JiraApiToken, &store).is_ok());
     }
 

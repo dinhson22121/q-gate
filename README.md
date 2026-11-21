@@ -47,7 +47,7 @@ findings and the gate; findings carry prevention rules into `qgate-rules.md` (se
 
 Requires Docker Desktop (macOS/Windows) or Docker Engine with the Compose plugin (Linux).
 
-1. **Configure:** `cp qgate.env.example qgate.env`, then set `ANTHROPIC_API_KEY` and `REPOS_PATH` (the folder
+1. **Configure:** `cp qgate.env.example qgate.env`, then set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token` on a machine logged in to your Claude subscription; see "Claude authentication" below) and `REPOS_PATH` (the folder
    that contains your git repositories, e.g. `/Users/me/code` or `C:/Users/me/code`).
 2. **Start:** `docker compose up -d`
    (the first start builds the image and installs Go + Java into a cache volume: a few minutes).
@@ -80,8 +80,8 @@ qgate has three layers of configuration:
 
 | File | Scope | Contents |
 |---|---|---|
-| `qgate.env` (from `qgate.env.example`) | Docker setup | API key, repo folder, port, toolchains, Jira credentials, webhook, base branch, runner limits/network, container uid/gid |
-| Settings page (<http://localhost:8080/settings>), stored in the `qgate-data` volume | Server | dashboard, repo scanning depth, poll interval, concurrency, base branch, Anthropic endpoint, Jira connection and defaults, agents, Figma, review files. Seeded once from `config/qgate.toml` |
+| `qgate.env` (from `qgate.env.example`) | Docker setup | Claude subscription token, repo folder, port, toolchains, Jira credentials, webhook, base branch, runner limits/network, container uid/gid |
+| Settings page (<http://localhost:8080/settings>), stored in the `qgate-data` volume | Server | dashboard, repo scanning depth, poll interval, concurrency, base branch, Claude CLI binary/timeout, Jira connection and defaults, agents, Figma, review files. Seeded once from `config/qgate.toml` |
 | `.qgate.toml` in each repository | Repository | model, effort, gate policy, base branch, ignored paths, checks (`[[checks]]`), Jira `enabled`/`ac_field`/`key_pattern_projects` |
 
 **Server settings live in qgate's database** (`/data/qgate.db`, tables `server_settings` and
@@ -91,13 +91,13 @@ every save is kept as a new version (who/when/which fields), and the History sec
 last 20 versions (a rollback is saved as a new version too).
 
 Environment variables win over the stored settings: `QGATE_BIND`, `QGATE_REPOS_ROOT`, `QGATE_WEBHOOK_URL`,
-`QGATE_LLM_BASE_URL`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `QGATE_JIRA_ENABLED`, `QGATE_OUTPUT_DIR`,
+`QGATE_CLAUDE_BIN`, `QGATE_CLI_TIMEOUT_SECS`, `JIRA_BASE_URL`, `JIRA_EMAIL`, `QGATE_JIRA_ENABLED`, `QGATE_OUTPUT_DIR`,
 `QGATE_JIRA_MCP_COMMAND` (space-separated), `QGATE_JIRA_MCP_ENV_PASSTHROUGH` (comma list), `QGATE_FIGMA_API_BASE_URL`,
 `QGATE_FIGMA_MCP_URL`, `QGATE_RUN_REPO_CHECKS`, `QGATE_WATCH_BASE_BRANCH`. The Settings page shows those fields
 locked ("set by QGATE_…"); env values are never written to the database.
 
 **Admin-only settings** are never editable over HTTP (Settings page or Policy assistant), because any process
-that can reach the dashboard could otherwise send the API key elsewhere or run a command: `llm.base_url`,
+that can reach the dashboard could otherwise run another program with your Claude credentials or send secrets elsewhere: `llm.claude_bin`, `llm.timeout_secs`,
 `jira.base_url`, `jira.mcp.command`, `jira.mcp.env_passthrough`, `figma.api_base_url`, `figma.mcp_url`, setting
 `notify.webhook_url`, `watch.base_branch` and turning `watch.run_repo_checks` on. Set them with the environment variables above in
 `qgate.env` (or in `config/qgate.toml` before the first start) and restart qgate. Clearing the webhook and turning
@@ -107,7 +107,7 @@ listen address, allowed hosts, repository folders, scan depth, poll interval, re
 review-file folder need
 `docker compose restart qgate` (the page tells you after saving).
 
-Secrets (Anthropic API key, Jira API token, Figma token) are **not** stored in the settings database: they come
+Secrets (Jira API token, Figma token; the Claude token is only read from the environment) are **not** stored in the settings database: they come
 from the environment variable, its `*_FILE` variant, or the credential store (0600 file in the config dir, or the
 OS keychain natively). The Settings page can set or remove a stored secret (write-only, never shown again) unless
 it comes from the environment. The webhook URL contains a token, so the page only shows whether one is configured.
@@ -270,20 +270,46 @@ website open in your browser cannot change them. They also need the dashboard se
 that only logged-in pages carry, so a process that can reach the port (e.g. test code in the runner container via
 `host.docker.internal`) gets neither data nor write access without the login token.
 
+## Claude authentication and usage limits
+
+qgate does not use the Anthropic API (no API key, no per-token bill). Every agent runs the Claude Code CLI
+(`claude -p`) installed in the `qgate` image (pinned release, SHA-256 verified; `QGATE_CLAUDE_VERSION` build arg) on
+your Claude subscription (Max/Pro). The `qgate-runner` image is built from a separate Docker target and contains
+neither `claude` nor any token. Authenticate the `qgate` container one of these ways:
+
+1. **`CLAUDE_CODE_OAUTH_TOKEN` (preferred for automation).** On a machine where you are logged in run
+   `claude setup-token` and put the token in `qgate.env` (or a Docker secret via `CLAUDE_CODE_OAUTH_TOKEN_FILE`).
+2. **Log in inside the container:** `docker compose exec qgate claude login`; the login is stored in the
+   `qgate-data` volume and survives restarts.
+3. **Mount the host's `~/.claude` read-only** (example in `docker-compose.override.example.yml`). This hands your
+   own Claude Code credentials, settings and history to the container, and on macOS the login lives in the
+   Keychain (not in that folder), so prefer option 1 or 2.
+
+`qgate doctor` (inside the container) checks that the CLI is installed. `llm.claude_bin` / `QGATE_CLAUDE_BIN` and
+`llm.timeout_secs` / `QGATE_CLI_TIMEOUT_SECS` (admin-only) choose the binary and the time limit of one call.
+
+**Usage limits.** Reviews draw on your subscription's usage. At the start of every review qgate sends one tiny
+probe; if the limit is reached the review is **not run at all** and ends as an *error* (never a pass or a fail):
+"qgate: not running - Claude usage limit reached, waiting for session reset (resets ...)". The same applies if a
+limit is hit mid-review (the review aborts rather than passing with skipped work), and if the CLI is missing or
+not logged in. Re-run the review after the reset. The remaining quota cannot be read, so qgate only logs a
+best-effort estimate ("estimated ~N input tokens for this review") in `docker compose logs qgate`.
+
 ## Security notes
 
-- **Secrets:** `qgate.env` contains your API keys. Never commit it (add `qgate.env` to `.gitignore`), and make it
-  private: `chmod 600 qgate.env`. Better still, use a Docker secret: put the key in `secrets/anthropic_api_key`
-  (`chmod 600`), enable the `secrets:` block in `docker-compose.override.example.yml`, clear `ANTHROPIC_API_KEY`
-  and set `ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key`. `JIRA_API_TOKEN_FILE` and `FIGMA_TOKEN_FILE`
-  work the same way.
-- **Code leaves your machine:** diffs and relevant file contents are sent to the Anthropic API for review (and
+- **Secrets:** `qgate.env` contains your Claude subscription token and other credentials. Never commit it (add
+  `qgate.env` to `.gitignore`), and make it private: `chmod 600 qgate.env`. Better still, use a Docker secret: put the
+  token in `secrets/claude_oauth_token` (`chmod 600`), enable the `secrets:` block in
+  `docker-compose.override.example.yml`, clear `CLAUDE_CODE_OAUTH_TOKEN` and set
+  `CLAUDE_CODE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth_token`. `JIRA_API_TOKEN_FILE` and `FIGMA_TOKEN_FILE`
+  work the same way. The Claude token (like everything in `qgate.env`) is never passed to `qgate-runner`.
+- **Code leaves your machine:** diffs and relevant file contents are sent to Claude (through the Claude Code CLI on your subscription) for review (and
   ticket keys to your Jira site). Exclude sensitive paths with `review.ignore` in `.qgate.toml`.
 - **Trust boundary:** a repository's `.qgate.toml` is controlled by anyone who can push a commit.
   - It may choose the model, effort, gate policy, ignored paths, Jira `ac_field`/`key_pattern_projects` and checks.
-  - It can never choose endpoints or commands that receive credentials: `[llm] base_url`, `[jira] base_url`,
+  - It can never choose endpoints or commands that receive credentials: `[llm] claude_bin`, `[jira] base_url`,
     `email`, `provider` and `[jira.mcp]` are server settings only (Settings page); a `.qgate.toml` setting them
-    fails to load. HTTP redirects from the Anthropic and Jira APIs are never followed.
+    fails to load. HTTP redirects from the Jira API are never followed.
   - `[[checks]]` and the generated tests execute repository code (tests, linters, build scripts). In Docker they
     run in the separate `qgate-runner` container: no secrets, no access to qgate's database, config, review
     files or your repositories (only a per-commit snapshot; each test scenario gets its own), read-only

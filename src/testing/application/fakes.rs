@@ -1,5 +1,3 @@
-//! Test doubles for the testing ports: a scripted tool loop and a canned test runner.
-
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -16,7 +14,6 @@ use futures::future::BoxFuture;
 
 use super::ports::{ScenarioSnapshot, ScenarioSnapshots, TestRunner, ToolLoop};
 
-/// Plays fixed tool calls against the handler, like Claude would, and records what it saw.
 #[derive(Default)]
 pub struct ScriptedLoop {
     pub steps: Vec<(String, Value)>,
@@ -66,7 +63,6 @@ impl ToolLoop for ScriptedLoop {
     }
 }
 
-/// Returns queued runs in order (exit 0 once the queue is empty) and records each command.
 #[derive(Default)]
 pub struct FakeRunner {
     pub queue: Mutex<VecDeque<RawRun>>,
@@ -98,8 +94,6 @@ pub const GO_ASSERTION_OUTPUT: &str = "--- FAIL: TestQgateS1 (0.00s)\n    qgate_
 pub const GO_BUILD_OUTPUT: &str =
     "# example.com/m/calc\ncalc/qgate_s1_test.go:6:9: undefined: Sum\nFAIL [build failed]";
 
-/// Copies a fixture directory into a fresh temp dir per scenario (like a per-scenario export), or
-/// fails when the fixture does not exist.
 pub struct CopySnapshots {
     pub source: PathBuf,
     pub created: Mutex<Vec<PathBuf>>,

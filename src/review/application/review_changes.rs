@@ -1,5 +1,3 @@
-//! Use case: review a set of code changes and decide whether they pass the gate.
-
 use futures::future::BoxFuture;
 use futures::{StreamExt, stream};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -29,9 +27,6 @@ pub struct ReviewSettings {
     pub guidelines: String,
     pub gate: GatePolicy,
     pub checks: Vec<CheckSpec>,
-    /// When false (ticket in progress, e.g. a `[WIP]` tip commit), unmet acceptance criteria are
-    /// shown as progress but do not block the gate: `fail_on_unmet_criteria` is treated as false
-    /// for this run only, without mutating the stored policy.
     pub block_acceptance: bool,
 }
 
@@ -61,7 +56,6 @@ pub enum ReviewError {
     InvalidIgnorePattern { pattern: String, reason: String },
 }
 
-/// Called before the reviewer runs, so the interface can show progress.
 pub trait ReviewProgress: Sync {
     fn started(&self, files: usize, batches: usize);
 }
@@ -130,8 +124,6 @@ where
         Ok(Self { source, reviewer, checks, settings, ignore })
     }
 
-    /// The gate for this run: a ticket in progress relaxes `fail_on_unmet_criteria` to false, so
-    /// acceptance criteria are reported as progress without blocking. The stored policy is unchanged.
     fn effective_gate(&self) -> GatePolicy {
         if self.settings.block_acceptance {
             self.settings.gate.clone()
@@ -140,8 +132,6 @@ where
         }
     }
 
-    /// Runs checks, defect review and (when `requirements` is given) the acceptance-criteria
-    /// assessment concurrently, verifies every claim against the code and applies the gate.
     pub async fn execute(
         &self,
         requirements: Option<Requirements>,
@@ -150,8 +140,6 @@ where
         self.execute_with_agents(requirements, None, None, progress).await
     }
 
-    /// Like [`execute`](Self::execute), plus the ticket agents (tests, architecture, design) when
-    /// `agents` is given. Agent results are verified and go through the same gate.
     pub async fn execute_with_agents(
         &self,
         requirements: Option<Requirements>,
@@ -221,7 +209,6 @@ where
         })
     }
 
-    /// Nothing reviewable: no model call and no checks; criteria cannot be judged.
     fn empty_report(&self, skipped: Vec<SkippedFile>, requirements: Option<Requirements>) -> ReviewReport {
         let requirements_report = requirements.map(|r| verify_assessments(&ChangeSet::default(), r, Vec::new()));
         let gate = self.effective_gate().decide(GateInput {
@@ -246,7 +233,6 @@ where
         }
     }
 
-    /// A non-fatal assessment failure leaves every criterion `Unclear` with the reason.
     async fn assess(
         &self,
         files: &[FileChange],
@@ -302,7 +288,6 @@ where
         }
     }
 
-    /// Reviews one batch; a truncated response is retried as two smaller batches.
     fn review_batch<'a>(&'a self, files: &'a [FileChange]) -> BoxFuture<'a, BatchOutcome> {
         Box::pin(async move {
             let input = ReviewInput { files, guidelines: &self.settings.guidelines };
@@ -351,7 +336,6 @@ mod tests {
         }
     }
 
-    /// Returns scripted results; records the batch sizes it was called with.
     struct FakeReviewer {
         script: Mutex<Vec<Result<ReviewerOutput, ReviewerError>>>,
         calls: Mutex<Vec<usize>>,
@@ -506,6 +490,14 @@ mod tests {
         assert!(matches!(result, Err(ReviewError::Reviewer(ReviewerError::Rejected(_)))));
     }
 
+    #[tokio::test]
+    async fn a_usage_limit_stop_aborts_instead_of_passing_with_skipped_work() {
+        let limited = ReviewerError::RateLimited("Claude usage limit reached (resets 5pm): x".into());
+        let reviewer = FakeReviewer::new(vec![Err(limited)]);
+        let result = use_case(vec![go_file("a.go")], reviewer, sequential()).execute(None, &NoProgress).await;
+        assert!(matches!(result, Err(ReviewError::Reviewer(ReviewerError::RateLimited(_)))));
+    }
+
     #[test]
     fn invalid_ignore_pattern_is_reported() {
         let settings = ReviewSettings { ignore_patterns: vec!["a[".into()], ..ReviewSettings::default() };
@@ -520,7 +512,6 @@ mod tests {
 
     #[tokio::test]
     async fn ticket_in_progress_unmet_criterion_does_not_block_gate() {
-        // A verified not-met criterion would normally block; in progress it only shows as progress.
         use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus};
         struct NotMetReviewer;
         impl CodeReviewer for NotMetReviewer {

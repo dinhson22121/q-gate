@@ -62,7 +62,20 @@ if [[ "${1:-}" == "qgate" && "${2:-}" == "runner" ]]; then
   exec "$@"
 fi
 
+# Docker secret for the Claude subscription token: CLAUDE_CODE_OAUTH_TOKEN_FILE=/run/secrets/<name>.
+load_claude_token() {
+  local file="${CLAUDE_CODE_OAUTH_TOKEN_FILE:-}"
+  [[ -n "$file" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || return 0
+  if [[ -r "$file" ]]; then
+    CLAUDE_CODE_OAUTH_TOKEN="$(tr -d '[:space:]' <"$file")"
+    export CLAUDE_CODE_OAUTH_TOKEN
+  else
+    log "WARNING: CLAUDE_CODE_OAUTH_TOKEN_FILE=$file is not readable; Claude auth will fall back to ~/.claude"
+  fi
+}
+
 prepare_data_dir
+load_claude_token
 seed_config
 install_toolchains
 # shellcheck source=docker/toolchains/env.sh

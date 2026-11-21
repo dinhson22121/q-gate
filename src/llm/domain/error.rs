@@ -1,6 +1,5 @@
-//! Errors of a Claude call. Messages never contain the API key.
+pub const USAGE_LIMIT_PREFIX: &str = "Claude usage limit reached";
 
-/// Why a Claude call failed.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LlmError {
     #[error("Claude stopped at max_tokens before finishing its answer")]
@@ -9,10 +8,12 @@ pub enum LlmError {
     Refused { category: Option<String> },
     #[error("invalid response from Claude: {0}")]
     InvalidResponse(String),
-    #[error("Claude API unavailable: {0}")]
+    #[error("Claude unavailable: {0}")]
     Unavailable(String),
-    #[error("Claude API rejected the request: {0}")]
+    #[error("Claude rejected the request: {0}")]
     Rejected(String),
-    #[error("LLM budget of ${limit_usd:.2} exhausted")]
-    BudgetExceeded { limit_usd: f64 },
+    #[error("not supported by this model backend: {0}")]
+    Unsupported(String),
+    #[error("Claude usage limit reached{}: {message}", resets_at.as_deref().map(|t| format!(" (resets {t})")).unwrap_or_default())]
+    RateLimited { resets_at: Option<String>, message: String },
 }

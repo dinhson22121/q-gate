@@ -1,6 +1,3 @@
-//! `BuildRulebook`: read rule sources and a code sample, ask the model once, keep only grounded
-//! rules, carry human decisions over, and store the result.
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -18,12 +15,10 @@ use crate::conventions::domain::sources::{
     RULE_SOURCE_CAP, SourceFile, fingerprint, layout, relevant_content, rule_source_paths,
 };
 
-/// The repository key a rulebook is stored under.
 pub fn repo_key(root: &Path) -> String {
     root.to_string_lossy().into_owned()
 }
 
-/// Runs blocking work (filesystem, SQLite) on the blocking pool.
 pub(crate) async fn blocking<T, F>(work: F) -> Result<T, ConventionsError>
 where
     T: Send + 'static,
@@ -34,7 +29,6 @@ where
         .map_err(|err| ConventionsError::Storage(format!("background worker failed: {err}")))?
 }
 
-/// What defines a repository's rules right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RepoSnapshot {
     pub paths: Vec<String>,
@@ -98,14 +92,12 @@ impl BuildRulebook {
         Self { model, reader, store }
     }
 
-    /// Fingerprint of the repository's rule sources and layout as they are now.
     pub async fn current_fingerprint(&self, root: &Path) -> Result<String, ConventionsError> {
         let reader = self.reader.clone();
         let root = root.to_path_buf();
         blocking(move || read_snapshot(reader.as_ref(), &root).map(|s| s.fingerprint)).await
     }
 
-    /// Builds and stores a new rulebook for the repository at `root` (read-only).
     pub async fn execute(&self, root: &Path) -> Result<Rulebook, ConventionsError> {
         let reader = self.reader.clone();
         let owned_root = root.to_path_buf();
@@ -117,9 +109,7 @@ impl BuildRulebook {
         let repo = repo_key(root);
         let store = self.store.clone();
         blocking(move || {
-            // Decisions and team rules are read after the model call so ones made during the build are kept.
             let decisions = store.decisions(&repo)?;
-            // Team rules come first: they are never derived again and must not be cut by the rule cap.
             let mut drafts = store.load(&repo)?.map(|existing| existing.team_drafts()).unwrap_or_default();
             drafts.extend(validated);
             let rulebook = Rulebook::assemble(repo, fingerprint, drafts, &decisions, Utc::now());

@@ -1,8 +1,5 @@
-//! A string credential whose `Debug` output is redacted.
-
 use std::fmt;
 
-/// API token or similar credential. Never printed: `Debug` shows `Secret(***)`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 
@@ -11,7 +8,6 @@ impl Secret {
         Self(value.into())
     }
 
-    /// The raw value, for building the request that needs it.
     pub fn expose(&self) -> &str {
         &self.0
     }
