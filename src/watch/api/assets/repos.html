@@ -90,13 +90,26 @@ pre.quote { font-family: var(--mono); font-size: 12.5px; background: var(--code-
 .banner { padding: 8px 12px; border-radius: var(--radius); margin: 0; }
 .empty { color: var(--muted); font-style: italic; }
 p { margin: 4px 0; }
-@media (max-width: 480px) { header.top, main { padding-left: 12px; padding-right: 12px; } }
-ul.list { list-style: none; margin: 0; padding: 0; }
-ul.list li { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--border); }
-ul.list li:first-child { border-top: 0; }
-ul.list .name { flex: 1 1 auto; min-width: 0; }
-.crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0 0 8px; }
-.crumbs button { padding: 2px 8px; }
+@media (max-width: 480px) { main { padding-left: 12px; padding-right: 12px; } }
+.hint { color: var(--subtle); font-size: 13px; margin: -2px 0 14px; }
+.hint .tag-git { margin: 0 2px; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 0 0 14px; font-size: 13px; }
+.crumbs .crumb { padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--muted); cursor: pointer; }
+.crumbs .crumb:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text); }
+.crumbs .crumb.current { color: var(--text); font-weight: 600; cursor: default; background: var(--surface-2); }
+.crumbs .sep { color: var(--subtle); }
+.cwd-git { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: space-between; background: var(--selected); border: 1px solid var(--accent); border-radius: var(--radius); padding: 11px 14px; margin: 0 0 14px; }
+.cwd-git .txt { min-width: 0; flex: 1 1 260px; }
+.browse-list { list-style: none; margin: 0; padding: 0; }
+.browse-list li { display: flex; gap: 10px; align-items: center; border-top: 1px solid var(--border); }
+.browse-list li:first-child { border-top: 0; }
+.row-open { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 8px; border: 0; background: none; color: var(--text); text-align: left; font-weight: 500; border-radius: var(--radius); }
+.row-open:hover { background: var(--surface-hover); }
+.row-open .chev { flex: 0 0 auto; color: var(--subtle); font-size: 15px; width: 14px; text-align: center; }
+.row-open .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; padding-right: 4px; }
+.imp-name { flex: 1 1 auto; min-width: 0; padding: 10px 8px; }
+.tag-git { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; line-height: 18px; background: var(--info-bg); color: var(--info-fg); }
 </style>
 </head>
 <body>
@@ -113,15 +126,17 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
 <div class="content">
 <header class="page-head"><h1>Repositories</h1><p class="sub">Import and manage the repositories qgate watches.</p></header>
 <main>
-  <p class="banner info">qgate reviews the repository you import from the folder below. You can import several repositories; each is watched and can be removed on its own.</p>
   <div id="error" class="banner bad" role="alert" hidden></div>
   <section class="panel">
     <h2>Imported repositories</h2>
+    <p class="hint">qgate only watches and reviews the repositories listed here. Remove one to stop watching it.</p>
     <div id="imported"><p class="empty">Loading…</p></div>
   </section>
   <section class="panel">
-    <h2>Browse <span class="muted mono" id="base"></span></h2>
-    <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+    <h2>Browse &amp; import</h2>
+    <p class="hint">Navigate to a folder on this machine, then import the Git repository you want qgate to review. A folder tagged <span class="tag-git">git</span> is a repository you can import.</p>
+    <nav class="crumbs" id="crumbs" aria-label="Current folder"></nav>
+    <div id="cwd-git"></div>
     <div id="folders"><p class="empty">Loading…</p></div>
   </section>
 </main>
@@ -150,7 +165,10 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
     }
     return node;
   }
-  const replace = (node, ...children) => { node.replaceChildren(); node.append(...children.flat()); };
+  const replace = (node, ...children) => {
+    node.replaceChildren();
+    node.append(...children.flat(Infinity).filter((c) => c !== null && c !== undefined && c !== false));
+  };
   const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
 
   function showError(message) {
@@ -174,44 +192,67 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
 
   function renderImported() {
     const rows = state.imported.map((repo) => el("li", {},
-      el("span", { class: "name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, repo.path)),
-      !repo.exists && chip("missing on disk", "warn"),
-      el("button", { type: "button", onclick: guarded(async () => {
-        await call("DELETE", "/api/repos", { path: repo.path });
-        await loadImported();
-      }) }, "Remove")));
-    replace($("imported"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No repository imported yet."));
+      el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, repo.path)),
+      el("span", { class: "row-actions" },
+        !repo.exists && chip("missing on disk", "warn"),
+        el("button", { type: "button", onclick: guarded(async () => {
+          await call("DELETE", "/api/repos", { path: repo.path });
+          await loadImported();
+        }) }, "Remove"))));
+    replace($("imported"), rows.length
+      ? el("ul", { class: "browse-list" }, rows)
+      : el("p", { class: "empty" }, "No repository imported yet — browse below and import one."));
   }
 
   function renderListing(listing) {
     state.path = listing.path;
-    $("base").textContent = listing.base;
-    replace($("crumbs"), listing.crumbs.map((crumb, i) => [
-      i > 0 && el("span", { class: "muted" }, "/"),
-      el("button", { type: "button", onclick: guarded(() => browse(crumb.path)) }, crumb.name),
-    ]));
+    const last = listing.crumbs.length - 1;
+    replace($("crumbs"), listing.crumbs.map((crumb, i) => {
+      const current = i === last;
+      return [
+        i > 0 && el("span", { class: "sep" }, "/"),
+        el("button", {
+          type: "button",
+          class: current ? "crumb current" : "crumb",
+          disabled: current,
+          onclick: current ? undefined : guarded(() => browse(crumb.path)),
+        }, crumb.name || "root"),
+      ];
+    }));
+
+    if (listing.is_git_root) {
+      replace($("cwd-git"), el("div", { class: "cwd-git" },
+        el("span", { class: "txt" }, el("strong", {}, "This folder is a Git repository. "), el("span", { class: "mono muted" }, listing.path)),
+        importButton(listing.path)));
+    } else {
+      replace($("cwd-git"));
+    }
+
     const rows = [];
     if (listing.parent) {
-      rows.push(el("li", {}, el("button", { type: "button", onclick: guarded(() => browse(listing.parent)) }, ".. (up)")));
+      rows.push(el("li", {}, el("button", { type: "button", class: "row-open", onclick: guarded(() => browse(listing.parent)) },
+        el("span", { class: "chev" }, "↑"), el("span", { class: "nm" }, "Up one level"))));
     }
-    if (listing.is_git_root) rows.push(el("li", {}, el("span", { class: "name muted" }, "This folder is a git repository."), importButton(listing.path)));
     for (const entry of listing.entries) {
       rows.push(el("li", {},
-        el("button", { type: "button", class: "name", onclick: guarded(() => browse(entry.path)) }, entry.name + "/"),
-        entry.is_git_root && chip("git", "info"),
-        entry.is_git_root && importButton(entry.path)));
+        el("button", { type: "button", class: "row-open", onclick: guarded(() => browse(entry.path)) },
+          el("span", { class: "chev" }, "›"), el("span", { class: "nm" }, entry.name)),
+        el("span", { class: "row-actions" },
+          entry.is_git_root && el("span", { class: "tag-git" }, "git"),
+          entry.is_git_root && importButton(entry.path))));
     }
-    if (listing.truncated) rows.push(el("li", {}, el("span", { class: "muted" }, "More folders exist than are shown.")));
-    replace($("folders"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No subfolders."));
+    if (listing.truncated) rows.push(el("li", {}, el("span", { class: "imp-name muted" }, "More folders exist than are shown.")));
+    replace($("folders"), rows.length ? el("ul", { class: "browse-list" }, rows) : el("p", { class: "empty" }, "No subfolders here."));
   }
 
   const isImported = (path) => state.imported.some((repo) => repo.path === path);
 
   function importButton(path) {
-    return el("button", { type: "button", class: "primary", disabled: isImported(path), onclick: guarded(async () => {
+    const imported = isImported(path);
+    return el("button", { type: "button", class: imported ? "" : "primary", disabled: imported, onclick: guarded(async () => {
       await call("POST", "/api/repos/import", { path });
       await loadImported();
-    }) }, isImported(path) ? "Imported" : "Import");
+    }) }, imported ? "Imported ✓" : "Import");
   }
 
   async function browse(path) {

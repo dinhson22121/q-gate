@@ -61,7 +61,8 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   .brand { padding: 2px 10px 2px 2px; }
   .page-head { padding: 14px 16px; }
 }
-nav.toc { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; margin-top: 10px; }
+nav.toc { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; margin-top: 12px; }
+nav.toc .nav-link { font-size: 13px; padding: 5px 10px; }
 input, select, textarea, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
 input[type="text"], input[type="number"], input[type="password"], select, textarea { width: 100%; max-width: 100%; }
 textarea { font-family: var(--mono); font-size: 12.5px; min-height: 64px; resize: vertical; }
@@ -543,7 +544,7 @@ p { margin: 4px 0; }
   }
 
   function render(history) {
-    replace($("toc"), SECTIONS.map((s) => el("a", { href: "#s-" + s.id }, s.title)), el("a", { href: "#s-history" }, "History"));
+    replace($("toc"), SECTIONS.map((s) => el("a", { class: "nav-link", href: "#s-" + s.id }, s.title)), el("a", { class: "nav-link", href: "#s-history" }, "History"));
     replace($("sections"), el("div", { style: "display: grid; gap: 16px" }, SECTIONS.map(renderSection), renderHistory(history)));
     showRestart(state.view.pending_restart, false);
     wirePreview();
