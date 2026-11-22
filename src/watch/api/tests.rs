@@ -17,12 +17,20 @@ use crate::watch::infrastructure::git::test_support::init_repo;
 use crate::watch::infrastructure::toml_registry::TomlRepoRegistry;
 use crate::web::{REQUEST_HEADER, TOKEN_HEADER};
 
+struct RecordingScanner(Arc<std::sync::Mutex<Vec<PathBuf>>>);
+impl crate::watch::application::ports::ManualScanner for RecordingScanner {
+    fn scan(&self, repo_root: PathBuf) {
+        self.0.lock().unwrap().push(repo_root);
+    }
+}
+
 struct TestServer {
     addr: SocketAddr,
     client: reqwest::Client,
     registry: TomlRepoRegistry,
     base: PathBuf,
     token: ApiToken,
+    scans: Arc<std::sync::Mutex<Vec<PathBuf>>>,
     _stop: oneshot::Sender<()>,
     _dir: tempfile::TempDir,
 }
@@ -40,7 +48,11 @@ impl TestServer {
         let runs = Arc::new(SqliteRunRepository::open(dir.path().join("qgate.db")).unwrap());
         let hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
         let token = ApiToken::generate().unwrap();
-        let extra = router(ReposApiState::new(registry.clone(), base.clone(), hosts.clone(), token.clone()));
+        let scans = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let extra = router(
+            ReposApiState::new(registry.clone(), base.clone(), hosts.clone(), token.clone())
+                .with_scanner(Arc::new(RecordingScanner(scans.clone()))),
+        );
         let dashboard = DashboardState::with_allowed_hosts(runs, hosts);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -48,7 +60,7 @@ impl TestServer {
         tokio::spawn(serve_on_with(listener, dashboard, extra, async {
             let _ = stopped.await;
         }));
-        Self { addr, client: reqwest::Client::new(), registry, base, token, _stop: stop, _dir: dir }
+        Self { addr, client: reqwest::Client::new(), registry, base, token, scans, _stop: stop, _dir: dir }
     }
 
     fn url(&self, path: &str) -> String {
@@ -217,4 +229,21 @@ async fn mutations_require_header_host_and_token() {
     assert_eq!(send(hostile("origin", "http://evil.example")).await, StatusCode::FORBIDDEN);
     assert_eq!(send(hostile("host", "evil.example")).await, StatusCode::FORBIDDEN);
     assert!(server.registry.list().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn scan_triggers_only_for_imported_repos() {
+    let server = TestServer::start().await;
+    let path = server.base.join("one");
+    let body = json!({ "path": path });
+
+    let (status, _) = TestServer::send(server.mutate(reqwest::Method::POST, "/api/repos/scan", body.clone())).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a repository that is not imported cannot be scanned");
+    assert!(server.scans.lock().unwrap().is_empty());
+
+    server.import("one").await;
+    let (status, reply) = TestServer::send(server.mutate(reqwest::Method::POST, "/api/repos/scan", body)).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(reply["started"], json!(true));
+    assert_eq!(server.scans.lock().unwrap().as_slice(), &[path]);
 }

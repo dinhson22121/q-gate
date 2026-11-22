@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axum::Json;
 use axum::body::{Body, Bytes};
@@ -130,6 +130,19 @@ pub(super) async fn import<R: RepoRegistry, B: RepoBrowser>(
     let path = parse_path(&body)?;
     let repo = state.service.import(&path).await.map_err(manage_error)?;
     Ok((StatusCode::CREATED, Json(json!({ "repo": repo_json(&repo) }))).into_response())
+}
+
+pub(super) async fn scan<R: RepoRegistry, B: RepoBrowser>(
+    State(state): State<ReposApiState<R, B>>,
+    body: Bytes,
+) -> ApiResult {
+    let path = parse_path(&body)?;
+    let repos = state.service.list().await.map_err(manage_error)?;
+    if !repos.iter().any(|r| r.path == Path::new(&path)) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "that repository is not imported"));
+    }
+    state.scanner.scan(PathBuf::from(&path));
+    Ok((StatusCode::ACCEPTED, Json(json!({ "started": true }))).into_response())
 }
 
 pub(super) async fn remove<R: RepoRegistry, B: RepoBrowser>(

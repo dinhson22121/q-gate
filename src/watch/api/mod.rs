@@ -9,7 +9,7 @@ use axum::middleware;
 use axum::routing::{get, post};
 
 use crate::watch::application::manage_repos::{ManageRepos, RepoBrowser};
-use crate::watch::application::ports::RepoRegistry;
+use crate::watch::application::ports::{ManualScanner, RepoRegistry};
 use crate::watch::infrastructure::fs_browser::FsRepoBrowser;
 use crate::web::{ApiToken, MutationGuard};
 
@@ -17,14 +17,20 @@ pub const REQUEST_HEADER_VALUE: &str = "repos";
 
 pub const MAX_BODY_BYTES: usize = 8 * 1024;
 
+struct NoopScanner;
+impl ManualScanner for NoopScanner {
+    fn scan(&self, _repo_root: PathBuf) {}
+}
+
 pub struct ReposApiState<R, B = FsRepoBrowser> {
     service: Arc<ManageRepos<R, B>>,
     guard: Arc<MutationGuard>,
+    scanner: Arc<dyn ManualScanner>,
 }
 
 impl<R, B> Clone for ReposApiState<R, B> {
     fn clone(&self) -> Self {
-        Self { service: self.service.clone(), guard: self.guard.clone() }
+        Self { service: self.service.clone(), guard: self.guard.clone(), scanner: self.scanner.clone() }
     }
 }
 
@@ -37,7 +43,12 @@ impl<R: RepoRegistry> ReposApiState<R> {
 impl<R: RepoRegistry, B: RepoBrowser> ReposApiState<R, B> {
     pub fn with_browser(registry: R, browser: B, allowed_hosts: Vec<String>, token: ApiToken) -> Self {
         let guard = Arc::new(MutationGuard::new(REQUEST_HEADER_VALUE, &allowed_hosts, token));
-        Self { service: Arc::new(ManageRepos::new(registry, browser)), guard }
+        Self { service: Arc::new(ManageRepos::new(registry, browser)), guard, scanner: Arc::new(NoopScanner) }
+    }
+
+    pub fn with_scanner(mut self, scanner: Arc<dyn ManualScanner>) -> Self {
+        self.scanner = scanner;
+        self
     }
 }
 
@@ -51,6 +62,7 @@ where
         .route("/api/repos", get(handlers::list::<R, B>).delete(handlers::remove::<R, B>))
         .route("/api/repos/browse", get(handlers::browse::<R, B>))
         .route("/api/repos/import", post(handlers::import::<R, B>))
+        .route("/api/repos/scan", post(handlers::scan::<R, B>))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::protect_mutations::<R, B>))
         .route_layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)

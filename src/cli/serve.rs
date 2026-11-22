@@ -13,7 +13,7 @@ use super::policy::policy_service;
 use crate::access::api::{AccessState, protect};
 use crate::conventions::{RulebookApiState, router as rulebook_router};
 use crate::history::api::{DashboardState, router_guarded, serve_router};
-use crate::history::application::Trigger;
+use crate::history::application::{RunRepository, Trigger};
 use crate::policy::{PolicyApiState, router as policy_router};
 use crate::redteam::api::{RedteamApiState, redteam_router};
 use crate::review::application::NoProgress;
@@ -22,7 +22,9 @@ use crate::review::infrastructure::snapshot::sweep_stale_snapshots;
 use crate::settings::api::{SettingsApiState, router as settings_router};
 use crate::settings::domain::ReposConfig;
 use crate::watch::api::{ReposApiState, router as repos_router};
-use crate::watch::application::ports::{CommitEvent, CommitReviewer, CommitVerdict, Notifier, WatchError};
+use crate::watch::application::ports::{
+    CommitEvent, CommitReviewer, CommitVerdict, ManualScanner, Notifier, WatchError,
+};
 use crate::watch::application::watch_commits::{WatchCommits, WatchConfig};
 use crate::watch::infrastructure::composite_registry::CompositeRegistry;
 use crate::watch::infrastructure::fs_browser::repos_root_from_env;
@@ -63,15 +65,20 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     let rulebooks = rulebook_service(context.clone())?;
     let policy = policy_service(context.clone(), settings_deps.clone(), rulebooks.clone(), history.clone())?;
     let redteam = redteam_service(context.clone())?;
+    let scanner: Arc<dyn ManualScanner> =
+        Arc::new(PipelineScanner { context: context.clone(), history: history.clone() });
     let token = ApiToken::generate().context("cannot generate the dashboard API token")?;
     let settings_page = settings_router(SettingsApiState::new(settings_deps, hosts.clone(), token.clone()))
         .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
-        .merge(repos_router(ReposApiState::new(
-            TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
-            repos_root_from_env(),
-            hosts.clone(),
-            token.clone(),
-        )))
+        .merge(repos_router(
+            ReposApiState::new(
+                TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
+                repos_root_from_env(),
+                hosts.clone(),
+                token.clone(),
+            )
+            .with_scanner(scanner),
+        ))
         .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
         .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
@@ -165,6 +172,62 @@ impl CommitReviewer for PipelineReviewer {
             run_id: outcome.run_id,
         })
     }
+}
+
+struct PipelineScanner {
+    context: Arc<AppContext>,
+    history: Arc<dyn RunRepository>,
+}
+
+impl ManualScanner for PipelineScanner {
+    fn scan(&self, repo_root: PathBuf) {
+        let context = self.context.clone();
+        let history = self.history.clone();
+        tokio::spawn(async move {
+            let target = resolve_manual_target(&repo_root, &context).await;
+            let request = ReviewRequest {
+                repo_root,
+                target,
+                trigger: Trigger::Manual,
+                explicit_ticket: None,
+                ticket_in_progress: false,
+            };
+            if let Err(e) = ReviewPipeline::new(context, Some(history)).run(&request, &NoProgress).await {
+                eprintln!("qgate: manual scan failed: {e:#}");
+            }
+        });
+    }
+}
+
+async fn resolve_manual_target(root: &Path, context: &AppContext) -> DiffTarget {
+    let head = git_rev(root, "HEAD").await;
+    let configured = context.server().watch.base_branch;
+    for candidate in [configured.as_str(), "origin/main", "origin/master"] {
+        if candidate.is_empty() {
+            continue;
+        }
+        if let Some(base) = git_rev(root, candidate).await
+            && head.as_deref() != Some(base.as_str())
+        {
+            return DiffTarget::Base(candidate.to_string());
+        }
+    }
+    DiffTarget::Commit(head.unwrap_or_else(|| "HEAD".into()))
+}
+
+async fn git_rev(root: &Path, rev: &str) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", rev])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!sha.is_empty()).then_some(sha)
 }
 
 fn review_target(event: &CommitEvent) -> DiffTarget {

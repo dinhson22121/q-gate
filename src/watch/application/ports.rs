@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use crate::watch::domain::freshness::ReflogHead;
 pub use crate::watch::domain::repo::{CommitEvent, CommitVerdict, WatchedRepo};
@@ -49,6 +49,10 @@ pub trait RepoInspector: Send + Sync + 'static {
 
 pub trait CommitReviewer: Send + Sync + 'static {
     fn review_commit(&self, event: &CommitEvent) -> impl Future<Output = Result<CommitVerdict, WatchError>> + Send;
+}
+
+pub trait ManualScanner: Send + Sync + 'static {
+    fn scan(&self, repo_root: PathBuf);
 }
 
 pub trait Notifier: Send + Sync + 'static {

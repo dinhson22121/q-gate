@@ -129,6 +129,7 @@ p { margin: 4px 0; }
 <header class="page-head"><h1>Repositories</h1><p class="sub">Import and manage the repositories qgate watches.</p></header>
 <main>
   <div id="error" class="banner bad" role="alert" hidden></div>
+  <div id="notice" class="banner info" role="status" hidden></div>
   <section class="panel">
     <h2>Imported repositories</h2>
     <p class="hint">qgate only watches and reviews the repositories listed here. Remove one to stop watching it.</p>
@@ -199,6 +200,11 @@ p { margin: 4px 0; }
     $("error").textContent = message || "";
   }
 
+  function showNotice(message) {
+    $("notice").hidden = !message;
+    $("notice").textContent = message || "";
+  }
+
   async function call(method, path, body) {
     const options = { method, credentials: "same-origin", headers: method === "GET" ? { Accept: "application/json" } : HEADERS };
     if (method !== "GET") options.body = JSON.stringify(body || {});
@@ -210,7 +216,7 @@ p { margin: 4px 0; }
   }
 
   const guarded = (fn) => async () => {
-    try { showError(""); await fn(); } catch (err) { showError(err.message); }
+    try { showError(""); showNotice(""); await fn(); } catch (err) { showError(err.message); }
   };
 
   function renderImported() {
@@ -218,6 +224,10 @@ p { margin: 4px 0; }
       el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, toHost(repo.path))),
       el("span", { class: "row-actions" },
         !repo.exists && chip("missing on disk", "warn"),
+        el("button", { type: "button", class: "primary", disabled: !repo.exists, onclick: guarded(async () => {
+          await call("POST", "/api/repos/scan", { path: repo.path });
+          showNotice("Scan started for " + repo.name + " — results appear on the Dashboard shortly.");
+        }) }, "Scan now"),
         el("button", { type: "button", onclick: guarded(async () => {
           await call("DELETE", "/api/repos", { path: repo.path });
           await loadImported();
