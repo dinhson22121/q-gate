@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::json;
 
+use super::super::env::CHILD_ENV_ALLOWLIST;
 use super::*;
 
 const SUCCESS: &str = include_str!("fixtures/structured_success.json");

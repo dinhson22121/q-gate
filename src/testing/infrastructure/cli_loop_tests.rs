@@ -246,3 +246,23 @@ async fn live_claude_calls_a_trivial_mcp_tool() {
     assert_eq!(handler.names(), ["ping"]);
     assert_eq!(outcome.stop, LoopStop::Finished);
 }
+
+#[tokio::test]
+async fn child_receives_only_the_allowlisted_environment() {
+    unsafe {
+        std::env::set_var("FIGMA_TOKEN", "figma-secret");
+        std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let bin = script(dir.path(), "env > child-env.txt");
+    let cli = loop_for(&bin, Duration::from_secs(5));
+
+    let mut child = cli.spawn(Vec::new(), dir.path()).unwrap();
+    child.wait().await.unwrap();
+
+    let seen = std::fs::read_to_string(dir.path().join("child-env.txt")).unwrap();
+    assert!(seen.contains("CLAUDE_CODE_OAUTH_TOKEN=oauth-token"));
+    assert!(seen.contains("PATH="));
+    assert!(!seen.contains("FIGMA_TOKEN"));
+    assert!(!seen.contains("CARGO_MANIFEST_DIR"));
+}

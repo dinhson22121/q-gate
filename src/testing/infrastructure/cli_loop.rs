@@ -15,7 +15,7 @@ use tokio::time::Instant;
 use super::mcp_bridge::{RunningServer, SERVER_NAME, ToolBridge, ToolCall};
 use crate::llm::{
     CliConfig, ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, MAX_OUTPUT_BYTES, SystemBlock, ToolHandler,
-    ToolSpec, Usage, envelope_consumption, exceeded_cap, read_capped,
+    ToolSpec, Usage, envelope_consumption, exceeded_cap, read_capped, scrub_child_env,
 };
 use crate::testing::application::ports::ToolLoop;
 
@@ -69,7 +69,9 @@ impl CliToolLoop {
     }
 
     fn spawn(&self, args: Vec<String>, cwd: &std::path::Path) -> Result<Child, LlmError> {
-        Command::new(&self.config.claude_bin)
+        let mut command = Command::new(&self.config.claude_bin);
+        scrub_child_env(&mut command);
+        command
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())

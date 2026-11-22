@@ -9,28 +9,13 @@ use tokio::process::Command;
 
 use super::bounded::{MAX_OUTPUT_BYTES, exceeded_cap, read_capped};
 use super::config::CliConfig;
+use super::env::scrub_child_env;
 use super::envelope::{Answer, Envelope, classify_failure};
 use crate::llm::{LlmError, Structured, StructuredModel};
 
 const CHARS_PER_TOKEN: usize = 4;
 const PROBE_PROMPT: &str = "ok";
 const PROBE_EFFORT: &str = "low";
-const CHILD_ENV_ALLOWLIST: [&str; 14] = [
-    "HOME",
-    "PATH",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "TMPDIR",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "CLAUDE_CONFIG_DIR",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "NO_PROXY",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "NODE_EXTRA_CA_CERTS",
-];
 const DENIED_TOOLS: &str = "Bash,Edit,Write,WebFetch,WebSearch";
 const SPAWN_RETRIES: u32 = 20;
 const SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
@@ -139,7 +124,8 @@ impl CliClient {
 
     async fn run(&self, args: Vec<String>, prompt: &str, cwd: Option<&Path>) -> Result<Answer, LlmError> {
         let mut command = Command::new(&self.config.claude_bin);
-        command.args(args).env_clear().envs(child_env());
+        command.args(args);
+        scrub_child_env(&mut command);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
@@ -189,10 +175,6 @@ async fn spawn_with_retry(command: &mut Command) -> std::io::Result<tokio::proce
             other => return other,
         }
     }
-}
-
-fn child_env() -> Vec<(&'static str, std::ffi::OsString)> {
-    CHILD_ENV_ALLOWLIST.iter().filter_map(|name| std::env::var_os(name).map(|value| (*name, value))).collect()
 }
 
 fn scoped_read_rule(dir: &Path) -> String {
