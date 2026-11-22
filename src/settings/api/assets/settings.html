@@ -323,6 +323,35 @@ p { margin: 4px 0; }
   const adminNote = (admin) => el("p", { class: "note muted" }, "Read-only here for security: set " + admin.env_var +
     " in qgate.env (or config/qgate.toml before the first start) and restart qgate.");
 
+  const secretFromEnv = (name) => {
+    const s = state.view.secrets.find((x) => x.name === name);
+    return Boolean(s) && (s.source === "env" || s.source === "env_file");
+  };
+  const blockEditable = (b) => {
+    if (b.path) return b.kind !== "readonly" && !isReadOnly(b.path, getPath(state.view.config, b.path));
+    if (b.preview) return !isReadOnly(b.preview, getPath(state.view.config, b.preview));
+    if (b.secret) return !secretFromEnv(b.secret);
+    if (b.webhook) return !lockOf("notify.webhook_url") && !adminOf("notify.webhook_url");
+    return null;
+  };
+  function visibleBlocks(section) {
+    const marks = section.blocks.map((b) => ({ b, e: blockEditable(b) }));
+    const anyField = marks.some((m) => m.e === true);
+    if (!anyField) return [];
+    const out = [];
+    for (let i = 0; i < marks.length; i++) {
+      const { b, e } = marks[i];
+      if (e === false) continue;
+      if (b.sub) {
+        let has = false;
+        for (let j = i + 1; j < marks.length && !marks[j].b.sub; j++) if (marks[j].e === true) { has = true; break; }
+        if (!has) continue;
+      }
+      out.push(b);
+    }
+    return out;
+  }
+
   function fieldShell(def, control, opts) {
     const lock = lockOf(def.path);
     const restart = needsRestart(def.path);
@@ -507,10 +536,12 @@ p { margin: 4px 0; }
   }
 
   function renderSection(section) {
+    const blocks = visibleBlocks(section);
+    if (!blocks.length) return null;
     const body = [];
     let grid = el("div", { class: "grid" });
     const flush = () => { if (grid.childNodes.length) body.push(grid); grid = el("div", { class: "grid" }); };
-    for (const block of section.blocks) {
+    for (const block of blocks) {
       if (block.sub) {
         flush();
         body.push(el("h3", { class: "sub" }, block.sub));
@@ -545,8 +576,9 @@ p { margin: 4px 0; }
   }
 
   function render(history) {
-    replace($("toc"), SECTIONS.map((s) => el("a", { class: "nav-link", href: "#s-" + s.id }, s.title)), el("a", { class: "nav-link", href: "#s-history" }, "History"));
-    replace($("sections"), el("div", { style: "display: grid; gap: 16px" }, SECTIONS.map(renderSection), renderHistory(history)));
+    const visible = SECTIONS.filter((s) => visibleBlocks(s).length);
+    replace($("toc"), visible.map((s) => el("a", { class: "nav-link", href: "#s-" + s.id }, s.title)), el("a", { class: "nav-link", href: "#s-history" }, "History"));
+    replace($("sections"), el("div", { style: "display: grid; gap: 16px" }, visible.map(renderSection), renderHistory(history)));
     showRestart(state.view.pending_restart, false);
     wirePreview();
   }
@@ -643,7 +675,10 @@ p { margin: 4px 0; }
     showError("");
     const config = structuredClone(state.view.config);
     try {
-      for (const def of FIELDS) setPath(config, def.path, readField(def, config));
+      for (const def of FIELDS) {
+        if (!document.querySelector('[data-field="' + def.path + '"]')) continue;
+        setPath(config, def.path, readField(def, config));
+      }
     } catch (err) {
       showFieldError(err.field, err.message);
       return;
