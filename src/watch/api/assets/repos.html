@@ -93,6 +93,8 @@ p { margin: 4px 0; }
 @media (max-width: 480px) { main { padding-left: 12px; padding-right: 12px; } }
 .hint { color: var(--subtle); font-size: 13px; margin: -2px 0 14px; }
 .hint .tag-git { margin: 0 2px; }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.jump input { flex: 1 1 260px; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
 .crumbs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 0 0 14px; font-size: 13px; }
 .crumbs .crumb { padding: 3px 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--muted); cursor: pointer; }
 .crumbs .crumb:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text); }
@@ -136,6 +138,11 @@ p { margin: 4px 0; }
     <h2>Browse &amp; import</h2>
     <p class="hint">Navigate to a folder on this machine, then import the Git repository you want qgate to review. A folder tagged <span class="tag-git">git</span> is a repository you can import.</p>
     <p class="hint" id="host-line" hidden>Folder on your machine (read-only): <span class="mono" id="host-root"></span></p>
+    <div class="jump">
+      <input id="jump-path" type="text" autocomplete="off" spellcheck="false" aria-label="Repository path to import">
+      <button type="button" id="jump-open">Open</button>
+      <button type="button" class="primary" id="jump-import">Import</button>
+    </div>
     <nav class="crumbs" id="crumbs" aria-label="Current folder"></nav>
     <div id="cwd-git"></div>
     <div id="folders"><p class="empty">Loading…</p></div>
@@ -159,6 +166,13 @@ p { margin: 4px 0; }
     return p;
   };
   const baseName = (p) => (p || "").split(/[\\/]/).filter(Boolean).pop() || p;
+  const fromHost = (p) => {
+    p = (p || "").trim();
+    if (!p) return "";
+    if (state.base && (p === state.base || p.startsWith(state.base + "/"))) return p;
+    if (state.hostBase && (p === state.hostBase || p.startsWith(state.hostBase + "/"))) return state.base + p.slice(state.hostBase.length);
+    return p;
+  };
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -219,6 +233,7 @@ p { margin: 4px 0; }
     state.hostBase = listing.host_base || listing.base;
     $("host-root").textContent = state.hostBase;
     $("host-line").hidden = false;
+    $("jump-path").placeholder = state.hostBase + "/my-repo";
     const last = listing.crumbs.length - 1;
     replace($("crumbs"), listing.crumbs.map((crumb, i) => {
       const current = i === last;
@@ -280,6 +295,18 @@ p { margin: 4px 0; }
     renderImported();
     if (state.path) await browse(state.path);
   }
+
+  $("jump-open").addEventListener("click", guarded(async () => {
+    const p = fromHost($("jump-path").value);
+    if (p) await browse(p);
+  }));
+  $("jump-import").addEventListener("click", guarded(async () => {
+    const p = fromHost($("jump-path").value);
+    if (!p) return;
+    await call("POST", "/api/repos/import", { path: p });
+    $("jump-path").value = "";
+    await loadImported();
+  }));
 
   guarded(async () => { await browse(""); await loadImported(); })();
 })();
