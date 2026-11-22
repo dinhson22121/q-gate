@@ -1,6 +1,6 @@
 use tokio::process::Command;
 
-pub(super) const CHILD_ENV_ALLOWLIST: [&str; 14] = [
+pub(super) const CHILD_ENV_ALLOWLIST: [&str; 15] = [
     "HOME",
     "PATH",
     "USER",
@@ -8,6 +8,7 @@ pub(super) const CHILD_ENV_ALLOWLIST: [&str; 14] = [
     "LC_ALL",
     "TMPDIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
     "CLAUDE_CONFIG_DIR",
     "HTTPS_PROXY",
     "HTTP_PROXY",

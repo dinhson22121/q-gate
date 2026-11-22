@@ -285,8 +285,14 @@ qgate does not use the Anthropic API (no API key, no per-token bill). Every agen
 your Claude subscription (Max/Pro). The `qgate-runner` image is built from a separate Docker target and contains
 neither `claude` nor any token. Authenticate the `qgate` container one of these ways:
 
-1. **`CLAUDE_CODE_OAUTH_TOKEN` (preferred for automation).** On a machine where you are logged in run
-   `claude setup-token` and put the token in `qgate.env` (or a Docker secret via `CLAUDE_CODE_OAUTH_TOKEN_FILE`).
+1. **`CLAUDE_CODE_OAUTH_TOKEN` (preferred for automation).** Get a long-lived subscription token:
+   1. On a machine with the `claude` CLI, logged in to your Claude Max/Pro account, run `claude setup-token`
+      in your **own terminal** (do not pipe it through anything that logs output — it prints a secret).
+   2. Complete the browser sign-in it opens; the terminal then prints a token starting with `sk-ant-oat01-`.
+   3. Paste it into `qgate.env`: `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...` (or use a Docker secret via
+      `CLAUDE_CODE_OAUTH_TOKEN_FILE`), then apply with `docker compose up -d`.
+   The token is long-lived. Verify it inside the container with `docker compose exec qgate claude -p "say OK"`
+   (a `401 OAuth access token is invalid` means it was mis-pasted or expired — regenerate it).
 2. **Log in inside the container:** `docker compose exec qgate claude login`; the login is stored in the
    `qgate-data` volume and survives restarts.
 3. **Mount the host's `~/.claude` read-only** (example in `docker-compose.override.example.yml`). This hands your

@@ -11,3 +11,5 @@ config/repos.toml
 # Review files written by qgate (REVIEWS_PATH default, native .qgate/reviews)
 reviews/
 .qgate/reviews/
+
+.claude/settings.local.json

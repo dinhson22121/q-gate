@@ -50,6 +50,7 @@ const MAX_GUIDELINE_BYTES: usize = 20 * 1024;
 const SHORT_SHA_LEN: usize = 7;
 const DEFAULT_DASHBOARD_PORT: u16 = 8080;
 const ENV_CLAUDE_OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+const ENV_ANTHROPIC_API_KEY: &str = "ANTHROPIC_API_KEY";
 
 pub struct AppContext {
     pub paths: AppPaths,
@@ -347,6 +348,10 @@ impl ReviewPipeline {
         let claude_token = (self.context.env)(ENV_CLAUDE_OAUTH_TOKEN).unwrap_or_default();
         if !claude_token.is_empty() {
             secrets.push(&claude_token);
+        }
+        let api_key = (self.context.env)(ENV_ANTHROPIC_API_KEY).unwrap_or_default();
+        if !api_key.is_empty() {
+            secrets.push(&api_key);
         }
         redact_report(report, &secrets);
     }
