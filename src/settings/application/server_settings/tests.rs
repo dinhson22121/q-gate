@@ -93,7 +93,7 @@ fn view_masks_webhook_and_lists_locks_and_secrets() {
     assert!(view.webhook_configured);
     assert_eq!(view.config.jira.email, "bot@acme.com");
     assert_eq!(view.locked, vec![LockedField { field: "jira.email", env_var: "JIRA_EMAIL" }]);
-    assert_eq!(view.admin_only.len(), 11);
+    assert_eq!(view.admin_only.len(), 13);
     assert!(view.admin_only.contains(&LockedField { field: "llm.claude_bin", env_var: "QGATE_CLAUDE_BIN" }));
     assert!(view.admin_only.contains(&LockedField { field: "watch.base_branch", env_var: "QGATE_WATCH_BASE_BRANCH" }));
     assert_eq!(view.restart_required_fields.len(), 9);

@@ -9,6 +9,7 @@ pub mod impact;
 pub mod llm;
 pub mod policy;
 pub mod quality;
+pub mod redteam;
 pub mod review;
 pub mod sandbox;
 pub mod settings;

@@ -1,7 +1,9 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 use globset::{Glob, GlobMatcher};
 
 use crate::testing::application::ports::{SearchHit, Workspace};
@@ -17,36 +19,55 @@ const SKIPPED_DIRS: &[&str] =
 #[derive(Debug, Clone)]
 pub struct SnapshotWorkspace {
     root: PathBuf,
+    dir: Arc<Dir>,
+}
+
+fn dir_path(rel: &str) -> &str {
+    if rel.is_empty() { "." } else { rel }
+}
+
+fn io_error(rel: &str, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::PermissionDenied && error.to_string().contains("outside") {
+        format!("'{rel}' resolves outside the repository")
+    } else {
+        format!("'{rel}': {error}")
+    }
+}
+
+fn join_rel(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() { name.to_string() } else { format!("{prefix}/{name}") }
 }
 
 impl SnapshotWorkspace {
-    fn resolve_existing(&self, rel: &str) -> Result<PathBuf, String> {
-        let rel = normalize_relative(rel).map_err(|e| e.to_string())?;
-        let canonical = self.root.join(&rel).canonicalize().map_err(|e| format!("'{rel}': {e}"))?;
-        if !canonical.starts_with(&self.root) {
-            return Err(format!("'{rel}' resolves outside the repository"));
-        }
-        Ok(canonical)
-    }
-
-    fn prepare_parent(&self, rel: &str) -> Result<PathBuf, String> {
-        let mut dir = self.root.clone();
+    fn prepare_parent(&self, rel: &str) -> Result<(Dir, String), String> {
         let parts: Vec<&str> = rel.split('/').collect();
         let (file, parents) = parts.split_last().ok_or("empty path")?;
+        let mut dir = self.dir.try_clone().map_err(|e| io_error(rel, &e))?;
         for part in parents {
-            dir.push(part);
-            match fs::symlink_metadata(&dir) {
+            match dir.symlink_metadata(part) {
                 Ok(meta) if meta.file_type().is_symlink() => return Err(format!("'{rel}': symlinked directory")),
                 Ok(meta) if meta.is_dir() => {}
                 Ok(_) => return Err(format!("'{rel}': a parent is not a directory")),
-                Err(_) => fs::create_dir(&dir).map_err(|e| format!("'{rel}': {e}"))?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    dir.create_dir(part).map_err(|e| io_error(rel, &e))?;
+                }
+                Err(e) => return Err(io_error(rel, &e)),
             }
+            dir = dir.open_dir(part).map_err(|e| io_error(rel, &e))?;
         }
-        Ok(dir.join(file))
+        Ok((dir, (*file).to_string()))
     }
 
-    fn walk(&self, dir: &Path, glob: Option<&GlobMatcher>, literal: &str, max: usize, hits: &mut Vec<SearchHit>) {
-        let Ok(entries) = fs::read_dir(dir) else {
+    fn walk(
+        &self,
+        dir: &Dir,
+        prefix: &str,
+        glob: Option<&GlobMatcher>,
+        literal: &str,
+        hits: &mut Vec<SearchHit>,
+        max: usize,
+    ) {
+        let Ok(entries) = dir.entries() else {
             return;
         };
         let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
@@ -56,41 +77,41 @@ impl SnapshotWorkspace {
                 return;
             }
             let Ok(kind) = entry.file_type() else { continue };
-            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel = join_rel(prefix, &name);
             if kind.is_dir() {
-                if !SKIPPED_DIRS.contains(&entry.file_name().to_string_lossy().as_ref()) {
-                    self.walk(&path, glob, literal, max, hits);
+                if SKIPPED_DIRS.contains(&name.as_str()) {
+                    continue;
                 }
-            } else if kind.is_file() {
-                self.search_file(&path, glob, literal, max, hits);
+                if let Ok(child) = dir.open_dir(&name) {
+                    self.walk(&child, &rel, glob, literal, hits, max);
+                }
+            } else if kind.is_file() && glob.is_none_or(|g| g.is_match(&rel)) {
+                Self::search_file(dir, &name, &rel, literal, hits, max);
             }
         }
     }
 
-    fn search_file(
-        &self,
-        path: &Path,
-        glob: Option<&GlobMatcher>,
-        literal: &str,
-        max: usize,
-        hits: &mut Vec<SearchHit>,
-    ) {
-        let Ok(rel) = path.strip_prefix(&self.root) else { return };
-        let rel = rel.to_string_lossy().replace('\\', "/");
-        if glob.is_some_and(|g| !g.is_match(&rel)) {
+    fn search_file(dir: &Dir, name: &str, rel: &str, literal: &str, hits: &mut Vec<SearchHit>, max: usize) {
+        let Ok(mut file) = dir.open(name) else { return };
+        if file.metadata().map_or(true, |m| m.len() > MAX_SEARCH_FILE_BYTES) {
             return;
         }
-        if fs::metadata(path).map_or(true, |m| m.len() > MAX_SEARCH_FILE_BYTES) {
+        let mut text = String::new();
+        if file.read_to_string(&mut text).is_err() {
             return;
         }
-        let Ok(text) = fs::read_to_string(path) else { return };
         for (index, line) in text.lines().enumerate() {
             if hits.len() >= max {
                 return;
             }
             if line.contains(literal) {
                 let text: String = line.trim().chars().take(MAX_HIT_CHARS).collect();
-                hits.push(SearchHit { file: rel.clone(), line: u32::try_from(index + 1).unwrap_or(u32::MAX), text });
+                hits.push(SearchHit {
+                    file: rel.to_string(),
+                    line: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                    text,
+                });
             }
         }
     }
@@ -98,7 +119,7 @@ impl SnapshotWorkspace {
 
 impl ProbeFs for SnapshotWorkspace {
     fn has_path(&self, rel: &str) -> bool {
-        normalize_relative(rel).is_ok_and(|rel| fs::symlink_metadata(self.root.join(rel)).is_ok())
+        normalize_relative(rel).is_ok_and(|rel| self.dir.symlink_metadata(dir_path(&rel)).is_ok())
     }
 
     fn entries(&self, rel: &str) -> Vec<String> {
@@ -112,7 +133,8 @@ impl Workspace for SnapshotWorkspace {
         if !root.is_dir() {
             return Err(format!("{} is not a directory", root.display()));
         }
-        Ok(Self { root })
+        let dir = Dir::open_ambient_dir(&root, ambient_authority()).map_err(|e| format!("{}: {e}", root.display()))?;
+        Ok(Self { root, dir: Arc::new(dir) })
     }
 
     fn root(&self) -> &Path {
@@ -120,8 +142,8 @@ impl Workspace for SnapshotWorkspace {
     }
 
     fn list_dir(&self, rel: &str) -> Result<Vec<String>, String> {
-        let dir = self.resolve_existing(rel)?;
-        let entries = fs::read_dir(&dir).map_err(|e| format!("'{rel}': {e}"))?;
+        let rel = normalize_relative(rel).map_err(|e| e.to_string())?;
+        let entries = self.dir.read_dir(dir_path(&rel)).map_err(|e| io_error(&rel, &e))?;
         let mut names: Vec<String> = entries
             .filter_map(Result::ok)
             .filter(|e| e.file_name() != ".git")
@@ -135,15 +157,18 @@ impl Workspace for SnapshotWorkspace {
     }
 
     fn read_text(&self, rel: &str) -> Result<String, String> {
-        let path = self.resolve_existing(rel)?;
-        let meta = fs::metadata(&path).map_err(|e| format!("'{rel}': {e}"))?;
+        let rel = normalize_relative(rel).map_err(|e| e.to_string())?;
+        let mut file = self.dir.open(dir_path(&rel)).map_err(|e| io_error(&rel, &e))?;
+        let meta = file.metadata().map_err(|e| io_error(&rel, &e))?;
         if !meta.is_file() {
             return Err(format!("'{rel}' is not a file"));
         }
         if meta.len() > MAX_FILE_BYTES {
             return Err(format!("'{rel}' is larger than 5 MB"));
         }
-        fs::read_to_string(&path).map_err(|e| format!("'{rel}': {e}"))
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(|e| io_error(&rel, &e))?;
+        Ok(text)
     }
 
     fn search(&self, literal: &str, glob: Option<&str>, max_hits: usize) -> Result<Vec<SearchHit>, String> {
@@ -151,7 +176,7 @@ impl Workspace for SnapshotWorkspace {
             .map(|g| Glob::new(g).map(|g| g.compile_matcher()).map_err(|e| format!("invalid glob: {e}")))
             .transpose()?;
         let mut hits = Vec::new();
-        self.walk(&self.root, matcher.as_ref(), literal, max_hits, &mut hits);
+        self.walk(&self.dir, "", matcher.as_ref(), literal, &mut hits, max_hits);
         Ok(hits)
     }
 
@@ -160,38 +185,39 @@ impl Workspace for SnapshotWorkspace {
         if rel.is_empty() {
             return Err("empty path".into());
         }
-        let path = self.prepare_parent(&rel)?;
+        let (parent, name) = self.prepare_parent(&rel)?;
         let mut options = OpenOptions::new();
         options.write(true);
         if create_new {
             options.create_new(true);
         } else {
-            match fs::symlink_metadata(&path) {
+            match parent.symlink_metadata(&name) {
                 Ok(meta) if meta.is_file() => {}
                 _ => return Err(format!("'{rel}' is not the test file written earlier")),
             }
             options.truncate(true);
         }
-        let mut file = no_follow(&mut options).open(&path).map_err(|e| format!("'{rel}': {e}"))?;
+        let mut file = parent.open_with(&name, no_follow(&mut options)).map_err(|e| io_error(&rel, &e))?;
         if !file.metadata().is_ok_and(|meta| meta.is_file()) {
             return Err(format!("'{rel}' is not a regular file"));
         }
-        file.write_all(content.as_bytes()).map_err(|e| format!("'{rel}': {e}"))
+        file.write_all(content.as_bytes()).map_err(|e| io_error(&rel, &e))
     }
 }
 
-fn no_follow(options: &mut OpenOptions) -> &mut OpenOptions {
+fn no_follow(options: &mut OpenOptions) -> &OpenOptions {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW)
+        use cap_std::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
     }
-    #[cfg(not(unix))]
     options
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn snapshot() -> (tempfile::TempDir, SnapshotWorkspace) {
@@ -276,10 +302,46 @@ mod tests {
 
         let mut options = OpenOptions::new();
         options.write(true).truncate(true);
+        let root = Dir::open_ambient_dir(dir.path(), ambient_authority()).unwrap();
 
-        assert!(no_follow(&mut options).open(&swapped).is_err(), "O_NOFOLLOW rejects the final symlink");
+        assert!(
+            root.open_with("calc/swapped_test.go", no_follow(&mut options)).is_err(),
+            "O_NOFOLLOW rejects the final symlink"
+        );
 
         assert_eq!(fs::read_to_string(&target).unwrap(), "PRECIOUS");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn intermediate_symlinked_directories_never_redirect_a_write() {
+        let (dir, ws) = snapshot();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("deep")).unwrap();
+        fs::write(outside.path().join("deep/victim.txt"), "PRECIOUS").unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("calc/hop")).unwrap();
+        std::os::unix::fs::symlink("../..", dir.path().join("calc/up")).unwrap();
+
+        for rel in ["calc/hop/deep/new_test.go", "calc/hop/deep/victim.txt", "calc/up/x/new_test.go"] {
+            for create_new in [true, false] {
+                assert!(ws.write_file(rel, "pwned", create_new).is_err(), "{rel} {create_new}");
+            }
+        }
+        assert!(ws.read_text("calc/hop/deep/victim.txt").unwrap_err().contains("outside"));
+        assert!(ws.list_dir("calc/hop").unwrap_err().contains("outside"));
+        assert_eq!(fs::read_to_string(outside.path().join("deep/victim.txt")).unwrap(), "PRECIOUS");
+        assert!(!outside.path().join("deep/new_test.go").exists());
+        assert!(!dir.path().join("../x").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn intermediate_symlink_to_a_directory_inside_the_snapshot_is_still_refused_for_writes() {
+        let (dir, ws) = snapshot();
+        std::os::unix::fs::symlink("calc", dir.path().join("alias")).unwrap();
+        assert!(ws.write_file("alias/new_test.go", "x", true).unwrap_err().contains("symlinked"));
+        assert!(!dir.path().join("calc/new_test.go").exists());
+        assert!(ws.read_text("alias/calc.go").unwrap().contains("func Add"));
     }
 
     #[cfg(unix)]

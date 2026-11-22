@@ -39,6 +39,7 @@ fn manage_error(err: ManageError) -> ApiError {
     match err {
         ManageError::OutsideBase => ApiError::new(StatusCode::FORBIDDEN, &err.to_string()),
         ManageError::NotFound(_) => ApiError::new(StatusCode::NOT_FOUND, &err.to_string()),
+        ManageError::TooManyRepos(_) => ApiError::new(StatusCode::CONFLICT, &err.to_string()),
         ManageError::NotADirectory(_) | ManageError::NotGitRoot(_) | ManageError::Watch(WatchError::InvalidRepo(_)) => {
             ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, &err.to_string())
         }

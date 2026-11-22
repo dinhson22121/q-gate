@@ -11,6 +11,7 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::history::api::{DashboardState, serve_on_with};
 use crate::history::infrastructure::SqliteRunRepository;
+use crate::watch::application::manage_repos::MAX_IMPORTED_REPOS;
 use crate::watch::application::ports::RepoSource;
 use crate::watch::infrastructure::git::test_support::init_repo;
 use crate::watch::infrastructure::toml_registry::TomlRepoRegistry;
@@ -129,24 +130,32 @@ async fn browse_refuses_to_leave_the_base() {
 }
 
 #[tokio::test]
-async fn import_persists_lists_and_replaces_the_single_repo() {
+async fn import_is_additive_idempotent_and_removal_keeps_the_others() {
     let server = TestServer::start().await;
     let (status, body) = server.import("one").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["repo"]["name"], "one");
-
     let (status, body) = server.import("two").await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["repo"]["name"], "two");
+    assert_eq!(server.import("one").await.0, StatusCode::CREATED);
 
     let (status, body) = server.get_json("/api/repos").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["max_repos"], 1);
+    assert_eq!(body["max_repos"], MAX_IMPORTED_REPOS);
     let repos = body["repos"].as_array().unwrap();
-    assert_eq!(repos.len(), 1, "single-repo cap replaces the previous import");
-    assert_eq!(repos[0]["path"], json!(server.base.join("two")));
+    assert_eq!(repos.len(), 2, "both repositories are watched, re-import adds no duplicate");
+    assert_eq!(repos[0]["path"], json!(server.base.join("one")));
+    assert_eq!(repos[1]["path"], json!(server.base.join("two")));
     assert_eq!(repos[0]["exists"], true);
-    assert_eq!(server.registry.list().await.unwrap().len(), 1, "persisted in repos.toml");
+    assert_eq!(server.registry.list().await.unwrap().len(), 2, "persisted in repos.toml");
+
+    let path = json!({ "path": server.base.join("one") });
+    let removed = TestServer::send(server.mutate(reqwest::Method::DELETE, "/api/repos", path)).await;
+    assert_eq!(removed.0, StatusCode::OK);
+    let remaining = server.registry.list().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].path, server.base.join("two"));
 }
 
 #[tokio::test]

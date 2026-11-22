@@ -200,6 +200,21 @@ mod tests {
     }
 
     #[cfg(unix)]
+    async fn exec_freshly_written(request: ExecRequest) -> ExecResult {
+        const ATTEMPTS: u32 = 100;
+        let mut result = exec(request.clone()).await;
+        for _ in 1..ATTEMPTS {
+            let busy = result.failure.as_ref().is_some_and(|f| f.message.contains("ext file busy"));
+            if !busy {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            result = exec(request.clone()).await;
+        }
+        result
+    }
+
+    #[cfg(unix)]
     async fn group_is_gone(pgid: libc::pid_t) -> bool {
         for _ in 0..50 {
             // SAFETY: signal 0 only checks for existence.
@@ -294,10 +309,10 @@ mod tests {
         let script = dir.path().join("mvnw");
         std::fs::write(&script, "#!/bin/sh\nenv\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut req = request(dir.path(), &["./mvnw"], 10_000);
+        let mut req = request(dir.path(), &["./mvnw"], 30_000);
         req.env.insert("QGATE_EXTRA".into(), "given".into());
-        let result = exec(req).await;
-        assert!(result.success(), "{}", result.output_tail);
+        let result = exec_freshly_written(req).await;
+        assert!(result.success(), "{:?} {}", result.failure, result.output_tail);
         assert!(result.output_tail.contains("PATH=") && result.output_tail.contains("QGATE_EXTRA=given"));
         assert!(!result.output_tail.contains("s3cret"));
     }

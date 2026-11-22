@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use super::agents::rulebook_service;
+use super::agents::{redteam_service, rulebook_service};
 use super::login::{dashboard_secret, login_url};
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest, load_review_config};
 use super::policy::policy_service;
@@ -15,6 +15,7 @@ use crate::conventions::{RulebookApiState, router as rulebook_router};
 use crate::history::api::{DashboardState, router_guarded, serve_router};
 use crate::history::application::Trigger;
 use crate::policy::{PolicyApiState, router as policy_router};
+use crate::redteam::api::{RedteamApiState, redteam_router};
 use crate::review::application::NoProgress;
 use crate::review::infrastructure::local_git::DiffTarget;
 use crate::review::infrastructure::snapshot::sweep_stale_snapshots;
@@ -61,6 +62,7 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     let settings_deps = context.settings_deps();
     let rulebooks = rulebook_service(context.clone())?;
     let policy = policy_service(context.clone(), settings_deps.clone(), rulebooks.clone(), history.clone())?;
+    let redteam = redteam_service(context.clone())?;
     let token = ApiToken::generate().context("cannot generate the dashboard API token")?;
     let settings_page = settings_router(SettingsApiState::new(settings_deps, hosts.clone(), token.clone()))
         .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
@@ -70,6 +72,7 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
             hosts.clone(),
             token.clone(),
         )))
+        .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
         .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
     let dashboard_shutdown = stopped(stop_rx.clone());

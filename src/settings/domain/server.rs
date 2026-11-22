@@ -42,6 +42,8 @@ pub const ENV_RUN_REPO_CHECKS: &str = "QGATE_RUN_REPO_CHECKS";
 pub const ENV_WATCH_BASE_BRANCH: &str = "QGATE_WATCH_BASE_BRANCH";
 pub const ENV_QUALITY_ENABLED: &str = "QGATE_QUALITY_ENABLED";
 pub const ENV_REGRESSION_ENABLED: &str = "QGATE_REGRESSION_ENABLED";
+pub const ENV_REDTEAM_ALLOWED_TARGETS: &str = "QGATE_REDTEAM_ALLOWED_TARGETS";
+pub const ENV_REDTEAM_ISOLATED_TARGETS: &str = "QGATE_REDTEAM_ISOLATED_TARGETS";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -214,6 +216,42 @@ impl ServerLlmConfig {
     }
 }
 
+const DEFAULT_REDTEAM_ALLOWED_TARGETS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RedteamConfig {
+    pub allowed_targets: Vec<String>,
+    pub isolated_targets: Vec<String>,
+}
+
+impl Default for RedteamConfig {
+    fn default() -> Self {
+        Self {
+            allowed_targets: DEFAULT_REDTEAM_ALLOWED_TARGETS.iter().map(|h| h.to_string()).collect(),
+            isolated_targets: Vec::new(),
+        }
+    }
+}
+
+impl RedteamConfig {
+    fn validate(&self) -> ValidationResult {
+        if self.allowed_targets.iter().any(|h| h.trim().is_empty() || h.contains(char::is_whitespace)) {
+            return Err(ValidationError::new(
+                "redteam.allowed_targets",
+                "hosts must be non-empty and contain no spaces",
+            ));
+        }
+        if self.isolated_targets.iter().any(|h| h.trim().is_empty() || h.contains(char::is_whitespace)) {
+            return Err(ValidationError::new(
+                "redteam.isolated_targets",
+                "hosts must be non-empty and contain no spaces",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
@@ -228,6 +266,7 @@ pub struct ServerConfig {
     pub agents: AgentsConfig,
     pub figma: FigmaConfig,
     pub output: OutputConfig,
+    pub redteam: RedteamConfig,
 }
 
 impl ServerConfig {
@@ -240,7 +279,8 @@ impl ServerConfig {
         self.jira.validate("jira")?;
         self.agents.validate()?;
         self.figma.validate()?;
-        self.output.validate()
+        self.output.validate()?;
+        self.redteam.validate()
     }
 
     pub fn with_env_overrides(mut self, env: impl Fn(&str) -> Option<String>) -> Self {
@@ -264,7 +304,7 @@ impl std::fmt::Debug for EnvOverride {
     }
 }
 
-pub const ENV_OVERRIDES: [EnvOverride; 18] = [
+pub const ENV_OVERRIDES: [EnvOverride; 20] = [
     EnvOverride { env_var: ENV_BIND, field: "dashboard.bind", apply: |c, v| c.dashboard.bind = v.into() },
     EnvOverride { env_var: ENV_REPOS_ROOT, field: "repos.roots", apply: |c, v| c.repos.roots = split_list(v) },
     EnvOverride {
@@ -323,9 +363,19 @@ pub const ENV_OVERRIDES: [EnvOverride; 18] = [
         field: "regression.enabled",
         apply: |c, v| c.regression.enabled = parse_flag(v),
     },
+    EnvOverride {
+        env_var: ENV_REDTEAM_ALLOWED_TARGETS,
+        field: "redteam.allowed_targets",
+        apply: |c, v| c.redteam.allowed_targets = split_list(v),
+    },
+    EnvOverride {
+        env_var: ENV_REDTEAM_ISOLATED_TARGETS,
+        field: "redteam.isolated_targets",
+        apply: |c, v| c.redteam.isolated_targets = split_list(v),
+    },
 ];
 
-pub const ADMIN_ONLY_FIELDS: [&str; 9] = [
+pub const ADMIN_ONLY_FIELDS: [&str; 11] = [
     "repos.auto_scan",
     "llm.claude_bin",
     "llm.timeout_secs",
@@ -335,6 +385,8 @@ pub const ADMIN_ONLY_FIELDS: [&str; 9] = [
     "figma.api_base_url",
     "figma.mcp_url",
     "watch.base_branch",
+    "redteam.allowed_targets",
+    "redteam.isolated_targets",
 ];
 pub const WEBHOOK_URL_FIELD: &str = "notify.webhook_url";
 pub const RUN_REPO_CHECKS_FIELD: &str = "watch.run_repo_checks";
@@ -522,7 +574,7 @@ mod tests {
             ("jira.email", ENV_JIRA_EMAIL, "a@b.c")
         );
         assert!(format!("{:?}", active[0].0).contains("jira.email"));
-        assert_eq!(ENV_OVERRIDES.len(), 18);
+        assert_eq!(ENV_OVERRIDES.len(), 20);
     }
 
     #[test]

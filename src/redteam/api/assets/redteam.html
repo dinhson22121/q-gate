@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
+<title>qgate red team</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #d8dce3;
+  --text: #1b1f24; --muted: #57606a; --accent: #a1121a; --focus: #a1121a;
+  --ok-bg: #dcf3e3; --ok-fg: #11622f; --bad-bg: #fde2e1; --bad-fg: #a1121a;
+  --warn-bg: #fdf0cf; --warn-fg: #7a4b00; --info-bg: #e3ecfb; --info-fg: #1d4f91;
+  --neutral-bg: #e8eaee; --neutral-fg: #3d444d;
+  --code-bg: #f3f4f6; --radius: 8px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --surface: #171b21; --surface-2: #1e242c; --border: #2f3742;
+    --text: #e6e9ee; --muted: #9aa5b1; --accent: #ff9e9a; --focus: #ff9e9a;
+    --ok-bg: #12351f; --ok-fg: #7fdc9c; --bad-bg: #431517; --bad-fg: #ff9e9a;
+    --warn-bg: #3d2d07; --warn-fg: #f5c86a; --info-bg: #15294a; --info-fg: #9cc3ff;
+    --neutral-bg: #262d36; --neutral-fg: #c4ccd6; --code-bg: #10141a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+header.top { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+header.top h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; gap: 14px; align-items: baseline; }
+main { display: grid; gap: 16px; padding: 16px 20px; max-width: 1000px; margin: 0 auto; }
+section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; min-width: 0; }
+section.panel > h2 { font-size: 15px; margin: 0 0 10px; }
+label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 2px; margin-bottom: 8px; }
+input, select, button, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; }
+textarea { resize: vertical; }
+button { cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.finding { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; background: var(--surface-2); }
+.finding-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.bad { background: var(--bad-bg); color: var(--bad-fg); }
+.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.info { background: var(--info-bg); color: var(--info-fg); }
+.neutral { background: var(--neutral-bg); color: var(--neutral-fg); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+pre.quote { font-family: var(--mono); font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 2px 0 6px; white-space: pre-wrap; }
+.label { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 6px; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { padding: 6px 0; border-top: 1px solid var(--border); }
+.list li:first-child { border-top: none; }
+.empty { color: var(--muted); }
+#error { background: var(--bad-bg); color: var(--bad-fg); border-radius: var(--radius); padding: 8px 12px; margin: 0 20px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>qgate</h1><a href="/redteam">Red team</a></div>
+  <p class="muted">On-demand black-box pentest of an already-running app (dev or isolated on-prem only).</p>
+</header>
+<p id="error" hidden role="alert"></p>
+<main>
+  <section class="panel">
+    <h2>New scan</h2>
+    <form id="scan-form">
+      <div class="row">
+        <label>Base URL
+          <input id="base_url" type="text" placeholder="http://127.0.0.1:8080" required>
+        </label>
+        <label>Health path
+          <input id="health_path" type="text" placeholder="/">
+        </label>
+      </div>
+      <div class="row">
+        <label>Auth
+          <select id="auth_kind">
+            <option value="none">None</option>
+            <option value="bearer">Bearer token</option>
+            <option value="login">Login (POST url + username/password)</option>
+          </select>
+        </label>
+        <label id="bearer_row" hidden>Token
+          <input id="bearer_token" type="password">
+        </label>
+        <label id="login_url_row" hidden>Login URL
+          <input id="login_url" type="text">
+        </label>
+        <label id="login_user_row" hidden>Username
+          <input id="login_username" type="text">
+        </label>
+        <label id="login_pass_row" hidden>Password
+          <input id="login_password" type="password">
+        </label>
+      </div>
+      <label style="flex-direction: row; align-items: center; gap: 6px;">
+        <input id="allow_destructive" type="checkbox">
+        Allow destructive PoCs (only honored when this target is flagged isolated/disposable in settings)
+      </label>
+      <button type="submit" class="primary" id="run">Run pentest</button>
+    </form>
+  </section>
+  <section class="panel" id="result-panel" hidden>
+    <h2>Latest scan</h2>
+    <div id="result"></div>
+  </section>
+  <section class="panel">
+    <h2>Recent scans</h2>
+    <div id="recent"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+<script>
+"use strict";
+(() => {
+  const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
+  const RELOAD_HINT = "qgate restarted or the page is stale: reload the page.";
+  const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "redteam", "X-Qgate-Token": TOKEN, Accept: "application/json" };
+  const $ = (id) => document.getElementById(id);
+
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+  const replace = (node, ...children) => { node.replaceChildren(); node.append(...children.flat()); };
+  const chip = (text, cls) => el("span", { class: "chip " + (cls || "neutral") }, text);
+  const sevClass = (s) => (s === "critical" ? "bad" : "warn");
+
+  function showError(message) {
+    $("error").hidden = !message;
+    $("error").textContent = message || "";
+  }
+
+  async function call(method, path, body) {
+    const options = { method, credentials: "same-origin", headers: method === "GET" ? { Accept: "application/json" } : HEADERS };
+    if (method !== "GET") options.body = JSON.stringify(body || {});
+    const response = await fetch(path, options);
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) throw new Error(RELOAD_HINT);
+    if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+    return data;
+  }
+
+  const guarded = (fn) => async (...args) => {
+    try { showError(""); await fn(...args); } catch (err) { showError(err.message); }
+  };
+
+  $("auth_kind").addEventListener("change", () => {
+    const kind = $("auth_kind").value;
+    $("bearer_row").hidden = kind !== "bearer";
+    for (const id of ["login_url_row", "login_user_row", "login_pass_row"]) $(id).hidden = kind !== "login";
+  });
+
+  function buildTarget() {
+    const target = { base_url: $("base_url").value.trim(), allow_destructive: $("allow_destructive").checked };
+    const healthPath = $("health_path").value.trim();
+    if (healthPath) target.health_path = healthPath;
+    const kind = $("auth_kind").value;
+    if (kind === "bearer") target.auth = { type: "bearer", token: $("bearer_token").value };
+    if (kind === "login") {
+      target.auth = { type: "login", url: $("login_url").value.trim(), username: $("login_username").value, password: $("login_password").value };
+    }
+    return target;
+  }
+
+  function renderFinding(finding) {
+    return el("li", { class: "finding" },
+      el("div", { class: "finding-head" },
+        chip(finding.severity, sevClass(finding.severity)),
+        el("strong", {}, finding.category),
+        el("span", { class: "mono muted" }, finding.endpoint.method + " " + finding.endpoint.path)),
+      el("p", {}, finding.impact),
+      el("p", { class: "label" }, "Proof of concept"),
+      el("pre", { class: "quote" }, finding.poc.request + "\n" + finding.poc.response_evidence),
+      el("p", { class: "label" }, "Reproduce"),
+      el("pre", { class: "quote" }, finding.poc.reproduce),
+      el("p", { class: "label" }, "Fix"),
+      el("p", {}, finding.fix),
+      el("p", { class: "label" }, "Prevention rule"),
+      el("p", {}, finding.rule.text));
+  }
+
+  function renderResult(report) {
+    $("result-panel").hidden = false;
+    const statusCls = report.status === "completed" ? "ok" : report.status === "timed_out" ? "warn" : "bad";
+    const nodes = [
+      el("div", { class: "finding-head" },
+        chip(report.status, statusCls),
+        el("span", { class: "mono muted" }, report.target.base_url),
+        el("span", { class: "muted" }, report.findings.length + " finding(s), " + report.http_requests + " request(s), " + report.model_calls + " model call(s)")),
+    ];
+    if (report.notes.length) nodes.push(el("p", { class: "muted" }, report.notes.join(" · ")));
+    nodes.push(report.findings.length
+      ? el("ul", { class: "list" }, report.findings.map(renderFinding))
+      : el("p", { class: "empty" }, "No proven findings."));
+    replace($("result"), nodes);
+  }
+
+  function renderRecent(scans) {
+    const rows = scans.map((s) => el("li", {},
+      el("span", { class: "mono" }, s.target.base_url), " ",
+      chip(s.status, s.status === "completed" ? "ok" : s.status === "timed_out" ? "warn" : "bad"), " ",
+      el("span", { class: "muted" }, s.findings.length + " finding(s)"), " ",
+      el("button", { type: "button", onclick: guarded(async () => renderResult(await call("GET", "/api/redteam/scans/" + s.id))) }, "View")));
+    replace($("recent"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No scans yet."));
+  }
+
+  async function loadRecent() {
+    const { scans } = await call("GET", "/api/redteam/scans");
+    renderRecent(scans);
+  }
+
+  $("scan-form").addEventListener("submit", guarded(async (event) => {
+    event.preventDefault();
+    $("run").disabled = true;
+    try {
+      const report = await call("POST", "/api/redteam/scan", buildTarget());
+      renderResult(report);
+      await loadRecent();
+    } finally {
+      $("run").disabled = false;
+    }
+  }));
+
+  guarded(loadRecent)();
+})();
+</script>
+</body>
+</html>

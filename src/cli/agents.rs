@@ -17,6 +17,9 @@ use crate::design::infrastructure::{
     FigmaDesignReviewer, FigmaRestConfig, FigmaRestSource, FigmaToken, SqliteDesignCache,
 };
 use crate::llm::{CliConfig, MeteredModel, StructuredModel, UsageMeter};
+use crate::redteam::application::{RedteamService, RunPentest, TargetPolicy};
+use crate::redteam::domain::ScanBudget;
+use crate::redteam::infrastructure::{AllowlistTargetPolicy, ClaudeAttackModel, ReqwestProbe, SqliteScanStore};
 use crate::review::application::{AgentSuite, Category, DesignMismatchKind, GatePolicy};
 use crate::sandbox::application::ExecBackend;
 use crate::settings::application::{
@@ -32,6 +35,7 @@ use crate::tickets::infrastructure::{ClaudeTicketAnalyst, SqliteTicketCache};
 
 const TEST_AGENT_MAX_TURNS: u32 = 30;
 const TEST_AGENT_MODEL_TIME: Duration = Duration::from_secs(600);
+const REDTEAM_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Agents {
     pub suite: AgentSuite,
@@ -113,6 +117,22 @@ pub fn rulebook_service(context: Arc<AppContext>) -> Result<Arc<RulebookService>
     let db = context.paths.data_dir.join(HISTORY_DB_FILE);
     let store = SqliteRulebookStore::open(&db).with_context(|| format!("cannot open rulebooks in {}", db.display()))?;
     Ok(Arc::new(RulebookService::new(Arc::new(LiveRuleModel { context }), Arc::new(FsRepoReader), Arc::new(store))))
+}
+
+pub fn redteam_service(context: Arc<AppContext>) -> Result<Arc<RedteamService>> {
+    let server = context.server();
+    let model = context
+        .structured_model(&server.agents.model, effort_name(&server))
+        .map_err(|e| anyhow::anyhow!("cannot build the red team model: {e}"))?;
+    let policy: Arc<dyn TargetPolicy> =
+        Arc::new(AllowlistTargetPolicy::new(&server.redteam.allowed_targets, &server.redteam.isolated_targets));
+    let probe = ReqwestProbe::new(policy.clone(), REDTEAM_PROBE_TIMEOUT)
+        .map_err(|e| anyhow::anyhow!("cannot build the red team probe: {e}"))?;
+    let run = RunPentest::new(Arc::new(ClaudeAttackModel::new(model)), Arc::new(probe), policy, ScanBudget::default());
+    let db = context.paths.data_dir.join(HISTORY_DB_FILE);
+    let store = SqliteScanStore::open(&db)
+        .map_err(|e| anyhow::anyhow!("cannot open red team scans in {}: {e}", db.display()))?;
+    Ok(Arc::new(RedteamService::new(run, Arc::new(store))))
 }
 
 struct LiveRuleModel {

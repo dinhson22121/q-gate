@@ -72,10 +72,10 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
 </head>
 <body>
 <header class="top">
-  <div class="brand"><h1>qgate repositories</h1><a href="/">Dashboard</a><a href="/settings">Settings</a><a href="/rulebook">Rulebook</a><a href="/policy">Policy assistant</a></div>
+  <div class="brand"><h1>qgate repositories</h1><a href="/">Dashboard</a><a href="/settings">Settings</a><a href="/rulebook">Rulebook</a><a href="/redteam">Red team</a><a href="/policy">Policy assistant</a></div>
 </header>
 <main>
-  <p class="banner info">qgate reviews the repository you import from the folder below. Importing a repository replaces the current one.</p>
+  <p class="banner info">qgate reviews the repository you import from the folder below. You can import several repositories; each is watched and can be removed on its own.</p>
   <div id="error" class="banner bad" role="alert" hidden></div>
   <section class="panel">
     <h2>Imported repositories</h2>
@@ -165,11 +165,13 @@ ul.list .name { flex: 1 1 auto; min-width: 0; }
     replace($("folders"), rows.length ? el("ul", { class: "list" }, rows) : el("p", { class: "empty" }, "No subfolders."));
   }
 
+  const isImported = (path) => state.imported.some((repo) => repo.path === path);
+
   function importButton(path) {
-    return el("button", { type: "button", class: "primary", onclick: guarded(async () => {
+    return el("button", { type: "button", class: "primary", disabled: isImported(path), onclick: guarded(async () => {
       await call("POST", "/api/repos/import", { path });
       await loadImported();
-    }) }, state.imported.length ? "Import (replaces)" : "Import");
+    }) }, isImported(path) ? "Imported" : "Import");
   }
 
   async function browse(path) {
