@@ -5,25 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>qgate · log in</title>
 <style>
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1d2330; }
-  main { max-width: 34rem; margin: 10vh auto; padding: 2rem; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
-  h1 { font-size: 1.3rem; margin-top: 0; }
-  code { background: #eef0f4; padding: .1rem .3rem; border-radius: 4px; font-size: .9em; }
-  form { display: flex; gap: .5rem; margin-top: 1rem; }
-  input { flex: 1; padding: .45rem .6rem; border: 1px solid #c4c9d4; border-radius: 4px; font: inherit; }
-  button { padding: .45rem 1rem; border: 0; border-radius: 4px; background: #2f5bd3; color: #fff; font: inherit; cursor: pointer; }
+  :root { --bg: #f7f8f9; --surface: #ffffff; --border: #dfe1e6; --text: #172b4d; --muted: #626f86; --accent: #0c66e4; --accent-hover: #0055cc; --code: #f1f2f4; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161a1d; --surface: #22272b; --border: #2c333a; --text: #c7d1db; --muted: #9fadbc; --accent: #579dff; --accent-hover: #85b8ff; --code: #1d2125; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  main { max-width: 30rem; margin: 12vh auto; padding: 2rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 1px rgba(9,30,66,.25), 0 0 1px rgba(9,30,66,.13); }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 1.2rem; font-weight: 700; font-size: 1.05rem; }
+  .brand .logo { width: 32px; height: 32px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; color: #fff; }
+  .brand .logo svg { width: 20px; height: 20px; display: block; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  p { margin: .5rem 0; }
   .msg { font-weight: 600; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #14171c; color: #dde2ea; }
-    main { background: #1d2128; }
-    code { background: #2a2f38; }
-    input { background: #14171c; color: inherit; border-color: #3a404b; }
-  }
+  code { background: var(--code); padding: .1rem .35rem; border-radius: 4px; font-size: .88em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  ul { margin: .5rem 0; padding-left: 1.2rem; }
+  form { display: flex; gap: .5rem; margin-top: 1rem; }
+  input { flex: 1; padding: .5rem .65rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--surface); color: var(--text); }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { padding: .5rem 1.1rem; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  a { color: var(--accent); }
 </style>
 </head>
 <body>
 <main>
-  <h1>qgate dashboard</h1>
+  <div class="brand"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9.2 12.2l2 2 3.6-3.8"/></svg></span>QGate</div>
+  <h1>Log in to the dashboard</h1>
   <p class="msg">__MESSAGE__</p>
   <p>The login link is printed when qgate starts:</p>
   <ul>
