@@ -135,6 +135,7 @@ p { margin: 4px 0; }
   <section class="panel">
     <h2>Browse &amp; import</h2>
     <p class="hint">Navigate to a folder on this machine, then import the Git repository you want qgate to review. A folder tagged <span class="tag-git">git</span> is a repository you can import.</p>
+    <p class="hint" id="host-line" hidden>Folder on your machine (read-only): <span class="mono" id="host-root"></span></p>
     <nav class="crumbs" id="crumbs" aria-label="Current folder"></nav>
     <div id="cwd-git"></div>
     <div id="folders"><p class="empty">Loading…</p></div>
@@ -148,8 +149,16 @@ p { margin: 4px 0; }
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page.";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "repos", "X-Qgate-Token": TOKEN, Accept: "application/json" };
-  const state = { path: "", imported: [] };
+  const state = { path: "", imported: [], base: "", hostBase: "" };
   const $ = (id) => document.getElementById(id);
+
+  const toHost = (p) => {
+    if (!state.base || !state.hostBase || !p) return p;
+    if (p === state.base) return state.hostBase;
+    if (p.startsWith(state.base + "/")) return state.hostBase + p.slice(state.base.length);
+    return p;
+  };
+  const baseName = (p) => (p || "").split(/[\\/]/).filter(Boolean).pop() || p;
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -192,7 +201,7 @@ p { margin: 4px 0; }
 
   function renderImported() {
     const rows = state.imported.map((repo) => el("li", {},
-      el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, repo.path)),
+      el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, toHost(repo.path))),
       el("span", { class: "row-actions" },
         !repo.exists && chip("missing on disk", "warn"),
         el("button", { type: "button", onclick: guarded(async () => {
@@ -206,23 +215,29 @@ p { margin: 4px 0; }
 
   function renderListing(listing) {
     state.path = listing.path;
+    state.base = listing.base;
+    state.hostBase = listing.host_base || listing.base;
+    $("host-root").textContent = state.hostBase;
+    $("host-line").hidden = false;
     const last = listing.crumbs.length - 1;
     replace($("crumbs"), listing.crumbs.map((crumb, i) => {
       const current = i === last;
+      const label = i === 0 ? baseName(state.hostBase) : crumb.name;
       return [
         i > 0 && el("span", { class: "sep" }, "/"),
         el("button", {
           type: "button",
           class: current ? "crumb current" : "crumb",
+          title: toHost(crumb.path),
           disabled: current,
           onclick: current ? undefined : guarded(() => browse(crumb.path)),
-        }, crumb.name || "root"),
+        }, label || "root"),
       ];
     }));
 
     if (listing.is_git_root) {
       replace($("cwd-git"), el("div", { class: "cwd-git" },
-        el("span", { class: "txt" }, el("strong", {}, "This folder is a Git repository. "), el("span", { class: "mono muted" }, listing.path)),
+        el("span", { class: "txt" }, el("strong", {}, "This folder is a Git repository. "), el("span", { class: "mono muted" }, toHost(listing.path))),
         importButton(listing.path)));
     } else {
       replace($("cwd-git"));
@@ -266,7 +281,7 @@ p { margin: 4px 0; }
     if (state.path) await browse(state.path);
   }
 
-  guarded(async () => { await loadImported(); if (!state.path) await browse(""); })();
+  guarded(async () => { await browse(""); await loadImported(); })();
 })();
 </script>
 </body>

@@ -72,8 +72,11 @@ fn text(path: &Path) -> String {
 }
 
 fn listing_json(listing: &Listing) -> Value {
+    let base = text(&listing.base);
+    let host_base = std::env::var("REPOS_PATH").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| base.clone());
     json!({
-        "base": text(&listing.base),
+        "base": base,
+        "host_base": host_base,
         "path": text(&listing.path),
         "parent": listing.parent.as_deref().map(text),
         "is_git_root": listing.is_git_root,
