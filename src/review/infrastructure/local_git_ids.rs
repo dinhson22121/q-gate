@@ -11,6 +11,10 @@ impl ContentIds for LocalGit {
     fn tree_id<'a>(&'a self, rev: &'a str, dir: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>> {
         Box::pin(async move { self.tree_id_at(rev, dir).await.map_err(|e| CacheError(e.to_string())) })
     }
+
+    fn file_text<'a>(&'a self, rev: &'a str, path: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>> {
+        Box::pin(async move { self.read_file_at(rev, path).await.map_err(|e| CacheError(e.to_string())) })
+    }
 }
 
 #[cfg(test)]
@@ -46,6 +50,8 @@ mod tests {
         assert!(blob.is_some() && tree.is_some() && blob != tree);
         assert!(ids.tree_id("HEAD", "").await.unwrap().is_some());
         assert_eq!(ids.object_id("HEAD", "missing").await.unwrap(), None);
+        assert_eq!(ids.file_text("HEAD", "svc/a.txt").await.unwrap().as_deref(), Some("a"));
+        assert_eq!(ids.file_text("HEAD", "missing").await.unwrap(), None);
         assert!(ids.object_id("--bad", "x").await.is_err());
     }
 }

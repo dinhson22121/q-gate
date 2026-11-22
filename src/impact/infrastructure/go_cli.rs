@@ -87,7 +87,7 @@ impl GoCli {
 
 impl GoToolchain for GoCli {
     fn is_go_module(&self, root: &Path) -> bool {
-        root.join("go.mod").is_file()
+        std::fs::symlink_metadata(root.join("go.mod")).is_ok_and(|meta| meta.is_file())
     }
 
     fn list_packages<'a>(&'a self, root: &'a Path) -> BoxFuture<'a, Result<Vec<GoPackage>, ImpactError>> {
@@ -265,6 +265,13 @@ mod tests {
         assert!(!go.is_go_module(dir.path()));
         std::fs::write(dir.path().join("go.mod"), "module m\n").unwrap();
         assert!(go.is_go_module(dir.path()));
+        #[cfg(unix)]
+        {
+            let linked = tempfile::tempdir().unwrap();
+            let outside = tempfile::NamedTempFile::new().unwrap();
+            std::os::unix::fs::symlink(outside.path(), linked.path().join("go.mod")).unwrap();
+            assert!(!go.is_go_module(linked.path()), "a symlinked go.mod is not followed");
+        }
         assert_eq!(run_pattern(&["Test.A".into()]), "^(Test\\.A)$");
     }
 }

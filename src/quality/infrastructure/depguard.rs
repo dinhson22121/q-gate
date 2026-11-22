@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use futures::future::BoxFuture;
@@ -24,7 +25,7 @@ impl DepguardCheck {
 
     async fn check(&self, input: &CheckInput<'_>) -> CheckOutcome {
         let snapshot = input.snapshot();
-        let go_mod = std::fs::read_to_string(snapshot.join(GO_MOD));
+        let go_mod = read_regular_file(&snapshot.join(GO_MOD));
         if self.boundaries.is_empty() || !input.changes.paths().any(|p| p.ends_with(".go")) || go_mod.is_err() {
             return CheckOutcome::default();
         }
@@ -35,11 +36,12 @@ impl DepguardCheck {
         };
         let module = go_mod.ok().and_then(|text| module_path(&text));
         let config_path = snapshot.join(CONFIG_FILE);
-        if let Err(error) = tokio::fs::write(&config_path, render_config(&self.boundaries, module.as_deref())).await {
+        let config = render_config(&self.boundaries, module.as_deref());
+        if let Err(error) = write_fresh_file(&config_path, &config) {
             return CheckOutcome::skipped(format!("depguard config could not be written: {error}"));
         }
         let outcome = self.run_tool(binary, &config_path, snapshot).await;
-        let _ = tokio::fs::remove_file(&config_path).await;
+        let _ = std::fs::remove_file(&config_path);
         outcome
     }
 
@@ -80,6 +82,35 @@ impl QualityCheck for DepguardCheck {
     fn run<'a>(&'a self, input: &'a CheckInput<'a>) -> BoxFuture<'a, CheckOutcome> {
         Box::pin(self.check(input))
     }
+}
+
+fn no_follow(options: &mut std::fs::OpenOptions) -> &mut std::fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW)
+    }
+    #[cfg(not(unix))]
+    options
+}
+
+fn read_regular_file(path: &Path) -> std::io::Result<String> {
+    let mut file = no_follow(std::fs::OpenOptions::new().read(true)).open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+fn write_fresh_file(path: &Path, content: &str) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    let mut file = no_follow(std::fs::OpenOptions::new().write(true).create_new(true)).open(path)?;
+    file.write_all(content.as_bytes())
 }
 
 fn module_path(go_mod: &str) -> Option<String> {
@@ -238,5 +269,81 @@ mod tests {
         let (outcome, argv, _) = run(None, vec![boundary()], true, &["a.go"]);
         assert!(outcome.notes[0].starts_with("golangci-lint is not installed"));
         assert!(argv.is_empty());
+    }
+
+    #[cfg(unix)]
+    mod symlinks {
+        use super::*;
+
+        fn outside_file(content: &str) -> (tempfile::TempDir, PathBuf) {
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("qgate.db");
+            std::fs::write(&target, content).unwrap();
+            (outside, target)
+        }
+
+        #[test]
+        fn config_write_replaces_a_planted_symlink_instead_of_writing_through_it() {
+            let snapshot = tempfile::tempdir().unwrap();
+            let (_outside, target) = outside_file("PRECIOUS");
+            let config = snapshot.path().join(CONFIG_FILE);
+            std::os::unix::fs::symlink(&target, &config).unwrap();
+
+            write_fresh_file(&config, "version: \"2\"").unwrap();
+
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "PRECIOUS");
+            assert!(!std::fs::symlink_metadata(&config).unwrap().file_type().is_symlink());
+            assert_eq!(std::fs::read_to_string(&config).unwrap(), "version: \"2\"");
+        }
+
+        #[test]
+        fn config_write_refuses_when_the_planted_entry_cannot_be_removed() {
+            let snapshot = tempfile::tempdir().unwrap();
+            let (_outside, target) = outside_file("PRECIOUS");
+            std::fs::create_dir(snapshot.path().join(CONFIG_FILE)).unwrap();
+
+            assert!(write_fresh_file(&snapshot.path().join(CONFIG_FILE), "x").is_err());
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "PRECIOUS");
+        }
+
+        #[test]
+        fn go_mod_symlink_is_not_read() {
+            let snapshot = tempfile::tempdir().unwrap();
+            let (_outside, target) = outside_file("module secret.example/leak\n");
+            std::os::unix::fs::symlink(&target, snapshot.path().join(GO_MOD)).unwrap();
+
+            assert!(read_regular_file(&snapshot.path().join(GO_MOD)).is_err());
+        }
+
+        #[test]
+        fn check_with_symlinked_config_and_go_mod_leaves_outside_files_untouched() {
+            let snapshot = tempfile::tempdir().unwrap();
+            let (_outside, target) = outside_file("PRECIOUS");
+            std::os::unix::fs::symlink(&target, snapshot.path().join(CONFIG_FILE)).unwrap();
+            std::fs::write(snapshot.path().join(GO_MOD), "module example.com/app\n").unwrap();
+            let backend = Arc::new(RecordingBackend::answering(ExecResult {
+                exit_code: Some(0),
+                output_tail: REPORT.into(),
+                ..Default::default()
+            }));
+            let check = DepguardCheck::new(
+                ToolRunner::new(backend, 60),
+                Some(PathBuf::from("/tc/golangci-lint")),
+                vec![boundary()],
+            );
+            let request = QualityRequest {
+                snapshot: snapshot.path().into(),
+                base_sha: None,
+                head_sha: "h".into(),
+                changed_files: vec![ChangedFile::new("a.go", true, Default::default())],
+            };
+            let changes = ChangeIndex::new(&request.changed_files);
+            let languages = Default::default();
+            let input = CheckInput { request: &request, changes: &changes, languages: &languages };
+
+            tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(check.check(&input));
+
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "PRECIOUS");
+        }
     }
 }

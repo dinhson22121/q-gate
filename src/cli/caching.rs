@@ -96,6 +96,14 @@ mod tests {
         ) -> futures::future::BoxFuture<'a, Result<Option<String>, CacheError>> {
             Box::pin(async { Ok(None) })
         }
+
+        fn file_text<'a>(
+            &'a self,
+            _rev: &'a str,
+            _path: &'a str,
+        ) -> futures::future::BoxFuture<'a, Result<Option<String>, CacheError>> {
+            Box::pin(async { Ok(None) })
+        }
     }
 
     #[test]

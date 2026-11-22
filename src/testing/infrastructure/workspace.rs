@@ -172,9 +172,22 @@ impl Workspace for SnapshotWorkspace {
             }
             options.truncate(true);
         }
-        let mut file = options.open(&path).map_err(|e| format!("'{rel}': {e}"))?;
+        let mut file = no_follow(&mut options).open(&path).map_err(|e| format!("'{rel}': {e}"))?;
+        if !file.metadata().is_ok_and(|meta| meta.is_file()) {
+            return Err(format!("'{rel}' is not a regular file"));
+        }
         file.write_all(content.as_bytes()).map_err(|e| format!("'{rel}': {e}"))
     }
+}
+
+fn no_follow(options: &mut OpenOptions) -> &mut OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW)
+    }
+    #[cfg(not(unix))]
+    options
 }
 
 #[cfg(test)]
@@ -249,6 +262,40 @@ mod tests {
         assert!(ws.search("TOKEN", None, 10).unwrap().is_empty(), "search does not follow symlinks");
         assert_eq!(fs::read_to_string(outside.path().join("secret.txt")).unwrap(), "TOKEN");
         assert!(!outside.path().join("new_test.go").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_refuses_a_symlink_swapped_in_after_the_path_check() {
+        let (dir, _ws) = snapshot();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("victim.txt");
+        fs::write(&target, "PRECIOUS").unwrap();
+        let swapped = dir.path().join("calc/swapped_test.go");
+        std::os::unix::fs::symlink(&target, &swapped).unwrap();
+
+        let mut options = OpenOptions::new();
+        options.write(true).truncate(true);
+
+        assert!(no_follow(&mut options).open(&swapped).is_err(), "O_NOFOLLOW rejects the final symlink");
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "PRECIOUS");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewrite_never_truncates_through_a_symlink() {
+        let (dir, ws) = snapshot();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("victim.txt");
+        fs::write(&target, "PRECIOUS").unwrap();
+        ws.write_file("calc/t_test.go", "one", true).unwrap();
+        fs::remove_file(dir.path().join("calc/t_test.go")).unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("calc/t_test.go")).unwrap();
+
+        assert!(ws.write_file("calc/t_test.go", "two", false).is_err());
+        assert!(ws.write_file("calc/t_test.go", "two", true).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "PRECIOUS");
     }
 
     #[test]

@@ -6,7 +6,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use serde::Deserialize;
 use serde_json::Value;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::AsyncRead;
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -14,8 +14,8 @@ use tokio::time::Instant;
 
 use super::mcp_bridge::{RunningServer, SERVER_NAME, ToolBridge, ToolCall};
 use crate::llm::{
-    CliConfig, ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, SystemBlock, ToolHandler, ToolSpec, Usage,
-    envelope_consumption,
+    CliConfig, ContentPart, LlmError, LoopLimits, LoopOutcome, LoopStop, MAX_OUTPUT_BYTES, SystemBlock, ToolHandler,
+    ToolSpec, Usage, envelope_consumption, exceeded_cap, read_capped,
 };
 use crate::testing::application::ports::ToolLoop;
 
@@ -125,7 +125,7 @@ impl ToolLoop for CliToolLoop {
         if !matches!(ended, Ended::Exited) {
             let _ = child.kill().await;
         }
-        let (stdout, stderr) = (collect(stdout).await, collect(stderr).await);
+        let (stdout, stderr) = (collect(stdout).await?, collect(stderr).await?);
         drop(server);
 
         let result = parse_result(&stdout);
@@ -190,20 +190,24 @@ fn feed_prompt(child: &mut Child, prompt: String) -> Result<(), LlmError> {
     Ok(())
 }
 
-async fn collect(reader: JoinHandle<String>) -> String {
+async fn collect(reader: JoinHandle<Result<String, LlmError>>) -> Result<String, LlmError> {
     match tokio::time::timeout(OUTPUT_DRAIN, reader).await {
-        Ok(text) => text.unwrap_or_default(),
-        Err(_) => String::new(),
+        Ok(joined) => joined.unwrap_or_else(|_| Ok(String::new())),
+        Err(_) => Ok(String::new()),
     }
 }
 
-fn read_all(stream: Option<impl AsyncRead + Unpin + Send + 'static>) -> JoinHandle<String> {
+fn read_all(stream: Option<impl AsyncRead + Unpin + Send + 'static>) -> JoinHandle<Result<String, LlmError>> {
     tokio::spawn(async move {
-        let mut bytes = Vec::new();
-        if let Some(mut stream) = stream {
-            let _ = stream.read_to_end(&mut bytes).await;
+        let Some(mut stream) = stream else { return Ok(String::new()) };
+        match read_capped(&mut stream, MAX_OUTPUT_BYTES).await {
+            Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+            Err(error) if exceeded_cap(&error) => {
+                let _ = tokio::io::copy(&mut stream, &mut tokio::io::sink()).await;
+                Err(LlmError::Unavailable(format!("claude output exceeded {MAX_OUTPUT_BYTES} bytes")))
+            }
+            Err(_) => Ok(String::new()),
         }
-        String::from_utf8_lossy(&bytes).into_owned()
     })
 }
 

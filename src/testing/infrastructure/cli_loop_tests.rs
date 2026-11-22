@@ -195,6 +195,19 @@ async fn non_json_output_becomes_an_error_with_stderr() {
 }
 
 #[tokio::test]
+async fn output_over_the_cap_is_an_error_instead_of_unbounded_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    for stream in ["", ">&2"] {
+        let body = format!("cat >/dev/null; head -c 5000000 /dev/zero | tr '\\0' x {stream}");
+        let bin = script(dir.path(), &body);
+
+        let err = drive(&loop_for(&bin, Duration::from_secs(60)), &Recorder::new("x"), LIMITS).await.unwrap_err();
+
+        assert!(matches!(&err, LlmError::Unavailable(m) if m.contains("exceeded")), "{stream}: {err:?}");
+    }
+}
+
+#[tokio::test]
 async fn a_session_over_its_deadline_is_killed_and_reported() {
     let dir = tempfile::tempdir().unwrap();
     let bin = script(dir.path(), "sleep 30");

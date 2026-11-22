@@ -7,6 +7,7 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+use super::bounded::{MAX_OUTPUT_BYTES, exceeded_cap, read_capped};
 use super::config::CliConfig;
 use super::envelope::{Answer, Envelope, classify_failure};
 use crate::llm::{LlmError, Structured, StructuredModel};
@@ -14,6 +15,23 @@ use crate::llm::{LlmError, Structured, StructuredModel};
 const CHARS_PER_TOKEN: usize = 4;
 const PROBE_PROMPT: &str = "ok";
 const PROBE_EFFORT: &str = "low";
+const CHILD_ENV_ALLOWLIST: [&str; 14] = [
+    "HOME",
+    "PATH",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+];
+const DENIED_TOOLS: &str = "Bash,Edit,Write,WebFetch,WebSearch";
 const SPAWN_RETRIES: u32 = 20;
 const SPAWN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -121,7 +139,7 @@ impl CliClient {
 
     async fn run(&self, args: Vec<String>, prompt: &str, cwd: Option<&Path>) -> Result<Answer, LlmError> {
         let mut command = Command::new(&self.config.claude_bin);
-        command.args(args);
+        command.args(args).env_clear().envs(child_env());
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
@@ -134,14 +152,25 @@ impl CliClient {
         let feed = tokio::spawn(async move {
             let _ = stdin.write_all(prompt.as_bytes()).await;
         });
-        let output = tokio::time::timeout(self.config.timeout, child.wait_with_output())
+        let stdout = child.stdout.take().ok_or_else(|| LlmError::Unavailable("claude stdout unavailable".into()))?;
+        let stderr = child.stderr.take().ok_or_else(|| LlmError::Unavailable("claude stderr unavailable".into()))?;
+        let collected = async {
+            let streams =
+                tokio::try_join!(read_capped(stdout, MAX_OUTPUT_BYTES), read_capped(stderr, MAX_OUTPUT_BYTES))?;
+            child.wait().await?;
+            Ok::<_, std::io::Error>(streams)
+        };
+        let (stdout, stderr) = tokio::time::timeout(self.config.timeout, collected)
             .await
             .map_err(|_| LlmError::Unavailable(format!("claude did not finish within {:?}", self.config.timeout)))?
-            .map_err(|e| LlmError::Unavailable(format!("claude failed: {e}")))?;
+            .map_err(|e| match exceeded_cap(&e) {
+                true => LlmError::Unavailable(format!("claude output exceeded {MAX_OUTPUT_BYTES} bytes")),
+                false => LlmError::Unavailable(format!("claude failed: {e}")),
+            })?;
         let _ = feed.await;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&stdout);
+        let stderr = String::from_utf8_lossy(&stderr);
         match Envelope::parse(&stdout) {
             Some(envelope) => envelope.into_answer(),
             None => Err(classify_failure(None, &format!("{} {}", stderr.trim(), stdout.trim()))),
@@ -162,11 +191,27 @@ async fn spawn_with_retry(command: &mut Command) -> std::io::Result<tokio::proce
     }
 }
 
+fn child_env() -> Vec<(&'static str, std::ffi::OsString)> {
+    CHILD_ENV_ALLOWLIST.iter().filter_map(|name| std::env::var_os(name).map(|value| (*name, value))).collect()
+}
+
+fn scoped_read_rule(dir: &Path) -> String {
+    format!("Read(/{}/**)", dir.display())
+}
+
 fn enable_read(args: &mut Vec<String>, dir: &Path) {
     if let Some(at) = args.iter().position(|a| a == "--tools") {
         args[at + 1] = "Read".into();
     }
-    args.extend(["--add-dir".into(), dir.display().to_string(), "--allowedTools".into(), "Read".into()]);
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    args.extend([
+        "--add-dir".into(),
+        dir.display().to_string(),
+        "--allowedTools".into(),
+        scoped_read_rule(&dir),
+        "--disallowedTools".into(),
+        DENIED_TOOLS.into(),
+    ]);
 }
 
 impl StructuredModel for CliClient {

@@ -11,17 +11,22 @@ use crate::review::domain::change_set::fixtures::{added, file};
 #[derive(Default)]
 struct FakeIds {
     ids: Mutex<HashMap<String, String>>,
+    texts: Mutex<HashMap<String, String>>,
     fail: bool,
 }
 
 impl FakeIds {
     fn with(entries: &[(&str, &str)]) -> Arc<Self> {
         let ids = entries.iter().map(|(p, i)| (p.to_string(), i.to_string())).collect();
-        Arc::new(Self { ids: Mutex::new(ids), fail: false })
+        Arc::new(Self { ids: Mutex::new(ids), texts: Mutex::default(), fail: false })
     }
 
     fn set(&self, path: &str, id: &str) {
         self.ids.lock().unwrap().insert(path.into(), id.into());
+    }
+
+    fn set_text(&self, path: &str, text: &str) {
+        self.texts.lock().unwrap().insert(path.into(), text.into());
     }
 
     fn lookup(&self, path: &str) -> Result<Option<String>, CacheError> {
@@ -39,6 +44,15 @@ impl ContentIds for FakeIds {
 
     fn tree_id<'a>(&'a self, _rev: &'a str, dir: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>> {
         Box::pin(async move { self.lookup(&format!("tree:{dir}")) })
+    }
+
+    fn file_text<'a>(&'a self, _rev: &'a str, path: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>> {
+        Box::pin(async move {
+            if self.fail {
+                return Err(CacheError("git down".into()));
+            }
+            Ok(self.texts.lock().unwrap().get(path).cloned())
+        })
     }
 }
 
@@ -249,4 +263,48 @@ fn stored_test_round_trips_through_json() {
     let stored = StoredTest { commit: "abc".into(), result: result(TestVerdict::Passed, "svc/a.go") };
     let bytes = serde_json::to_vec(&stored).unwrap();
     assert_eq!(serde_json::from_slice::<StoredTest>(&bytes).unwrap(), stored);
+}
+
+#[tokio::test]
+async fn local_path_dependency_outside_the_module_dir_is_never_cached() {
+    let ids = ids();
+    ids.set_text("svc/go.mod", "module svc\n\nreplace example.com/lib => ../lib\n");
+    let h = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), ids.clone(), tags(), false, Arc::default());
+    let files = files();
+    run(&h, &files, "aaa").await;
+    ids.set("tree:lib", "lib-tree-2");
+    let second = run(&h, &files, "bbb").await;
+    assert_eq!(calls(&h), 2, "a changed sibling dependency must not be answered from cache");
+    assert!(!second.note.starts_with("reused"));
+    assert!(h.cache.map.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn go_work_presence_or_change_is_never_a_stale_hit() {
+    let cache: Arc<MemoryCache> = Arc::default();
+    let files = files();
+    let seed = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), ids(), tags(), false, cache.clone());
+    run(&seed, &files, "aaa").await;
+    let with_work = ids();
+    with_work.set("go.work.sum", "ws1");
+    let h = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), with_work, tags(), false, cache.clone());
+    run(&h, &files, "aaa").await;
+    assert_eq!(calls(&h), 1, "go.work.sum is part of the key");
+    let workspace = ids();
+    workspace.set_text("go.work", "go 1.22\nuse ./svc\nuse ./lib\n");
+    let h = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), workspace, tags(), false, Arc::default());
+    run(&h, &files, "aaa").await;
+    run(&h, &files, "aaa").await;
+    assert_eq!(calls(&h), 2, "a nested module inside a go.work workspace is not cached");
+}
+
+#[tokio::test]
+async fn root_module_with_local_replace_is_still_cached_because_the_whole_tree_is_keyed() {
+    let ids = FakeIds::with(&[("go.mod", "g"), ("tree:", "root-tree")]);
+    ids.set_text("go.mod", "replace example.com/lib => ./lib\n");
+    let h = harness(result(TestVerdict::Passed, "calc/calc.go"), ids, tags(), false, Arc::default());
+    let files = vec![file("calc/calc.go", 5, vec![added(5, "return a - b")], Some("x"))];
+    run(&h, &files, "aaa").await;
+    run(&h, &files, "aaa").await;
+    assert_eq!(calls(&h), 1);
 }

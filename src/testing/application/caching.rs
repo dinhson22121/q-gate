@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::cache::application::{CacheError, CacheStore, CacheTags, ContentIds, ContentKey, digest};
 use crate::review::application::agent_ports::{AgentInput, TestAgent};
 use crate::review::application::{TestResult, TestScenario, TestVerdict};
+use crate::testing::domain::dependencies::has_local_dependency;
 use crate::testing::domain::verdict::criterion_texts;
 
 const KIND: &str = "test_scenario";
@@ -26,8 +27,17 @@ const MANIFESTS: [&str; 13] = [
     "Gemfile",
     "composer.json",
 ];
-const ROOT_BUILD_FILES: [&str; 6] =
-    ["Cargo.lock", "go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"];
+const WORKSPACE_FILES: [&str; 1] = ["go.work"];
+const ROOT_BUILD_FILES: [&str; 8] = [
+    "Cargo.lock",
+    "go.sum",
+    "go.work",
+    "go.work.sum",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct StoredTest {
@@ -66,6 +76,9 @@ impl CachingTestAgent {
             let dir = self.module_dir(input.commit, path, &mut modules).await.ok()?;
             covered.insert(dir);
         }
+        if self.reaches_outside_module(input.commit, &covered).await? {
+            return None;
+        }
         let mut key = self.tags.apply(ContentKey::new(KIND, SCHEMA_VERSION));
         key = key.with_input("scenario", scenario_digest(input, scenario));
         key = key.with_input("changed", digest(paths.iter().copied()));
@@ -79,6 +92,23 @@ impl CachingTestAgent {
             }
         }
         Some(ScenarioKey { key, covered_dirs: covered.into_iter().collect() })
+    }
+
+    async fn reaches_outside_module(&self, commit: &str, covered: &BTreeSet<String>) -> Option<bool> {
+        let module_dirs: Vec<&str> = covered.iter().map(String::as_str).filter(|dir| !dir.is_empty()).collect();
+        if module_dirs.is_empty() {
+            return Some(false);
+        }
+        for dir in std::iter::once("").chain(module_dirs) {
+            for name in MANIFESTS.iter().chain(WORKSPACE_FILES.iter()) {
+                let path = if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") };
+                let text = self.ids.file_text(commit, &path).await.ok()?;
+                if text.is_some_and(|text| has_local_dependency(name, &text)) {
+                    return Some(true);
+                }
+            }
+        }
+        Some(false)
     }
 
     async fn module_dir(

@@ -115,6 +115,20 @@ async fn non_json_output_becomes_unavailable_or_rate_limited_from_stderr() {
 }
 
 #[tokio::test]
+async fn output_over_the_cap_is_unavailable_and_the_child_is_not_waited_for() {
+    let dir = tempfile::tempdir().unwrap();
+    for stream in ["", ">&2"] {
+        let client = fake_claude(&dir, &format!("head -c 5000000 /dev/zero | tr '\\0' x {stream}; sleep 20"));
+        let started = std::time::Instant::now();
+
+        let err = client.preflight().await.unwrap_err();
+
+        assert!(matches!(&err, LlmError::Unavailable(m) if m.contains("exceeded")), "{stream}: {err:?}");
+        assert!(started.elapsed() < Duration::from_secs(15), "returns as soon as the cap is hit");
+    }
+}
+
+#[tokio::test]
 async fn missing_binary_and_timeout_are_unavailable() {
     let missing =
         CliClient::new(CliConfig { claude_bin: "/nonexistent/claude".into(), ..CliConfig::default() }).unwrap();
@@ -180,7 +194,39 @@ fn sharing_files_swaps_no_tools_for_read_only_in_that_dir() {
     let at = args.iter().position(|a| a == "--add-dir").unwrap();
     assert_eq!(args[at + 1], "/share");
     let at = args.iter().position(|a| a == "--allowedTools").unwrap();
-    assert_eq!(args[at + 1], "Read");
+    assert_eq!(args[at + 1], "Read(//share/**)", "Read is scoped to the shared dir, never bare");
+    let at = args.iter().position(|a| a == "--disallowedTools").unwrap();
+    assert_eq!(args[at + 1], "Bash,Edit,Write,WebFetch,WebSearch");
+}
+
+#[test]
+fn scoped_rule_uses_the_canonical_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let canonical = dir.path().canonicalize().unwrap();
+    let mut args = CliClient::new(CliConfig::default()).unwrap().base_args();
+
+    enable_read(&mut args, dir.path());
+
+    let at = args.iter().position(|a| a == "--allowedTools").unwrap();
+    assert_eq!(args[at + 1], format!("Read(/{}/**)", canonical.display()));
+    let at = args.iter().position(|a| a == "--add-dir").unwrap();
+    assert_eq!(args[at + 1], canonical.display().to_string());
+}
+
+#[tokio::test]
+async fn the_child_sees_only_the_allowlisted_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("env.txt");
+    let body = format!("/usr/bin/env > {}\n{}", record.display(), emit(&dir, "ok.json", SUCCESS));
+    let client = fake_claude(&dir, &body);
+
+    client.structured::<Named>("sys", "prompt", &schema()).await.unwrap();
+
+    let recorded = std::fs::read_to_string(&record).unwrap();
+    let names: Vec<&str> = recorded.lines().filter_map(|l| l.split_once('=').map(|(k, _)| k)).collect();
+    assert!(names.contains(&"PATH"));
+    assert!(names.iter().all(|n| CHILD_ENV_ALLOWLIST.contains(n) || ["PWD", "SHLVL", "_", "OLDPWD"].contains(n)));
+    assert!(!names.contains(&"CARGO_MANIFEST_DIR"), "{names:?}");
 }
 
 #[tokio::test]
@@ -238,4 +284,30 @@ async fn live_claude_reads_an_image_through_the_read_tool() {
 
     assert_eq!(out.value["left"].to_lowercase(), "red");
     assert_eq!(out.value["right"].to_lowercase(), "blue");
+}
+
+#[tokio::test]
+#[ignore = "calls the real claude CLI (needs a logged-in subscription)"]
+async fn live_scoped_read_reaches_the_shared_dir_but_not_files_outside_it() {
+    let share = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(share.path().join("inside.txt"), "INSIDE-7f3a").unwrap();
+    std::fs::write(outside.path().join("secret.txt"), "OUTSIDE-9c1e").unwrap();
+    let client =
+        CliClient::new(CliConfig { effort: "low".into(), model: "haiku".into(), ..CliConfig::default() }).unwrap();
+    let schema = json!({"type":"object","properties":{"inside":{"type":"string"},"outside":{"type":"string"}},"required":["inside","outside"]});
+    let prompt = format!(
+        "Use the Read tool on {} and on {}. Return their contents in fields inside and outside; use the text UNREADABLE for a file you could not read.",
+        share.path().join("inside.txt").display(),
+        outside.path().join("secret.txt").display()
+    );
+
+    let out = client
+        .structured_with_files::<serde_json::Map<String, Value>>("Be terse.", &prompt, &schema, share.path())
+        .await
+        .unwrap();
+
+    println!("{:?}", out.value);
+    assert!(out.value["inside"].as_str().unwrap().contains("INSIDE-7f3a"));
+    assert!(!out.value["outside"].as_str().unwrap().contains("OUTSIDE-9c1e"));
 }

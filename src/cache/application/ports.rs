@@ -16,4 +16,6 @@ pub trait ContentIds: Send + Sync {
     fn object_id<'a>(&'a self, rev: &'a str, path: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>>;
 
     fn tree_id<'a>(&'a self, rev: &'a str, dir: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>>;
+
+    fn file_text<'a>(&'a self, rev: &'a str, path: &'a str) -> BoxFuture<'a, Result<Option<String>, CacheError>>;
 }
