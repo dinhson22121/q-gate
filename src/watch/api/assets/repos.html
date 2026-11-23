@@ -281,7 +281,7 @@ p { margin: 4px 0; }
         el("span", { class: "row-actions" },
           !repo.exists && chip("missing on disk", "warn"),
           el("button", { type: "button", class: "primary", disabled: !repo.exists || scanning, onclick: () => startScan(repo) },
-            scanning ? "Đang quét…" : "Scan now"),
+            scanning ? "Scanning…" : "Scan now"),
           el("button", { type: "button", disabled: scanning, onclick: guarded(async () => {
             await call("DELETE", "/api/repos", { path: repo.path });
             await loadImported();
@@ -300,9 +300,9 @@ p { margin: 4px 0; }
       return el("div", { class: "scan-wrap" },
         el("div", { class: "scan-head" },
           el("span", { class: "spin" }),
-          el("span", {}, "Đang quét thay đổi của ", el("strong", {}, repo.name), " "),
+          el("span", {}, "Scanning changes in ", el("strong", {}, repo.name), " "),
           el("span", { class: "muted" }, sc.elapsed + "s")),
-        el("div", { class: "scan-bar", role: "progressbar", "aria-label": "Đang quét" }));
+        el("div", { class: "scan-bar", role: "progressbar", "aria-label": "Scanning" }));
     }
     if (sc.phase === "done") {
       const f = sc.run.findings || {};
@@ -316,17 +316,17 @@ p { margin: 4px 0; }
           el("span", {}, total + " finding" + (total === 1 ? "" : "s")
             + (f.critical ? " · " + f.critical + " critical" : "")
             + (f.major ? " · " + f.major + " major" : "")),
-          el("a", { class: "scan-link", href: "/" }, "Xem chi tiết trên Dashboard →")));
+          el("a", { class: "scan-link", href: "/" }, "View details on the Dashboard →")));
     }
     if (sc.phase === "timeout") {
       return el("div", { class: "scan-wrap" },
         el("div", { class: "scan-head" },
-          el("span", { class: "muted" }, "Quá trình quét vẫn đang chạy — kết quả sẽ xuất hiện trên Dashboard."),
-          el("a", { class: "scan-link", href: "/" }, "Mở Dashboard →")));
+          el("span", { class: "muted" }, "The scan is still running — results will appear on the Dashboard."),
+          el("a", { class: "scan-link", href: "/" }, "Open Dashboard →")));
     }
     if (sc.phase === "error") {
       return el("div", { class: "scan-wrap" },
-        el("div", { class: "scan-head" }, chip("Không khởi động được", "bad"), el("span", { class: "muted" }, sc.error || "")));
+        el("div", { class: "scan-head" }, chip("Could not start", "bad"), el("span", { class: "muted" }, sc.error || "")));
     }
     return null;
   }

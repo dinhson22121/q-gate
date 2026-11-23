@@ -249,7 +249,7 @@ mod tests {
     fn handles_empty_and_non_ascii_input() {
         assert_eq!(key(None, None), None);
         assert_eq!(key(Some(""), Some("")), None);
-        assert_eq!(key(Some("tính-năng/ABC-5"), None).as_deref(), Some("ABC-5"));
+        assert_eq!(key(Some("feature-café/ABC-5"), None).as_deref(), Some("ABC-5"));
         assert_eq!(key(Some("ABC-"), None), None);
     }
 }

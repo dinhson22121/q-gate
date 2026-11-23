@@ -372,9 +372,9 @@ p { margin: 4px 0; }
       const response = await fetch("/api/runs/" + encodeURIComponent(id) + "/export", { credentials: "same-origin" });
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error("Run " + id + " chưa có bản review để export (run cũ, hoặc không có report).");
+          throw new Error("Run " + id + " has no review to export (older run, or no report).");
         }
-        let message = "Không export được (HTTP " + response.status + ")";
+        let message = "Export failed (HTTP " + response.status + ")";
         try { const data = await response.json(); if (data && data.error) message = data.error; } catch (e) {}
         throw new Error(message);
       }
