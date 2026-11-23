@@ -121,7 +121,7 @@ async fn page_is_self_contained_and_never_parses_html() {
     let meta = format!(r#"<meta name="qgate-token" content="{}">"#, server.token.expose());
     assert!(html.contains(&meta), "the page carries this instance's token");
     assert!(html.contains(r#""X-Qgate-Token": TOKEN"#) && !html.contains("__QGATE_TOKEN__"));
-    assert!(html.contains("prefers-color-scheme: dark"));
+    assert!(html.contains("color-scheme: light") && html.contains("prefers-color-scheme: dark"));
 }
 
 #[tokio::test]
