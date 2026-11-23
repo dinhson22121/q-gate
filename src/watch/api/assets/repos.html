@@ -147,6 +147,19 @@ p { margin: 4px 0; }
 .row-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; padding-right: 4px; }
 .imp-name { flex: 1 1 auto; min-width: 0; padding: 10px 12px; }
 .tag-git { display: inline-flex; align-items: center; border-radius: 9999px; padding: 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; line-height: 18px; background: var(--info-bg); color: var(--info-fg); }
+.browse-list li { flex-wrap: wrap; }
+.scan-wrap { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; padding: 2px 4px 6px; }
+.scan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.scan-bar { position: relative; height: 6px; border-radius: 9999px; background: var(--main); overflow: hidden; }
+.scan-bar::after { content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 40%; border-radius: 9999px; background: linear-gradient(90deg, var(--primary-light), var(--primary-dark)); animation: scan-slide 1.1s var(--ease) infinite; }
+@keyframes scan-slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+.spin { flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--primary-dark); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.scan-link { font-size: 13px; font-weight: 600; margin-left: auto; }
+@media (prefers-reduced-motion: reduce) {
+  .scan-bar::after { animation: none; width: 100%; opacity: .5; }
+  .spin { animation: none; }
+}
 </style>
 <script>
 (function(){var K="qgate-theme",O=["system","light","dark"],c="system";try{c=localStorage.getItem(K)||"system";}catch(e){}function apply(t){var r=document.documentElement;if(t==="system")r.removeAttribute("data-theme");else r.setAttribute("data-theme",t);var b=document.getElementById("qg-theme");if(b){var l=b.querySelector(".tt-label");if(l)l.textContent=t.charAt(0).toUpperCase()+t.slice(1);}}apply(c);document.addEventListener("DOMContentLoaded",function(){apply(c);var b=document.getElementById("qg-theme");if(b)b.addEventListener("click",function(){c=O[(O.indexOf(c)+1)%3];try{localStorage.setItem(K,c);}catch(e){}apply(c);});});})();
@@ -196,7 +209,8 @@ p { margin: 4px 0; }
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page.";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "repos", "X-Qgate-Token": TOKEN, Accept: "application/json" };
-  const state = { path: "", imported: [], base: "", hostBase: "" };
+  const state = { path: "", imported: [], base: "", hostBase: "", scans: {} };
+  const SCAN_TIMEOUT_SECS = 240;
   const $ = (id) => document.getElementById(id);
 
   const toHost = (p) => {
@@ -259,21 +273,120 @@ p { margin: 4px 0; }
   };
 
   function renderImported() {
-    const rows = state.imported.map((repo) => el("li", {},
-      el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, toHost(repo.path))),
-      el("span", { class: "row-actions" },
-        !repo.exists && chip("missing on disk", "warn"),
-        el("button", { type: "button", class: "primary", disabled: !repo.exists, onclick: guarded(async () => {
-          await call("POST", "/api/repos/scan", { path: repo.path });
-          showNotice("Scan started for " + repo.name + " — results appear on the Dashboard shortly.");
-        }) }, "Scan now"),
-        el("button", { type: "button", onclick: guarded(async () => {
-          await call("DELETE", "/api/repos", { path: repo.path });
-          await loadImported();
-        }) }, "Remove"))));
+    const rows = state.imported.map((repo) => {
+      const scan = state.scans[repo.path];
+      const scanning = scan && scan.phase === "running";
+      return el("li", {},
+        el("span", { class: "imp-name" }, el("strong", {}, repo.name), " ", el("span", { class: "mono muted" }, toHost(repo.path))),
+        el("span", { class: "row-actions" },
+          !repo.exists && chip("missing on disk", "warn"),
+          el("button", { type: "button", class: "primary", disabled: !repo.exists || scanning, onclick: () => startScan(repo) },
+            scanning ? "Đang quét…" : "Scan now"),
+          el("button", { type: "button", disabled: scanning, onclick: guarded(async () => {
+            await call("DELETE", "/api/repos", { path: repo.path });
+            await loadImported();
+          }) }, "Remove")),
+        scanBlock(repo));
+    });
     replace($("imported"), rows.length
       ? el("ul", { class: "browse-list" }, rows)
       : el("p", { class: "empty" }, "No repository imported yet — browse below and import one."));
+  }
+
+  function scanBlock(repo) {
+    const sc = state.scans[repo.path];
+    if (!sc) return null;
+    if (sc.phase === "running") {
+      return el("div", { class: "scan-wrap" },
+        el("div", { class: "scan-head" },
+          el("span", { class: "spin" }),
+          el("span", {}, "Đang quét thay đổi của ", el("strong", {}, repo.name), " "),
+          el("span", { class: "muted" }, sc.elapsed + "s")),
+        el("div", { class: "scan-bar", role: "progressbar", "aria-label": "Đang quét" }));
+    }
+    if (sc.phase === "done") {
+      const f = sc.run.findings || {};
+      const total = (f.critical || 0) + (f.major || 0) + (f.minor || 0) + (f.info || 0);
+      const passed = sc.run.status === "passed";
+      const cls = passed ? "ok" : (sc.run.status === "error" ? "warn" : "bad");
+      const verdict = passed ? "PASSED" : (sc.run.status === "error" ? "ERROR" : "FAILED");
+      return el("div", { class: "scan-wrap" },
+        el("div", { class: "scan-head" },
+          chip(verdict, cls),
+          el("span", {}, total + " finding" + (total === 1 ? "" : "s")
+            + (f.critical ? " · " + f.critical + " critical" : "")
+            + (f.major ? " · " + f.major + " major" : "")),
+          el("a", { class: "scan-link", href: "/" }, "Xem chi tiết trên Dashboard →")));
+    }
+    if (sc.phase === "timeout") {
+      return el("div", { class: "scan-wrap" },
+        el("div", { class: "scan-head" },
+          el("span", { class: "muted" }, "Quá trình quét vẫn đang chạy — kết quả sẽ xuất hiện trên Dashboard."),
+          el("a", { class: "scan-link", href: "/" }, "Mở Dashboard →")));
+    }
+    if (sc.phase === "error") {
+      return el("div", { class: "scan-wrap" },
+        el("div", { class: "scan-head" }, chip("Không khởi động được", "bad"), el("span", { class: "muted" }, sc.error || "")));
+    }
+    return null;
+  }
+
+  async function latestRunId(name) {
+    try {
+      const { items } = await call("GET", "/api/runs?limit=10&repo=" + encodeURIComponent(name));
+      return (items || [])
+        .filter((it) => it.repo_name === name)
+        .reduce((max, it) => (it.id > max ? it.id : max), 0);
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  function stopScan(sc) {
+    if (sc.timer) { clearInterval(sc.timer); sc.timer = null; }
+  }
+
+  async function startScan(repo) {
+    showError("");
+    showNotice("");
+    const existing = state.scans[repo.path];
+    if (existing) stopScan(existing);
+    const sinceId = await latestRunId(repo.name);
+    const sc = { phase: "running", sinceId, startedAt: Date.now(), elapsed: 0, busy: false, timer: null };
+    state.scans[repo.path] = sc;
+    renderImported();
+    try {
+      await call("POST", "/api/repos/scan", { path: repo.path });
+    } catch (err) {
+      sc.phase = "error";
+      sc.error = err.message;
+      renderImported();
+      return;
+    }
+    sc.timer = setInterval(() => pollScan(repo, sc), 1500);
+  }
+
+  async function pollScan(repo, sc) {
+    sc.elapsed = Math.round((Date.now() - sc.startedAt) / 1000);
+    if (sc.phase !== "running" || sc.busy) { renderImported(); return; }
+    sc.busy = true;
+    try {
+      const { items } = await call("GET", "/api/runs?limit=10&repo=" + encodeURIComponent(repo.name));
+      const mine = (items || []).filter((it) => it.repo_name === repo.name && it.id > sc.sinceId);
+      if (mine.length) {
+        sc.run = mine.reduce((best, it) => (it.id > best.id ? it : best));
+        sc.phase = "done";
+        stopScan(sc);
+      } else if (sc.elapsed >= SCAN_TIMEOUT_SECS) {
+        sc.phase = "timeout";
+        stopScan(sc);
+      }
+    } catch (err) {
+      if (sc.elapsed >= SCAN_TIMEOUT_SECS) { sc.phase = "timeout"; stopScan(sc); }
+    } finally {
+      sc.busy = false;
+      renderImported();
+    }
   }
 
   function renderListing(listing) {
