@@ -161,7 +161,6 @@ fieldset > legend { font-size: 12px; color: var(--muted); font-weight: 600; padd
 .secret { background: var(--main); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; }
 .secret-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .secret-head label { margin: 0; }
-.card-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -606,8 +605,7 @@ p { margin: 4px 0; }
     }
     flush();
     return el("section", { class: "panel", id: "s-" + section.id, "aria-labelledby": "h-" + section.id },
-      el("h2", { id: "h-" + section.id }, section.title), body,
-      el("div", { class: "card-foot" }, el("button", { type: "button", class: "primary", onclick: save }, "Save settings")));
+      el("h2", { id: "h-" + section.id }, section.title), body);
   }
 
   function renderHistory(entries) {
