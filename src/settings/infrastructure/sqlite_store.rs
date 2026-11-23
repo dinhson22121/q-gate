@@ -188,7 +188,7 @@ mod tests {
         SqliteServerConfigStore::open(&path).unwrap().save_raw(&ServerConfig::default(), "x").unwrap();
         let store = SqliteServerConfigStore::open(&path).unwrap();
         assert!(store.load_raw().unwrap().is_some());
-        assert_eq!(history.schema_version().unwrap(), 1, "history schema untouched");
+        assert_eq!(history.schema_version().unwrap(), 2, "history schema untouched");
     }
 
     #[test]

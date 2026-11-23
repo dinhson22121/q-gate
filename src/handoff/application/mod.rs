@@ -10,6 +10,12 @@ pub use crate::handoff::domain::{
 };
 pub use export::{ExportOutcome, ExportReview, SkipReason};
 
+use crate::review::application::ReviewReport;
+
+pub fn render_review_markdown(meta: RunMeta, report: &ReviewReport) -> String {
+    render_markdown(&HandoffDocument::build(&HandoffInput { meta, report, rules: BlockingRules::default() }))
+}
+
 const NATIVE_DIR: [&str; 2] = [".qgate", "reviews"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

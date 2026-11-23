@@ -145,6 +145,9 @@ tr.run-row[aria-selected="true"] { background: var(--selected); }
 .error-banner { margin: 0; padding: 14px 16px; border-radius: 16px; font-weight: 500; }
 .detail h3 { font-size: 14px; font-weight: 700; margin: 18px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
 .detail h3:first-of-type { border-top: 0; padding-top: 0; }
+.detail-actions { margin: 10px 0 2px; }
+.btn-link { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; color: rgba(var(--ink), .8); font: 500 13px/1 var(--sans); text-decoration: none; transition: background .15s var(--ease); }
+.btn-link:hover { background: var(--main); text-decoration: none; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); }
 .verdict { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; margin: 10px 0 4px; }
 ul.plain { list-style: none; padding: 0; margin: 0; }
@@ -380,6 +383,8 @@ p { margin: 4px 0; }
       replace($("detail"), nodes);
       return;
     }
+    nodes.push(el("div", { class: "detail-actions" },
+      el("a", { class: "btn-link", href: "/api/runs/" + run.id + "/export", download: true, title: "Download the review as Markdown" }, "⬇ Export .md")));
     nodes.push(verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
       testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
       architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),

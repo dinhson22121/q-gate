@@ -13,6 +13,7 @@ use crate::conventions::application::{RulebookStore, repo_key};
 use crate::conventions::infrastructure::SqliteRulebookStore;
 use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta};
 use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
+use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::history::application::{RecordRun, ReviewRun, RunRepository, RunStatus, Trigger};
 use crate::history::infrastructure::SqliteRunRepository;
 use crate::llm::{CliClient, CliConfig, LlmError, StructuredModel};
@@ -420,6 +421,18 @@ fn build_run(request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutc
         .and_then(|r| r.requirements.as_ref())
         .map(|r| r.requirements.key.clone())
         .or_else(|| request.explicit_ticket.clone());
+    let report_md = report.as_ref().map(|r| {
+        let handoff_meta = HandoffRunMeta {
+            repo: meta.repo_name.clone(),
+            branch: meta.branch.clone(),
+            commit: meta.commit.clone().unwrap_or_default(),
+            ticket_keys: ticket_key.clone().into_iter().collect(),
+            reviewed_at: Utc::now(),
+            run_id: None,
+            dashboard_url: None,
+        };
+        render_review_markdown(handoff_meta, r)
+    });
     ReviewRun {
         id: 0,
         repo_path: request.repo_root.display().to_string(),
@@ -432,6 +445,7 @@ fn build_run(request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutc
         status,
         error,
         report,
+        report_md,
     }
 }
 

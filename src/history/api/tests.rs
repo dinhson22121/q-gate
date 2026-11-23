@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::history::application::RecordRun;
+use crate::history::domain::ReviewRun;
 use crate::history::domain::fixtures::live_run;
 use crate::history::infrastructure::SqliteRunRepository;
 
@@ -235,4 +236,25 @@ fn normalizes_host_header_values() {
     assert_eq!(security::normalize_host("[::1]:9"), "::1");
     assert_eq!(security::normalize_host("::1"), "::1");
     assert_eq!(security::normalize_host("example.com."), "example.com");
+}
+
+#[tokio::test]
+async fn exports_a_run_as_markdown_or_404s() {
+    let server = TestServer::start(None).await;
+    let md = "# Review — PASSED\n\nNo blocking findings.\n";
+    let run = ReviewRun { report_md: Some(md.to_string()), ..live_run("api", chrono::Utc::now()) };
+    let id = server.repository.insert(&run).unwrap();
+
+    let response = server.get(&format!("/api/runs/{id}/export")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap().to_string();
+    assert!(content_type.starts_with("text/markdown"), "{content_type}");
+    let disposition =
+        response.headers().get(reqwest::header::CONTENT_DISPOSITION).unwrap().to_str().unwrap().to_string();
+    assert!(disposition.starts_with("attachment;") && disposition.contains(".md"), "{disposition}");
+    assert_eq!(response.text().await.unwrap(), md);
+
+    assert_eq!(server.get(&format!("/api/runs/{}/export", server.run_id)).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(server.get("/api/runs/99999/export").await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(server.get("/api/runs/abc/export").await.status(), StatusCode::BAD_REQUEST);
 }

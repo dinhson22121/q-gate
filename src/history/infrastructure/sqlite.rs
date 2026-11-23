@@ -28,10 +28,10 @@ const MIGRATIONS: &[&str] = &["
     CREATE INDEX idx_runs_created_at ON runs (created_at_ms DESC);
     CREATE INDEX idx_runs_repo ON runs (repo_name, created_at_ms DESC);
     CREATE INDEX idx_runs_status ON runs (status, created_at_ms DESC);
-"];
+", "ALTER TABLE runs ADD COLUMN report_md TEXT;"];
 
 const COLUMNS: &str = "id, repo_path, repo_name, commit_sha, branch, ticket_key, trigger_kind, \
-                       created_at_ms, status, error, report_json";
+                       created_at_ms, status, error, report_json, report_md";
 const FILTER: &str = "(?1 IS NULL OR repo_name = ?1 OR repo_path = ?1) AND (?2 IS NULL OR status = ?2)";
 
 pub struct SqliteRunRepository {
@@ -125,6 +125,7 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<StoredRun> {
         status: status.parse::<RunStatus>().map_err(|e| invalid_column(8, e))?,
         error,
         report,
+        report_md: row.get(11)?,
     })
 }
 
@@ -134,7 +135,8 @@ impl RunRepository for SqliteRunRepository {
         let conn = self.lock()?;
         conn.prepare_cached(
             "INSERT INTO runs (repo_path, repo_name, commit_sha, branch, ticket_key, trigger_kind, \
-             created_at_ms, status, error, report_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             created_at_ms, status, error, report_json, report_md) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )
         .and_then(|mut stmt| {
             stmt.execute(params![
@@ -148,6 +150,7 @@ impl RunRepository for SqliteRunRepository {
                 run.status.as_str(),
                 run.error,
                 report_json,
+                run.report_md,
             ])
         })
         .map_err(storage)?;

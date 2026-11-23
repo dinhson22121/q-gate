@@ -99,10 +99,25 @@ main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding:
 .banner.info { background: var(--banner-info-bg); color: rgba(var(--ink), .8); }
 .banner.bad { background: var(--banner-bad-bg); color: var(--error); font-weight: 500; }
 .banner.warn { background: var(--banner-warn-bg); color: var(--warn-fg); font-weight: 500; }
-section.panel { background: transparent; border: 0; padding: 0; margin: 0; }
-section.panel > h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: rgba(var(--ink), .6); margin: 4px 2px 12px; display: flex; gap: 8px; align-items: center; }
-.rule { background: var(--sub); border: 0; border-radius: 16px; box-shadow: var(--shadow-soft); padding: 14px 16px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; transition: box-shadow .2s var(--ease); }
-.rule:hover { box-shadow: var(--shadow-lg); }
+#groups { display: flex; flex-direction: column; gap: 16px; }
+.summary { background: var(--sub); border-radius: 16px; box-shadow: var(--shadow-soft); padding: 12px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.summary .built { font-size: 13px; font-weight: 500; color: rgba(var(--ink), .6); }
+.summary .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.group { background: var(--sub); border-radius: 16px; box-shadow: var(--shadow-soft); overflow: hidden; }
+.group-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.group-head h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: rgba(var(--ink), .6); margin: 0; }
+.group-head .chip { margin-left: auto; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.dot.ok { background: var(--ok-fg); }
+.dot.warn { background: var(--warn-fg); }
+.dot.neutral { background: rgba(var(--ink), .3); }
+.group-body { display: flex; flex-direction: column; }
+.group-body > .empty { padding: 16px 18px; margin: 0; }
+.solo { background: var(--sub); border-radius: 16px; box-shadow: var(--shadow-soft); padding: 4px 6px; }
+.solo > .rule { border-bottom: 0; }
+.rule { background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 16px 18px; margin: 0; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--line); transition: background .15s var(--ease); }
+.group-body > .rule:last-child { border-bottom: 0; }
+.rule:hover { background: var(--main); }
 .rule .desc { font-size: 14px; color: rgba(var(--ink), .82); }
 .rule .scope { font-size: 12.5px; }
 details.more { margin-top: 2px; }
@@ -116,7 +131,7 @@ details.howto > summary { cursor: pointer; font-weight: 500; list-style: none; }
 details.howto > summary::-webkit-details-marker { display: none; }
 details.howto[open] > summary { margin-bottom: 8px; font-weight: 700; }
 details.howto p { margin: 0; font-weight: 300; }
-.rule.editing { gap: 10px; outline: 2px solid var(--selected); }
+.rule.editing, .rule.editing:hover { gap: 10px; background: var(--selected); }
 .rule .f-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: rgba(var(--ink), .6); }
 .rule input[type="text"], .rule textarea { font: 500 14px/1.4 var(--sans); color: rgb(var(--ink)); background: var(--input-bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; width: 100%; }
 .rule textarea { resize: vertical; font-weight: 300; }
@@ -312,14 +327,19 @@ p { margin: 4px 0; }
     clearTimeout(state.timer);
     if (view.building) state.timer = setTimeout(load, POLL_MS);
     const created = new Date(book.created_at).toLocaleString();
-    const sections = GROUPS.map(([key, title, cls]) => {
-      const rules = book.rules.filter((r) => r.status === key);
-      return el("section", { class: "panel" },
-        el("h2", {}, title, chip(String(rules.length), cls)),
-        rules.length ? rules.map(ruleCard) : el("p", { class: "empty" }, "No " + title.toLowerCase() + " rules."));
-    });
-    const newForm = state.editing === "__new__" ? ruleForm(null) : null;
-    replace($("groups"), el("p", { class: "muted" }, "Built " + created + " · " + book.rules.length + " rules"), newForm, sections);
+    const byStatus = GROUPS.map(([key, title, cls]) => ({ title, cls, rules: book.rules.filter((r) => r.status === key) }));
+    const summary = el("div", { class: "summary" },
+      el("span", { class: "built" }, "Built " + created),
+      el("span", { class: "counts" },
+        byStatus.map((g) => chip(g.title + " " + g.rules.length, g.cls)),
+        chip(book.rules.length + " total", "neutral")));
+    const sections = byStatus.map((g) =>
+      el("section", { class: "group" },
+        el("div", { class: "group-head" }, el("span", { class: "dot " + g.cls }), el("h2", {}, g.title), chip(String(g.rules.length), g.cls)),
+        el("div", { class: "group-body" },
+          g.rules.length ? g.rules.map(ruleCard) : el("p", { class: "empty" }, "No " + g.title.toLowerCase() + " rules."))));
+    const newForm = state.editing === "__new__" ? el("div", { class: "solo" }, ruleForm(null)) : null;
+    replace($("groups"), summary, newForm, sections);
   }
 
   async function load() {

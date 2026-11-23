@@ -122,6 +122,7 @@ pub fn stored(
         status,
         error: None,
         report,
+        report_md: None,
     }
 }
 
@@ -201,5 +202,6 @@ pub fn live_run(repo: &str, created_at: DateTime<Utc>) -> ReviewRun {
         status: RunStatus::of_report(&report),
         error: None,
         report: Some(report),
+        report_md: None,
     }
 }

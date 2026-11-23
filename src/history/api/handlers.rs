@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -105,4 +105,41 @@ pub(super) async fn get_run(State(state): State<DashboardState>, Path(id): Path<
 
 pub(super) async fn get_ticket(State(state): State<DashboardState>, Path(key): Path<String>) -> ApiResult {
     blocking(move || TicketHistory::new(state.repository).execute(&key)).await
+}
+
+fn export_filename(repo: &str, sha7: &str, id: i64) -> String {
+    let safe: String =
+        repo.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect();
+    let tag = if sha7.is_empty() { format!("run{id}") } else { sha7.to_string() };
+    format!("qgate-review-{safe}-{tag}.md")
+}
+
+pub(super) async fn export_run(State(state): State<DashboardState>, Path(id): Path<String>) -> Response {
+    let Ok(id) = id.parse::<i64>() else {
+        return (StatusCode::BAD_REQUEST, error_body("invalid run id")).into_response();
+    };
+    let repo = state.repository;
+    let run = match tokio::task::spawn_blocking(move || GetRun::new(repo).execute(id)).await {
+        Ok(Ok(Some(run))) => run,
+        Ok(Ok(None)) => return (StatusCode::NOT_FOUND, error_body("not found")).into_response(),
+        Ok(Err(err)) => return ApiError::from(err).into_response(),
+        Err(err) => {
+            eprintln!("qgate dashboard: worker failed: {err}");
+            return ApiError::Internal.into_response();
+        }
+    };
+    let Some(markdown) = run.report_md.clone() else {
+        return (StatusCode::NOT_FOUND, error_body("this run has no exportable review (older run, or no report)"))
+            .into_response();
+    };
+    let sha7: String = run.commit.clone().unwrap_or_default().chars().take(7).collect();
+    let filename = export_filename(&run.repo_name, &sha7, run.id);
+    (
+        [
+            (header::CONTENT_TYPE, "text/markdown; charset=utf-8".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{filename}\"")),
+        ],
+        markdown,
+    )
+        .into_response()
 }

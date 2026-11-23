@@ -47,6 +47,7 @@ pub fn router_guarded(state: DashboardState, extra: Router, guard: impl FnOnce(R
         .route("/api/summary", get(handlers::summary))
         .route("/api/runs", get(handlers::list_runs))
         .route("/api/runs/{id}", get(handlers::get_run))
+        .route("/api/runs/{id}/export", get(handlers::export_run))
         .route("/api/recurring", get(handlers::recurring))
         .route("/api/tickets/{key}", get(handlers::get_ticket))
         .with_state(state.clone())

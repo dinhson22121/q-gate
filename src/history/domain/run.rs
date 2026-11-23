@@ -77,6 +77,8 @@ pub struct ReviewRun<R = ReviewReport> {
     pub status: RunStatus,
     pub error: Option<String>,
     pub report: Option<R>,
+    #[serde(skip)]
+    pub report_md: Option<String>,
 }
 
 pub type StoredRun = ReviewRun<ReportView>;
