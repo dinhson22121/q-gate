@@ -8,10 +8,12 @@ use serde_json::{Value, json};
 
 use super::RulebookApiState;
 use crate::conventions::application::ConventionsError;
-use crate::conventions::domain::rulebook::{RuleStatus, Rulebook};
+use crate::conventions::domain::rulebook::{RuleRef, RuleStatus, Rulebook, TeamRule};
 
 const RULEBOOK_HTML: &str = include_str!("assets/rulebook.html");
 const DECISION_HINT: &str = "body must be {\"status\": \"approved\" | \"rejected\" | \"proposed\"}";
+const TEAM_RULE_HINT: &str =
+    "body must be {\"title\": string, \"description\": string, \"scope_globs\"?: string[], \"status\"?: string, \"replaces\"?: {\"id\": string, \"title\": string}}";
 
 pub(super) fn error_response(status: StatusCode, message: &str) -> Response<Body> {
     (status, Json(json!({ "error": message }))).into_response()
@@ -96,6 +98,56 @@ pub(super) async fn decide(
     let status = RuleStatus::parse(&parsed.status)
         .ok_or_else(|| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, DECISION_HINT))?;
     let rulebook = state.service.decide(&repo, &id, status).await?;
+    let rulebook = to_json(&rulebook)?;
+    Ok(Json(view(&state, &repo, rulebook)).into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplaceRef {
+    id: String,
+    title: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TeamRuleBody {
+    #[serde(default)]
+    replaces: Option<ReplaceRef>,
+    title: String,
+    description: String,
+    #[serde(default)]
+    scope_globs: Vec<String>,
+    #[serde(default)]
+    status: Option<String>,
+}
+
+pub(super) async fn team_rule(
+    State(state): State<RulebookApiState>,
+    Path(repo): Path<String>,
+    body: Bytes,
+) -> ApiResult {
+    let parsed: TeamRuleBody =
+        serde_json::from_slice(&body).map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, TEAM_RULE_HINT))?;
+    let title = parsed.title.trim();
+    let description = parsed.description.trim();
+    if title.is_empty() || description.is_empty() {
+        return Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "title and description are required"));
+    }
+    let status = match parsed.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => RuleStatus::Approved,
+        Some(raw) => {
+            RuleStatus::parse(raw).ok_or_else(|| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, TEAM_RULE_HINT))?
+        }
+    };
+    let team = TeamRule {
+        replaces: parsed.replaces.map(|r| RuleRef { id: r.id, title: r.title }),
+        title: title.to_string(),
+        description: description.to_string(),
+        scope_globs: parsed.scope_globs.into_iter().map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect(),
+        status,
+    };
+    let rulebook = state.service.add_team_rules(&repo, vec![team]).await?;
     let rulebook = to_json(&rulebook)?;
     Ok(Json(view(&state, &repo, rulebook)).into_response())
 }

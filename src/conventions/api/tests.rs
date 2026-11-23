@@ -25,11 +25,12 @@ struct TestServer {
     store: Arc<MemoryStore>,
     model: Arc<FakeModel>,
     token: ApiToken,
+    repo: String,
     _stop: oneshot::Sender<()>,
     _dir: tempfile::TempDir,
 }
 
-fn rulebook() -> Rulebook {
+fn rulebook(repo: &str) -> Rulebook {
     let rule = |id: &str, title: &str, kind, status| Rule {
         id: id.into(),
         title: title.into(),
@@ -41,7 +42,7 @@ fn rulebook() -> Rulebook {
         lint_suggestion: Some("clippy::unwrap_used".into()),
     };
     Rulebook {
-        repo: REPO.into(),
+        repo: repo.into(),
         fingerprint: "fp".into(),
         rules: vec![
             rule("R1", "Domain is pure", RuleKind::Explicit, RuleStatus::Approved),
@@ -53,10 +54,12 @@ fn rulebook() -> Rulebook {
 
 impl TestServer {
     async fn start() -> Self {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let repo = format!("{REPO}-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let dir = tempfile::tempdir().unwrap();
         let runs = Arc::new(SqliteRunRepository::open(dir.path().join("qgate.db")).unwrap());
         let store = Arc::new(MemoryStore::default());
-        store.save(&rulebook()).unwrap();
+        store.save(&rulebook(&repo)).unwrap();
         let model = Arc::new(FakeModel::default());
         let service = Arc::new(RulebookService::new(model.clone(), Arc::new(MemoryRepo::default()), store.clone()));
         let hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
@@ -69,7 +72,7 @@ impl TestServer {
         tokio::spawn(serve_on_with(listener, dashboard, extra, async {
             let _ = stopped.await;
         }));
-        Self { addr, client: reqwest::Client::new(), store, model, token, _stop: stop, _dir: dir }
+        Self { addr, client: reqwest::Client::new(), store, model, token, repo, _stop: stop, _dir: dir }
     }
 
     fn url(&self, path: &str) -> String {
@@ -102,8 +105,8 @@ fn encoded(repo: &str) -> String {
     repo.replace('/', "%2F")
 }
 
-fn decision_path(id: &str) -> String {
-    format!("/api/rulebook/{}/rules/{id}/decision", encoded(REPO))
+fn decision_path(repo: &str, id: &str) -> String {
+    format!("/api/rulebook/{}/rules/{id}/decision", encoded(repo))
 }
 
 #[tokio::test]
@@ -127,10 +130,10 @@ async fn page_is_self_contained_and_never_parses_html() {
 #[tokio::test]
 async fn lists_repos_and_reads_a_rulebook() {
     let server = TestServer::start().await;
-    assert_eq!(server.get_json("/api/rulebook/repos").await, (StatusCode::OK, json!({ "repos": [REPO] })));
-    let (status, view) = server.get_json(&format!("/api/rulebook?repo={}", encoded(REPO))).await;
+    assert_eq!(server.get_json("/api/rulebook/repos").await, (StatusCode::OK, json!({ "repos": [server.repo.as_str()] })));
+    let (status, view) = server.get_json(&format!("/api/rulebook?repo={}", encoded(&server.repo))).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(view["repo"], REPO);
+    assert_eq!(view["repo"], server.repo.as_str());
     assert_eq!(view["building"], false);
     assert_eq!(view["rulebook"]["rules"][1]["status"], "proposed");
     assert_eq!(view["rulebook"]["rules"][0]["kind"], "explicit");
@@ -141,21 +144,21 @@ async fn lists_repos_and_reads_a_rulebook() {
 #[tokio::test]
 async fn decision_persists_and_is_validated() {
     let server = TestServer::start().await;
-    let response = server.post(&decision_path("R2")).json(&json!({ "status": "approved" })).send().await.unwrap();
+    let response = server.post(&decision_path(&server.repo, "R2")).json(&json!({ "status": "approved" })).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["rulebook"]["rules"][1]["status"], "approved");
-    assert_eq!(server.store.load(REPO).unwrap().unwrap().rules[1].status, RuleStatus::Approved);
-    assert_eq!(server.store.decisions(REPO).unwrap()["errors use thiserror"], RuleStatus::Approved);
+    assert_eq!(server.store.load(&server.repo).unwrap().unwrap().rules[1].status, RuleStatus::Approved);
+    assert_eq!(server.store.decisions(&server.repo).unwrap()["errors use thiserror"], RuleStatus::Approved);
 
-    let bad = server.post(&decision_path("R2")).json(&json!({ "status": "maybe" })).send().await.unwrap();
+    let bad = server.post(&decision_path(&server.repo, "R2")).json(&json!({ "status": "maybe" })).send().await.unwrap();
     assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let garbage = server.post(&decision_path("R2")).body("nope").send().await.unwrap();
+    let garbage = server.post(&decision_path(&server.repo, "R2")).body("nope").send().await.unwrap();
     assert_eq!(garbage.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let unknown = server.post(&decision_path("R9")).json(&json!({ "status": "approved" })).send().await.unwrap();
+    let unknown = server.post(&decision_path(&server.repo, "R9")).json(&json!({ "status": "approved" })).send().await.unwrap();
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
     let huge =
-        server.post(&decision_path("R2")).body(format!("\"{}\"", "x".repeat(MAX_BODY_BYTES))).send().await.unwrap();
+        server.post(&decision_path(&server.repo, "R2")).body(format!("\"{}\"", "x".repeat(MAX_BODY_BYTES))).send().await.unwrap();
     assert_eq!(huge.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
@@ -163,35 +166,35 @@ async fn decision_persists_and_is_validated() {
 async fn mutations_require_csrf_header_allowed_origin_token_and_json() {
     let server = TestServer::start().await;
     let body = json!({ "status": "rejected" }).to_string();
-    let url = server.url(&decision_path("R1"));
+    let url = server.url(&decision_path(&server.repo, "R1"));
     let no_header =
         server.client.post(&url).header(CONTENT_TYPE, "application/json").body(body.clone()).send().await.unwrap();
     assert_eq!(no_header.status(), StatusCode::FORBIDDEN);
-    let evil = server.custom(&decision_path("R1"), "application/json", "https://evil.example").body(body.clone());
+    let evil = server.custom(&decision_path(&server.repo, "R1"), "application/json", "https://evil.example").body(body.clone());
     assert_eq!(evil.send().await.unwrap().status(), StatusCode::FORBIDDEN);
     let origin = format!("http://127.0.0.1:{}", server.addr.port());
-    let form = server.custom(&decision_path("R1"), "text/plain", &origin).body(body.clone());
+    let form = server.custom(&decision_path(&server.repo, "R1"), "text/plain", &origin).body(body.clone());
     assert_eq!(form.send().await.unwrap().status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    let rebuild = server.client.post(server.url(&format!("/api/rulebook/{}/rebuild", encoded(REPO))));
+    let rebuild = server.client.post(server.url(&format!("/api/rulebook/{}/rebuild", encoded(&server.repo))));
     assert_eq!(rebuild.send().await.unwrap().status(), StatusCode::FORBIDDEN);
-    let no_token = server.without_token(&decision_path("R1"), "application/json", &origin).body(body.clone());
+    let no_token = server.without_token(&decision_path(&server.repo, "R1"), "application/json", &origin).body(body.clone());
     assert_eq!(no_token.send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
     let wrong =
-        server.without_token(&decision_path("R1"), "application/json", &origin).header(TOKEN_HEADER, "0".repeat(64));
+        server.without_token(&decision_path(&server.repo, "R1"), "application/json", &origin).header(TOKEN_HEADER, "0".repeat(64));
     let wrong = wrong.body(body.clone()).send().await.unwrap();
     assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
     assert!(wrong.json::<Value>().await.unwrap()["error"].as_str().unwrap().contains("reload the page"));
-    assert_eq!(server.store.load(REPO).unwrap().unwrap().rules[0].status, RuleStatus::Approved);
+    assert_eq!(server.store.load(&server.repo).unwrap().unwrap().rules[0].status, RuleStatus::Approved);
 }
 
 #[tokio::test]
 async fn rebuild_runs_in_background_for_known_repos_only() {
     let server = TestServer::start().await;
-    let response = server.post(&format!("/api/rulebook/{}/rebuild", encoded(REPO))).body("{}").send().await.unwrap();
+    let response = server.post(&format!("/api/rulebook/{}/rebuild", encoded(&server.repo))).body("{}").send().await.unwrap();
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     for _ in 0..100 {
         if server.model.draft_calls() == 1
-            && !server.get_json(&format!("/api/rulebook?repo={}", encoded(REPO))).await.1["building"]
+            && !server.get_json(&format!("/api/rulebook?repo={}", encoded(&server.repo))).await.1["building"]
                 .as_bool()
                 .unwrap_or(true)
         {
@@ -200,8 +203,97 @@ async fn rebuild_runs_in_background_for_known_repos_only() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(server.model.draft_calls(), 1);
-    assert!(server.store.load(REPO).unwrap().unwrap().rules.is_empty());
+    assert!(server.store.load(&server.repo).unwrap().unwrap().rules.is_empty());
 
     let unknown = server.post(&format!("/api/rulebook/{}/rebuild", encoded("/etc"))).body("{}").send().await.unwrap();
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+}
+
+fn team_path(repo: &str) -> String {
+    format!("/api/rulebook/{}/rules", encoded(repo))
+}
+
+#[tokio::test]
+async fn editing_a_rule_promotes_it_to_a_team_rule_that_survives() {
+    let server = TestServer::start().await;
+    let response = server
+        .post(&team_path(&server.repo))
+        .json(&json!({
+            "replaces": { "id": "R2", "title": "Errors use thiserror" },
+            "title": "Errors use thiserror",
+            "description": "Every error type derives thiserror::Error",
+            "status": "approved"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.unwrap();
+    let rules = body["rulebook"]["rules"].as_array().unwrap();
+    let edited = rules.iter().find(|r| r["id"] == "R2").unwrap();
+    assert_eq!(edited["kind"], "team");
+    assert_eq!(edited["status"], "approved");
+    assert_eq!(edited["description"], "Every error type derives thiserror::Error");
+
+    let stored = server.store.load(&server.repo).unwrap().unwrap();
+    let stored_rule = stored.rules.iter().find(|r| r.id == "R2").unwrap();
+    assert_eq!(stored_rule.kind, RuleKind::Team);
+    assert_eq!(stored_rule.status, RuleStatus::Approved);
+}
+
+#[tokio::test]
+async fn adding_a_new_team_rule_appends_it() {
+    let server = TestServer::start().await;
+    let response = server
+        .post(&team_path(&server.repo))
+        .json(&json!({ "title": "Prefer composition", "description": "Favor composition over inheritance" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.unwrap();
+    let rules = body["rulebook"]["rules"].as_array().unwrap();
+    let added = rules.iter().find(|r| r["title"] == "Prefer composition").unwrap();
+    assert_eq!(added["kind"], "team");
+    assert_eq!(added["status"], "approved");
+}
+
+#[tokio::test]
+async fn team_rule_validates_input_and_stale_references() {
+    let server = TestServer::start().await;
+
+    let missing = server.post(&team_path(&server.repo)).json(&json!({ "description": "no title" })).send().await.unwrap();
+    assert_eq!(missing.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let blank = server.post(&team_path(&server.repo)).json(&json!({ "title": "   ", "description": "x" })).send().await.unwrap();
+    assert_eq!(blank.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let bad_status = server
+        .post(&team_path(&server.repo))
+        .json(&json!({ "title": "t", "description": "d", "status": "maybe" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_status.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let stale = server
+        .post(&team_path(&server.repo))
+        .json(&json!({ "replaces": { "id": "R9", "title": "ghost" }, "title": "t", "description": "d" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn adding_a_team_rule_requires_token_and_allowed_origin() {
+    let server = TestServer::start().await;
+    let origin = format!("http://127.0.0.1:{}", server.addr.port());
+    let body = json!({ "title": "t", "description": "d" }).to_string();
+
+    let no_token = server.without_token(&team_path(&server.repo), "application/json", &origin).body(body.clone());
+    assert_eq!(no_token.send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+    let evil = server.custom(&team_path(&server.repo), "application/json", "https://evil.example").body(body.clone());
+    assert_eq!(evil.send().await.unwrap().status(), StatusCode::FORBIDDEN);
 }

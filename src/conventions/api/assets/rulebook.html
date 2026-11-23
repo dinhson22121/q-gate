@@ -101,8 +101,25 @@ main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding:
 .banner.warn { background: var(--banner-warn-bg); color: var(--warn-fg); font-weight: 500; }
 section.panel { background: transparent; border: 0; padding: 0; margin: 0; }
 section.panel > h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: rgba(var(--ink), .6); margin: 4px 2px 12px; display: flex; gap: 8px; align-items: center; }
-.rule { background: var(--sub); border: 0; border-radius: 16px; box-shadow: var(--shadow-soft); padding: 20px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 10px; transition: transform .3s var(--ease), box-shadow .3s var(--ease); }
-.rule:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.rule { background: var(--sub); border: 0; border-radius: 16px; box-shadow: var(--shadow-soft); padding: 14px 16px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; transition: box-shadow .2s var(--ease); }
+.rule:hover { box-shadow: var(--shadow-lg); }
+.rule .desc { font-size: 14px; color: rgba(var(--ink), .82); }
+.rule .scope { font-size: 12.5px; }
+details.more { margin-top: 2px; }
+details.more > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--primary-dark); list-style: none; width: fit-content; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸ "; }
+details.more[open] > summary::before { content: "▾ "; }
+details.more[open] > summary { margin-bottom: 6px; }
+details.howto { padding: 12px 16px; }
+details.howto > summary { cursor: pointer; font-weight: 500; list-style: none; }
+details.howto > summary::-webkit-details-marker { display: none; }
+details.howto[open] > summary { margin-bottom: 8px; font-weight: 700; }
+details.howto p { margin: 0; font-weight: 300; }
+.rule.editing { gap: 10px; outline: 2px solid var(--selected); }
+.rule .f-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: rgba(var(--ink), .6); }
+.rule input[type="text"], .rule textarea { font: 500 14px/1.4 var(--sans); color: rgb(var(--ink)); background: var(--input-bg); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; width: 100%; }
+.rule textarea { resize: vertical; font-weight: 300; }
 .rule-head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
 .rule-head .title { font-weight: 700; font-size: 16px; flex: 1 1 240px; color: rgb(var(--ink)); }
 .rule-actions { display: flex; gap: 8px; }
@@ -149,13 +166,15 @@ p { margin: 4px 0; }
   <h1>Rulebook</h1><p class="sub">Architecture rules derived per repository from its rule files and a code sample.</p>
   <div class="filters">
     <label>Repository <select id="repo" aria-label="Repository"></select></label>
+    <button type="button" id="new-rule" disabled>New rule</button>
     <button type="button" class="primary" id="rebuild" disabled>Rebuild now</button>
   </div>
 </header>
 <main>
-  <p class="banner info">Rules are derived once per repository from its rule files (CLAUDE.md, ADRs, lint configs) and a code sample,
-    then reused for every commit. Explicit rules start approved; inferred rules start proposed and never block.
-    Rejected rules are never checked. Decisions survive rebuilds. Team rules (added from the Policy assistant) are kept across rebuilds.</p>
+  <details class="banner info howto">
+    <summary>Rules are derived per repository and reused for every commit.</summary>
+    <p>Derived once from its rule files (CLAUDE.md, ADRs, lint configs) and a code sample. Explicit rules start approved; inferred rules start proposed and never block. Rejected rules are never checked. Decisions survive rebuilds. Team rules (added from the Policy assistant) are kept across rebuilds.</p>
+  </details>
   <div id="error" class="banner bad" role="alert" hidden></div>
   <div id="status" class="banner warn" role="status" hidden></div>
   <div id="groups"><p class="empty">Loading…</p></div>
@@ -174,7 +193,7 @@ p { margin: 4px 0; }
     ["rejected", "Rejected", "neutral"],
   ];
   const POLL_MS = 3000;
-  const state = { repo: "", timer: null };
+  const state = { repo: "", timer: null, view: null, editing: null };
   const $ = (id) => document.getElementById(id);
 
   function el(tag, attrs, ...children) {
@@ -214,15 +233,54 @@ p { margin: 4px 0; }
 
   const repoPath = (repo) => "/api/rulebook/" + encodeURIComponent(repo);
 
+  function ruleForm(rule) {
+    const isNew = !rule;
+    const titleIn = el("input", { type: "text", value: isNew ? "" : rule.title, placeholder: "Rule title", autocomplete: "off", spellcheck: "false" });
+    const descIn = el("textarea", { rows: "3", placeholder: "What the rule requires", spellcheck: "false" });
+    descIn.value = isNew ? "" : rule.description;
+    const scopeIn = el("input", { type: "text", value: isNew ? "" : (rule.scope_globs || []).join(", "),
+      placeholder: "Scope globs, comma-separated (blank = all files)", autocomplete: "off", spellcheck: "false" });
+    const cancel = () => { state.editing = null; render(state.view); };
+    const save = async () => {
+      try {
+        showError("");
+        const body = {
+          title: titleIn.value.trim(),
+          description: descIn.value.trim(),
+          scope_globs: scopeIn.value.split(",").map((s) => s.trim()).filter(Boolean),
+          status: "approved",
+        };
+        if (!isNew) body.replaces = { id: rule.id, title: rule.title };
+        const view = await call("POST", repoPath(state.repo) + "/rules", body);
+        state.editing = null;
+        render(view);
+      } catch (err) { showError(err.message); }
+    };
+    return el("article", { class: "rule editing" },
+      el("div", { class: "rule-head" },
+        el("span", { class: "title" }, isNew ? "New team rule" : "Edit rule"),
+        chip("team", "ok")),
+      el("label", { class: "f-lbl" }, "Title", titleIn),
+      el("label", { class: "f-lbl" }, "Description", descIn),
+      el("label", { class: "f-lbl" }, "Scope", scopeIn),
+      el("div", { class: "rule-actions" },
+        el("button", { type: "button", class: "primary", onclick: save }, "Save as team rule"),
+        el("button", { type: "button", class: "ghost", onclick: cancel }, "Cancel")),
+      !isNew && el("p", { class: "muted scope" }, "Saved as a Team rule (kept across rebuilds); it replaces the original rule."));
+  }
+
   function ruleCard(rule) {
+    if (state.editing === rule.id) return ruleForm(rule);
     const decide = (status) => async () => {
       try {
         showError("");
         render(await call("POST", repoPath(state.repo) + "/rules/" + encodeURIComponent(rule.id) + "/decision", { status }));
       } catch (err) { showError(err.message); }
     };
+    const edit = () => { state.editing = rule.id; render(state.view); };
     const actions = el("div", { class: "rule-actions" },
       rule.status !== "approved" && el("button", { type: "button", class: "primary", onclick: decide("approved") }, "Approve"),
+      el("button", { type: "button", class: "ghost", onclick: edit }, "Edit"),
       rule.status !== "rejected" && el("button", { type: "button", class: "ghost", onclick: decide("rejected") }, "Reject"));
     const scope = rule.scope_globs.length ? rule.scope_globs.join(", ") : "all files";
     return el("article", { class: "rule" },
@@ -231,17 +289,20 @@ p { margin: 4px 0; }
         el("span", { class: "title" }, rule.title),
         chip(rule.kind, rule.kind === "explicit" ? "info" : rule.kind === "team" ? "ok" : "neutral"),
         actions),
-      el("p", {}, rule.description),
-      el("p", { class: "muted" }, "Scope: ", el("span", { class: "mono" }, scope)),
-      rule.examples.length && el("div", { class: "label" }, "Examples"),
-      rule.examples.map((ex) => [
-        el("div", { class: "mono muted" }, ex.file + ":" + ex.line),
-        el("pre", { class: "quote" }, ex.quote),
-      ]),
-      rule.lint_suggestion && [el("div", { class: "label" }, "Could be a lint rule"), el("p", { class: "mono" }, rule.lint_suggestion)]);
+      el("p", { class: "desc" }, rule.description),
+      el("p", { class: "muted scope" }, "Scope: ", el("span", { class: "mono" }, scope)),
+      (rule.examples.length || rule.lint_suggestion) && el("details", { class: "more" },
+        el("summary", {}, "Examples & lint"),
+        rule.examples.length ? el("div", { class: "label" }, "Examples") : null,
+        rule.examples.map((ex) => [
+          el("div", { class: "mono muted" }, ex.file + ":" + ex.line),
+          el("pre", { class: "quote" }, ex.quote),
+        ]),
+        rule.lint_suggestion ? [el("div", { class: "label" }, "Could be a lint rule"), el("p", { class: "mono" }, rule.lint_suggestion)] : null));
   }
 
   function render(view) {
+    state.view = view;
     const book = view.rulebook;
     const status = $("status");
     status.hidden = !view.building && !view.last_error;
@@ -257,7 +318,8 @@ p { margin: 4px 0; }
         el("h2", {}, title, chip(String(rules.length), cls)),
         rules.length ? rules.map(ruleCard) : el("p", { class: "empty" }, "No " + title.toLowerCase() + " rules."));
     });
-    replace($("groups"), el("p", { class: "muted" }, "Built " + created + " · " + book.rules.length + " rules"), sections);
+    const newForm = state.editing === "__new__" ? ruleForm(null) : null;
+    replace($("groups"), el("p", { class: "muted" }, "Built " + created + " · " + book.rules.length + " rules"), newForm, sections);
   }
 
   async function load() {
@@ -280,7 +342,10 @@ p { margin: 4px 0; }
       const wanted = new URLSearchParams(location.search).get("repo");
       state.repo = repos.includes(wanted) ? wanted : repos[0];
       select.value = state.repo;
-      select.addEventListener("change", () => { state.repo = select.value; load(); });
+      select.addEventListener("change", () => { state.repo = select.value; state.editing = null; load(); });
+      const newBtn = $("new-rule");
+      newBtn.disabled = false;
+      newBtn.addEventListener("click", () => { if (state.view) { state.editing = "__new__"; render(state.view); } });
       $("rebuild").addEventListener("click", async () => {
         try {
           showError("");

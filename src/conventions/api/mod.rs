@@ -34,6 +34,7 @@ pub fn router(state: RulebookApiState) -> Router {
         .route("/api/rulebook", get(handlers::get_rulebook))
         .route("/api/rulebook/repos", get(handlers::repos))
         .route("/api/rulebook/{repo}/rules/{id}/decision", post(handlers::decide))
+        .route("/api/rulebook/{repo}/rules", post(handlers::team_rule))
         .route("/api/rulebook/{repo}/rebuild", post(handlers::rebuild))
         .route_layer(middleware::from_fn_with_state(state.clone(), guard::protect_mutations))
         .route_layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
