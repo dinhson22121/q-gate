@@ -366,6 +366,30 @@ p { margin: 4px 0; }
 
   function codeBlock(text) { return el("pre", {}, el("code", {}, text)); }
 
+  async function exportRun(id) {
+    showError("");
+    try {
+      const response = await fetch("/api/runs/" + encodeURIComponent(id) + "/export", { credentials: "same-origin" });
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("Run " + id + " chưa có bản review để export (run cũ, hoặc không có report).");
+        }
+        let message = "Không export được (HTTP " + response.status + ")";
+        try { const data = await response.json(); if (data && data.error) message = data.error; } catch (e) {}
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      const match = (response.headers.get("content-disposition") || "").match(/filename="?([^"]+)"?/);
+      const link = el("a", { href: URL.createObjectURL(blob), download: match ? match[1] : "qgate-review-" + id + ".md" });
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
   function renderDetail(run) {
     const report = run.report;
     const nodes = [
@@ -384,7 +408,7 @@ p { margin: 4px 0; }
       return;
     }
     nodes.push(el("div", { class: "detail-actions" },
-      el("a", { class: "btn-link", href: "/api/runs/" + run.id + "/export", download: true, title: "Download the review as Markdown" }, "⬇ Export .md")));
+      el("button", { type: "button", class: "btn-link", title: "Download the review as Markdown", onclick: () => exportRun(run.id) }, "⬇ Export .md")));
     nodes.push(verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
       testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
       architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
