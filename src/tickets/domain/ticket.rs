@@ -22,6 +22,12 @@ fn is_one_of(issue_type: Option<&str>, names: &[&str]) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TicketLink {
+    pub key: TicketKey,
+    pub link_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub key: TicketKey,
     pub title: String,
@@ -38,6 +44,10 @@ pub struct Ticket {
     pub design_links: Vec<String>,
     #[serde(default)]
     pub updated: Option<String>,
+    #[serde(default)]
+    pub links: Vec<TicketLink>,
+    #[serde(default)]
+    pub doc_links: Vec<String>,
 }
 
 impl Ticket {
@@ -53,6 +63,8 @@ impl Ticket {
             description: String::new(),
             design_links: Vec::new(),
             updated: None,
+            links: Vec::new(),
+            doc_links: Vec::new(),
         }
     }
 
@@ -92,11 +104,15 @@ mod tests {
         let mut ticket = Ticket::new(key("AB-1"), "Title");
         ticket.parent = Some(ParentRef { key: key("AB-2"), issue_type: Some("Story".into()) });
         ticket.design_links = vec!["https://www.figma.com/design/k/x".into()];
+        ticket.doc_links = vec!["https://wiki.example/doc".into()];
+        ticket.links = vec![TicketLink { key: key("AB-3"), link_type: "is tested by".into() }];
         let json = serde_json::to_string(&ticket).unwrap();
         assert_eq!(serde_json::from_str::<Ticket>(&json).unwrap(), ticket);
 
         let old = r#"{"key":"AB-1","title":"t","url":null,"status":null,"criteria":["a"]}"#;
-        assert_eq!(serde_json::from_str::<Ticket>(old).unwrap().criteria, vec!["a"]);
+        let parsed = serde_json::from_str::<Ticket>(old).unwrap();
+        assert_eq!(parsed.criteria, vec!["a"]);
+        assert!(parsed.links.is_empty() && parsed.doc_links.is_empty());
         assert!(serde_json::from_str::<Ticket>(r#"{"key":"bad","title":"t"}"#).is_err());
     }
 }

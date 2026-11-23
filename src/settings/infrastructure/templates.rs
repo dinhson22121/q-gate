@@ -152,6 +152,8 @@ include_parent_story = true
 use_description = true
 # Re-fetch a ticket after this many minutes even if Jira's "updated" is unchanged (1-1440).
 cache_ttl_minutes = 10
+# Jira issue-link name that points to the QA ticket whose criteria are merged (empty: do not follow links).
+qa_link_type = "is tested by"
 
 [agents.tests]
 # Generate and run tests for the acceptance criteria. Languages: go, java, python, rust

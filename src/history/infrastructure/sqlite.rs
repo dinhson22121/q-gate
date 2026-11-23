@@ -11,7 +11,8 @@ use crate::history::domain::{ReportView, ReviewRun, RunStatus, StoredRun, Ticket
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const UNREADABLE_REPORT: &str = "stored report could not be read";
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE runs (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         repo_path     TEXT    NOT NULL,
@@ -28,7 +29,9 @@ const MIGRATIONS: &[&str] = &["
     CREATE INDEX idx_runs_created_at ON runs (created_at_ms DESC);
     CREATE INDEX idx_runs_repo ON runs (repo_name, created_at_ms DESC);
     CREATE INDEX idx_runs_status ON runs (status, created_at_ms DESC);
-", "ALTER TABLE runs ADD COLUMN report_md TEXT;"];
+",
+    "ALTER TABLE runs ADD COLUMN report_md TEXT;",
+];
 
 const COLUMNS: &str = "id, repo_path, repo_name, commit_sha, branch, ticket_key, trigger_kind, \
                        created_at_ms, status, error, report_json, report_md";

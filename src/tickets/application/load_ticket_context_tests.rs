@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use futures::future::BoxFuture;
 
 use super::*;
+use crate::tickets::domain::TicketLink;
 
 fn key(raw: &str) -> TicketKey {
     TicketKey::parse(raw).unwrap()
@@ -87,6 +88,10 @@ fn options() -> LoadOptions {
     LoadOptions::default()
 }
 
+fn plain_notes(loaded: &LoadedTickets) -> Vec<&String> {
+    loaded.notes.iter().filter(|n| !n.starts_with("completeness: ")).collect()
+}
+
 fn ids(loaded: &LoadedTickets) -> Vec<String> {
     loaded.requirements.criteria.iter().map(|c| c.id.clone()).collect()
 }
@@ -114,7 +119,7 @@ async fn subtask_merges_parent_story_and_stops_before_epic() {
         "[SHOP-8] Title SHOP-8\nDescription of SHOP-8\n\n[SHOP-7] Title SHOP-7\nDescription of SHOP-7"
     );
     assert_eq!(source.fetched(), vec!["SHOP-8", "SHOP-7"]);
-    assert!(loaded.notes.is_empty());
+    assert!(plain_notes(&loaded).is_empty());
 }
 
 #[tokio::test]
@@ -178,9 +183,10 @@ async fn unknown_hierarchy_and_failed_parent_become_notes() {
 
     let loaded = LoadTicketContext::new(&source, options()).execute(&[key("MCP-1"), key("AB-2")]).await.unwrap();
 
-    assert_eq!(loaded.notes.len(), 2, "{:?}", loaded.notes);
-    assert!(loaded.notes[0].contains("MCP-1") && loaded.notes[0].contains("no issue type"));
-    assert!(loaded.notes[1].contains("parent AB-1 of AB-2"));
+    let notes = plain_notes(&loaded);
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(notes[0].contains("MCP-1") && notes[0].contains("no issue type"));
+    assert!(notes[1].contains("parent AB-1 of AB-2"));
 }
 
 #[tokio::test]
@@ -194,6 +200,79 @@ async fn fails_only_when_no_implemented_ticket_loads() {
 
     assert_eq!(use_case.execute(&[key("AB-9")]).await.unwrap_err(), TicketError::NotFound("AB-9".into()));
     assert!(matches!(use_case.execute(&[]).await, Err(TicketError::Invalid(_))));
+}
+
+fn linked(mut ticket: Ticket, qa: &str, link_type: &str) -> Ticket {
+    ticket.links.push(TicketLink { key: key(qa), link_type: link_type.into() });
+    ticket
+}
+
+#[tokio::test]
+async fn follows_the_qa_link_type_case_insensitively_and_merges_criteria() {
+    let mut dev = linked(ticket("SHOP-8", "Story", None, &["dev ac"]), "QA-1", "Is Tested By");
+    dev.links.push(TicketLink { key: key("AB-5"), link_type: "relates to".into() });
+    dev.doc_links = vec!["https://wiki.example/doc".into(), "https://wiki.example/doc".into()];
+    let mut qa = ticket("QA-1", "Test", None, &["qa ac"]);
+    qa.design_links = vec!["https://www.figma.com/design/Qa/x".into()];
+    let source = FakeSource::with(vec![dev, qa, ticket("AB-5", "Task", None, &["other"])]);
+
+    let loaded = LoadTicketContext::new(&source, options()).execute(&[key("SHOP-8")]).await.unwrap();
+
+    assert_eq!(ids(&loaded), vec!["SHOP-8/AC-1", "QA-1/AC-1"]);
+    assert_eq!(loaded.context.keys, vec!["SHOP-8", "QA-1"]);
+    assert!(loaded.context.description.contains("[QA-1] Title QA-1"));
+    assert_eq!(loaded.context.design_links, vec!["https://www.figma.com/design/Qa/x"]);
+    assert_eq!(source.fetched(), vec!["SHOP-8", "QA-1"]);
+    assert!(loaded.notes.contains(&"QA ticket QA-1 linked via 'Is Tested By' merged".to_string()));
+    assert_eq!(loaded.notes.iter().filter(|n| *n == "dev doc: https://wiki.example/doc").count(), 1);
+    assert!(!loaded.notes.contains(&"completeness: no linked QA ticket".to_string()));
+}
+
+#[tokio::test]
+async fn failed_qa_load_is_a_note_and_duplicates_are_skipped() {
+    let mut dev = linked(ticket("SHOP-8", "Story", None, &["a"]), "QA-9", "is tested by");
+    dev.links.push(TicketLink { key: key("QA-9"), link_type: "is tested by".into() });
+    dev.links.push(TicketLink { key: key("SHOP-8"), link_type: "is tested by".into() });
+    let source = FakeSource::with(vec![dev]);
+    source.fail("QA-9", TicketError::NotFound("QA-9".into()));
+
+    let loaded = LoadTicketContext::new(&source, options()).execute(&[key("SHOP-8")]).await.unwrap();
+
+    assert_eq!(loaded.context.keys, vec!["SHOP-8"]);
+    assert_eq!(source.fetched(), vec!["SHOP-8", "QA-9"]);
+    assert!(loaded.notes.iter().any(|n| n.contains("QA ticket QA-9 of SHOP-8 could not be loaded")));
+    assert!(loaded.notes.contains(&"completeness: no linked QA ticket".to_string()));
+}
+
+#[tokio::test]
+async fn qa_links_are_ignored_when_no_link_type_is_configured() {
+    let source = FakeSource::with(vec![
+        linked(ticket("SHOP-8", "Story", None, &["a"]), "QA-1", "is tested by"),
+        ticket("QA-1", "Test", None, &["qa"]),
+    ]);
+    let options = LoadOptions { qa_link_type: None, ..options() };
+
+    let loaded = LoadTicketContext::new(&source, options).execute(&[key("SHOP-8")]).await.unwrap();
+
+    assert_eq!(source.fetched(), vec!["SHOP-8"]);
+    assert_eq!(loaded.context.keys, vec!["SHOP-8"]);
+}
+
+#[tokio::test]
+async fn thin_ticket_reports_completeness_gaps_as_notes() {
+    let source = FakeSource::with(vec![ticket("AB-1", "Story", None, &[])]);
+
+    let loaded = LoadTicketContext::new(&source, options()).execute(&[key("AB-1")]).await.unwrap();
+
+    assert_eq!(
+        loaded.notes,
+        vec![
+            "completeness: no acceptance criteria",
+            "completeness: thin or missing description",
+            "completeness: no Figma design link",
+            "completeness: no linked QA ticket",
+        ]
+    );
 }
 
 #[test]
@@ -313,6 +392,7 @@ async fn broken_cache_falls_back_to_tracker_with_note() {
     let loaded = LoadTicketContext::new(&source, options()).with_cache(cache).execute(&[key("AB-1")]).await.unwrap();
 
     assert_eq!(loaded.requirements.criteria.len(), 1);
-    assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
-    assert!(loaded.notes[0].contains("disk full"));
+    let notes = plain_notes(&loaded);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("disk full"));
 }

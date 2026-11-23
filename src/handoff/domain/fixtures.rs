@@ -212,6 +212,7 @@ pub fn ticket() -> TicketContext {
         keys: vec!["SHOP-7".into(), "SHOP-1".into()],
         description: "As a buyer\nI want tax included.".into(),
         design_links: vec!["https://www.figma.com/design/abc/Shop?node-id=1-2".into()],
+        notes: Vec::new(),
     }
 }
 

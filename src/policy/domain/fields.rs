@@ -42,6 +42,7 @@ const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
     ("agents.ticket_analyst.include_parent_story", None),
     ("agents.ticket_analyst.use_description", None),
     ("agents.ticket_analyst.cache_ttl_minutes", None),
+    ("agents.ticket_analyst.qa_link_type", None),
     ("agents.tests.enabled", None),
     ("agents.tests.languages", None),
     ("agents.tests.max_scenarios", None),

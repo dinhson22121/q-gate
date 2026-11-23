@@ -11,6 +11,8 @@ pub struct TicketContextView {
     pub description: String,
     #[serde(default)]
     pub design_links: Vec<String>,
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -222,8 +224,13 @@ mod tests {
         let live = AgentReport { notes: vec!["skipped".into()], cost_usd: Some(0.2), ..AgentReport::default() };
         let view: AgentReportView = serde_json::from_value(serde_json::to_value(&live).unwrap()).unwrap();
         assert_eq!((view.notes, view.cost_usd), (vec!["skipped".to_string()], Some(0.2)));
-        let ctx = TicketContext { keys: vec!["SHOP-7".into()], ..TicketContext::default() };
+        let ctx = TicketContext {
+            keys: vec!["SHOP-7".into()],
+            notes: vec!["completeness: no Figma design link".into()],
+            ..TicketContext::default()
+        };
         let view: TicketContextView = serde_json::from_value(serde_json::to_value(&ctx).unwrap()).unwrap();
         assert_eq!(view.keys, vec!["SHOP-7"]);
+        assert_eq!(view.notes, vec!["completeness: no Figma design link"]);
     }
 }

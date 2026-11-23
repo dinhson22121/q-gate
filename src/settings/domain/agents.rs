@@ -4,6 +4,7 @@ use super::legacy::LegacyField;
 use super::validation::{ValidationError, ValidationResult, require_range, require_secure_url};
 
 pub const DEFAULT_AGENT_MODEL: &str = "claude-opus-5-5";
+const DEFAULT_QA_LINK_TYPE: &str = "is tested by";
 const MAX_PARALLEL_AGENTS: usize = 8;
 const MAX_SCENARIOS: u32 = 30;
 const MAX_REPAIR_ROUNDS: u32 = 6;
@@ -77,11 +78,18 @@ pub struct TicketAnalystConfig {
     pub include_parent_story: bool,
     pub use_description: bool,
     pub cache_ttl_minutes: u32,
+    pub qa_link_type: String,
 }
 
 impl Default for TicketAnalystConfig {
     fn default() -> Self {
-        Self { enabled: true, include_parent_story: true, use_description: true, cache_ttl_minutes: 10 }
+        Self {
+            enabled: true,
+            include_parent_story: true,
+            use_description: true,
+            cache_ttl_minutes: 10,
+            qa_link_type: DEFAULT_QA_LINK_TYPE.into(),
+        }
     }
 }
 

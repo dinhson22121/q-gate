@@ -11,9 +11,9 @@ use super::tickets::{TicketLoad, load_ticket_context};
 use crate::cache::application::NoCacheTrailer;
 use crate::conventions::application::{RulebookStore, repo_key};
 use crate::conventions::infrastructure::SqliteRulebookStore;
+use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta};
 use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
-use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::history::application::{RecordRun, ReviewRun, RunRepository, RunStatus, Trigger};
 use crate::history::infrastructure::SqliteRunRepository;
 use crate::llm::{CliClient, CliConfig, LlmError, StructuredModel};
@@ -375,6 +375,7 @@ impl ReviewPipeline {
             include_parent_story: analyst.include_parent_story,
             include_description: analyst.use_description,
             cache_ttl: chrono::Duration::minutes(i64::from(analyst.cache_ttl_minutes)),
+            qa_link_type: Some(analyst.qa_link_type.trim().to_string()).filter(|t| !t.is_empty()),
         };
         let cache = SqliteTicketCache::open(db).ok().map(|c| Arc::new(c) as Arc<dyn TicketCache>);
         let load = load_ticket_context(

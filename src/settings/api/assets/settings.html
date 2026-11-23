@@ -312,6 +312,7 @@ p { margin: 4px 0; }
       f("agents.ticket_analyst.include_parent_story", "Include the parent Story and Epic (criteria and design links)", "bool"),
       f("agents.ticket_analyst.use_description", "Pass the ticket description as context (never gating)", "bool"),
       f("agents.ticket_analyst.cache_ttl_minutes", "Re-fetch a ticket after (minutes)", "int"),
+      f("agents.ticket_analyst.qa_link_type", "Jira link name of the linked QA ticket (empty: ignore links)", "text"),
       sub("Test agents", "Write and run tests for the ticket's acceptance criteria."),
       f("agents.tests.enabled", "Generate and run tests", "bool"),
       f("agents.tests.languages", "Languages", "set", { options: [

@@ -511,6 +511,24 @@ p { margin: 4px 0; }
 
   const criterionTicket = (id, owner) => (id.includes("/") ? id.split("/")[0] : owner);
 
+  const GAP_PREFIX = "completeness: ";
+
+  function understoodPanel(ctx, requirements) {
+    if (!ctx) return null;
+    const notes = ctx.notes || [];
+    const gaps = notes.filter((n) => n.startsWith(GAP_PREFIX)).map((n) => n.slice(GAP_PREFIX.length));
+    const sources = notes.filter((n) => !n.startsWith(GAP_PREFIX));
+    const criteria = requirements ? requirements.requirements.criteria.length : 0;
+    const summary = ctx.keys.length + " ticket(s), " + criteria + " acceptance criteria, " + ctx.design_links.length + " Figma link(s)";
+    return el("div", { class: "field" },
+      el("div", { class: "label" }, "What qgate understood ", chip("advisory, not gating", "neutral")),
+      el("p", {}, summary),
+      sources.length ? el("ul", { class: "reasons" }, sources.map((text) => el("li", {}, text))) : null,
+      gaps.length
+        ? el("div", {}, el("div", { class: "label" }, "Gaps"), el("ul", { class: "reasons" }, gaps.map((text) => el("li", {}, text))))
+        : el("p", { class: "muted" }, "No gaps found in the ticket."));
+  }
+
   function ticketSection(report) {
     const ctx = report.ticket;
     const req = report.requirements;
@@ -534,6 +552,8 @@ p { margin: 4px 0; }
         el("ul", { class: "reasons" }, links.map((u) => el("li", {},
           el("a", { href: u.href, rel: "noopener noreferrer", target: "_blank" }, u.hostname + u.pathname))))));
     }
+    const understood = understoodPanel(ctx, req);
+    if (understood) section.append(understood);
     if (brief && brief.implicit_requirements.length) {
       section.append(el("div", { class: "field" },
         el("div", { class: "label" }, "Implicit requirements ", chip("suggested, not gating", "neutral")),

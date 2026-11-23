@@ -9,6 +9,8 @@ pub struct TicketContext {
     pub keys: Vec<String>,
     pub description: String,
     pub design_links: Vec<String>,
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

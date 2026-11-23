@@ -12,8 +12,7 @@ use crate::conventions::domain::rulebook::{RuleRef, RuleStatus, Rulebook, TeamRu
 
 const RULEBOOK_HTML: &str = include_str!("assets/rulebook.html");
 const DECISION_HINT: &str = "body must be {\"status\": \"approved\" | \"rejected\" | \"proposed\"}";
-const TEAM_RULE_HINT: &str =
-    "body must be {\"title\": string, \"description\": string, \"scope_globs\"?: string[], \"status\"?: string, \"replaces\"?: {\"id\": string, \"title\": string}}";
+const TEAM_RULE_HINT: &str = "body must be {\"title\": string, \"description\": string, \"scope_globs\"?: string[], \"status\"?: string, \"replaces\"?: {\"id\": string, \"title\": string}}";
 
 pub(super) fn error_response(status: StatusCode, message: &str) -> Response<Body> {
     (status, Json(json!({ "error": message }))).into_response()

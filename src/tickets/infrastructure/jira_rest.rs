@@ -5,14 +5,15 @@ use serde_json::Value;
 
 use crate::tickets::application::{TicketError, TicketSource};
 use crate::tickets::domain::{
-    ParentRef, Ticket, TicketKey, extract_figma_links, merge_links, parse_acceptance_criteria, parse_criteria_list,
+    ParentRef, Ticket, TicketKey, TicketLink, extract_figma_links, merge_links, parse_acceptance_criteria,
+    parse_criteria_list,
 };
 
 use super::adf::{all_strings, field_to_text};
 use super::secret::Secret;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-const BASE_FIELDS: &str = "summary,description,status,issuetype,parent,updated";
+const BASE_FIELDS: &str = "summary,description,status,issuetype,parent,updated,issuelinks";
 const UPDATED_FIELD: &str = "updated";
 const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]"];
 
@@ -67,10 +68,10 @@ impl JiraRestSource {
         self.get_json(&self.issue_url(key), key).await
     }
 
-    async fn remote_figma_links(&self, key: &TicketKey) -> Vec<String> {
+    async fn remote_urls(&self, key: &TicketKey) -> Vec<String> {
         let url = format!("{}/rest/api/3/issue/{key}/remotelink", self.base_url);
         match self.get_json(&url, key).await {
-            Ok(links) => remote_link_urls(&links).iter().flat_map(|u| extract_figma_links(u)).collect(),
+            Ok(links) => remote_link_urls(&links),
             Err(TicketError::NotFound(_)) => Vec::new(),
             Err(error) => {
                 eprintln!("qgate tickets: remote links of {key} not read: {error}");
@@ -97,7 +98,9 @@ impl TicketSource for JiraRestSource {
     async fn fetch(&self, key: &TicketKey) -> Result<Ticket, TicketError> {
         let issue = self.get_issue(key).await?;
         let mut ticket = map_issue(key, &issue, self.ac_field.as_deref(), &format!("{}/browse/{key}", self.base_url))?;
-        merge_links(&mut ticket.design_links, self.remote_figma_links(key).await);
+        let remote = self.remote_urls(key).await;
+        merge_links(&mut ticket.design_links, remote.iter().flat_map(|u| extract_figma_links(u)));
+        ticket.doc_links = remote.into_iter().filter(|u| extract_figma_links(u).is_empty()).collect();
         Ok(ticket)
     }
 
@@ -114,6 +117,26 @@ fn remote_link_urls(links: &Value) -> Vec<String> {
             items.iter().filter_map(|l| l.pointer("/object/url").and_then(Value::as_str)).map(str::to_string).collect()
         })
         .unwrap_or_default()
+}
+
+fn map_links(fields: &Value) -> Vec<TicketLink> {
+    let Some(items) = fields.get("issuelinks").and_then(Value::as_array) else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|item| {
+            let (issue, label) = match (item.get("outwardIssue"), item.get("inwardIssue")) {
+                (Some(issue), _) => (issue, "outward"),
+                (None, Some(issue)) => (issue, "inward"),
+                (None, None) => return None,
+            };
+            let link_type = item
+                .pointer(&format!("/type/{label}"))
+                .or_else(|| item.pointer("/type/name"))
+                .and_then(Value::as_str)?;
+            let key = TicketKey::parse(issue.get("key").and_then(Value::as_str)?).ok()?;
+            Some(TicketLink { key, link_type: link_type.to_string() })
+        })
+        .collect()
 }
 
 fn validate_base_url(raw: &str) -> Result<String, TicketError> {
@@ -195,6 +218,7 @@ fn map_issue(key: &TicketKey, issue: &Value, ac_field: Option<&str>, url: &str) 
         design_links: extract_figma_links(&all_strings(raw_description)),
         description,
         updated: fields.get("updated").and_then(Value::as_str).map(str::to_string),
+        links: map_links(fields),
         ..Ticket::new(key.clone(), title)
     })
 }
@@ -260,6 +284,31 @@ mod tests {
         assert_eq!(ticket.status.as_deref(), Some("In Progress"));
         assert_eq!(ticket.url, Some(format!("{}/browse/ABC-123", server.uri())));
         assert_eq!(ticket.criteria, vec!["CSV export button", "Export is audited"]);
+    }
+
+    #[test]
+    fn maps_issue_links_using_the_direction_label_and_skipping_invalid_keys() {
+        let fields = json!({"issuelinks": [
+            {"type": {"name": "Test", "inward": "tests", "outward": "is tested by"}, "outwardIssue": {"key": "QA-7"}},
+            {"type": {"name": "Test", "inward": "tests", "outward": "is tested by"}, "inwardIssue": {"key": "DEV-2"}},
+            {"type": {"name": "Relates"}, "outwardIssue": {"key": "AB-9"}},
+            {"type": {"name": "Relates", "outward": "relates to"}, "outwardIssue": {"key": "bad key"}},
+            {"type": {"name": "Relates", "outward": "relates to"}},
+            {"outwardIssue": {"key": "AB-1"}}
+        ]});
+
+        let links = map_links(&fields);
+
+        let pairs: Vec<(String, String)> = links.iter().map(|l| (l.key.to_string(), l.link_type.clone())).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("QA-7".to_string(), "is tested by".to_string()),
+                ("DEV-2".to_string(), "tests".to_string()),
+                ("AB-9".to_string(), "Relates".to_string()),
+            ]
+        );
+        assert!(map_links(&json!({})).is_empty());
     }
 
     #[tokio::test]
@@ -364,7 +413,7 @@ mod tests {
         let source = JiraRestSource::new(config("https://acme.atlassian.net/", Some(""))).unwrap();
         assert_eq!(
             source.issue_url(&key()),
-            "https://acme.atlassian.net/rest/api/3/issue/ABC-123?fields=summary,description,status,issuetype,parent,updated"
+            "https://acme.atlassian.net/rest/api/3/issue/ABC-123?fields=summary,description,status,issuetype,parent,updated,issuelinks"
         );
         assert!(JiraRestSource::new(config("http://127.0.0.1:9", None)).is_ok());
     }
@@ -458,7 +507,7 @@ mod tests {
         );
         assert!(loaded.context.description.starts_with("[SHOP-8] Cart API\nframe"), "{}", loaded.context.description);
         assert!(loaded.context.description.contains("[SHOP-7] Cart\nShoppers see a cart."));
-        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        assert!(loaded.notes.iter().all(|n| n.starts_with("completeness: ")), "{:?}", loaded.notes);
     }
 
     #[tokio::test]

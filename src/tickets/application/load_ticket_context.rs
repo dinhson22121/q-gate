@@ -3,13 +3,15 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::review::application::{AcceptanceCriterion, Requirements, TicketContext};
-use crate::tickets::domain::{ParentRef, Ticket, TicketKey, merge_links};
+use crate::tickets::domain::{ParentRef, Ticket, TicketKey, completeness_gaps, merge_links};
 
 use super::ports::{CacheError, CachedTicket, TicketCache, TicketError, TicketSource};
 
 const MAX_PARENT_HOPS: usize = 2;
+pub const DEFAULT_QA_LINK_TYPE: &str = "is tested by";
 pub const MAX_DESCRIPTION_CHARS: usize = 6000;
 const TRUNCATION_MARKER: &str = " […truncated]";
+const COMPLETENESS_PREFIX: &str = "completeness: ";
 const TITLE_SEPARATOR: &str = " | ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,11 +19,17 @@ pub struct LoadOptions {
     pub include_parent_story: bool,
     pub include_description: bool,
     pub cache_ttl: Duration,
+    pub qa_link_type: Option<String>,
 }
 
 impl Default for LoadOptions {
     fn default() -> Self {
-        Self { include_parent_story: true, include_description: true, cache_ttl: Duration::minutes(10) }
+        Self {
+            include_parent_story: true,
+            include_description: true,
+            cache_ttl: Duration::minutes(10),
+            qa_link_type: Some(DEFAULT_QA_LINK_TYPE.into()),
+        }
     }
 }
 
@@ -79,8 +87,42 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
                 self.walk_parents(ticket, &implemented, &mut ancestors, &mut notes).await;
             }
         }
+        let mut qa_tickets = Vec::new();
+        if let Some(link_type) = &self.options.qa_link_type {
+            self.follow_qa_links(link_type, &implemented, &ancestors, &mut qa_tickets, &mut notes).await;
+        }
+        note_doc_links(&implemented, &mut notes);
         notes.dedup();
-        Ok(self.assemble(&implemented, &ancestors, notes))
+        Ok(self.assemble(&implemented, &ancestors, &qa_tickets, notes))
+    }
+
+    async fn follow_qa_links(
+        &self,
+        link_type: &str,
+        implemented: &[Ticket],
+        ancestors: &[Ticket],
+        qa_tickets: &mut Vec<Ticket>,
+        notes: &mut Vec<String>,
+    ) {
+        let mut attempted: Vec<&TicketKey> = Vec::new();
+        for ticket in implemented {
+            for link in ticket.links.iter().filter(|l| l.link_type.eq_ignore_ascii_case(link_type)) {
+                let is_known = |t: &Ticket| t.key == link.key;
+                if attempted.contains(&&link.key) || implemented.iter().chain(ancestors).any(is_known) {
+                    continue;
+                }
+                attempted.push(&link.key);
+                match self.load(&link.key, notes).await {
+                    Ok(qa) => {
+                        notes.push(format!("QA ticket {} linked via '{}' merged", qa.key, link.link_type));
+                        qa_tickets.push(qa);
+                    }
+                    Err(error) => {
+                        notes.push(format!("QA ticket {} of {} could not be loaded: {error}", link.key, ticket.key));
+                    }
+                }
+            }
+        }
     }
 
     async fn walk_parents(
@@ -176,15 +218,21 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         }
     }
 
-    fn assemble(&self, implemented: &[Ticket], ancestors: &[Ticket], notes: Vec<String>) -> LoadedTickets {
-        let all: Vec<&Ticket> = implemented.iter().chain(ancestors).collect();
+    fn assemble(
+        &self,
+        implemented: &[Ticket],
+        ancestors: &[Ticket],
+        qa_tickets: &[Ticket],
+        mut notes: Vec<String>,
+    ) -> LoadedTickets {
+        let all: Vec<&Ticket> = implemented.iter().chain(ancestors).chain(qa_tickets).collect();
         let main = &implemented[0];
         let title = if implemented.len() == 1 {
             main.title.clone()
         } else {
             implemented.iter().map(|t| format!("{}: {}", t.key, t.title)).collect::<Vec<_>>().join(TITLE_SEPARATOR)
         };
-        let criteria = all
+        let criteria: Vec<AcceptanceCriterion> = all
             .iter()
             .flat_map(|ticket| {
                 ticket.criteria.iter().enumerate().map(|(index, text)| AcceptanceCriterion {
@@ -195,12 +243,19 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
             .collect();
         let description = if self.options.include_description { describe(&all) } else { String::new() };
         let mut design_links = Vec::new();
-        for ticket in ancestors.iter().chain(implemented) {
+        for ticket in ancestors.iter().chain(implemented).chain(qa_tickets) {
             merge_links(&mut design_links, ticket.design_links.iter().cloned());
         }
+        let gaps = completeness_gaps(criteria.len(), &describe(&all), design_links.len(), qa_tickets.len());
+        notes.extend(gaps.into_iter().map(|gap| format!("{COMPLETENESS_PREFIX}{gap}")));
         LoadedTickets {
             requirements: Requirements { key: main.key.to_string(), title, url: main.url.clone(), criteria },
-            context: TicketContext { keys: all.iter().map(|t| t.key.to_string()).collect(), description, design_links },
+            context: TicketContext {
+                keys: all.iter().map(|t| t.key.to_string()).collect(),
+                description,
+                design_links,
+                notes: notes.clone(),
+            },
             notes,
         }
     }
@@ -213,6 +268,16 @@ fn stale(entry: CachedTicket, error: &TicketError, notes: &mut Vec<String>) -> T
         entry.fetched_at.format("%Y-%m-%d %H:%M UTC")
     ));
     entry.ticket
+}
+
+fn note_doc_links(implemented: &[Ticket], notes: &mut Vec<String>) {
+    let mut seen: Vec<&String> = Vec::new();
+    for url in implemented.iter().flat_map(|t| &t.doc_links) {
+        if !seen.contains(&url) {
+            seen.push(url);
+            notes.push(format!("dev doc: {url}"));
+        }
+    }
 }
 
 fn cache_note(error: &CacheError) -> String {
