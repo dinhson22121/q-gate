@@ -42,12 +42,12 @@ impl CodeReviewer for ClaudeReviewer {
     }
 }
 
-fn spent<T>(answer: &Structured<T>) -> (TokenUsage, Option<f64>) {
+pub(super) fn spent<T>(answer: &Structured<T>) -> (TokenUsage, Option<f64>) {
     let Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = answer.usage;
     (TokenUsage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens }, Some(answer.cost_usd))
 }
 
-fn reviewer_error(error: LlmError) -> ReviewerError {
+pub(super) fn reviewer_error(error: LlmError) -> ReviewerError {
     match error {
         LlmError::Truncated => ReviewerError::Truncated,
         LlmError::Refused { category } => ReviewerError::Refused { category },

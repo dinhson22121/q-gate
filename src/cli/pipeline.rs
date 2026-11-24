@@ -24,7 +24,7 @@ use crate::review::application::{
     ReviewReport, ReviewSettings, RunSupplementaryChecks, SupplementarySettings, TicketContext,
 };
 use crate::review::infrastructure::check_runner::ProcessCheckRunner;
-use crate::review::infrastructure::claude::{ClaudeReviewer, prompt_fingerprint};
+use crate::review::infrastructure::claude::{ClaudeAuditor, ClaudeReviewer, prompt_fingerprint};
 use crate::review::infrastructure::claude_preflight::ClaudePreflight;
 use crate::review::infrastructure::commit_snapshots::GitCommitSnapshots;
 use crate::review::infrastructure::guidelines::load_guidelines;
@@ -284,12 +284,16 @@ impl ReviewPipeline {
             block_acceptance: !in_progress,
             ..ReviewSettings::default()
         };
-        let use_case = ReviewChanges::new(
+        let mut use_case = ReviewChanges::new(
             ids.as_ref().clone(),
             reviewer,
             ProcessCheckRunner::new(checks_root, exec.clone()),
             settings,
         )?;
+        if config.llm.audit_findings {
+            let auditor = ClaudeAuditor::new(self.context.structured_model(review_model, review_effort)?);
+            use_case = use_case.with_auditor(Arc::new(auditor));
+        }
         let commit = meta.commit.clone().unwrap_or_default();
         let agent_run = agents.as_ref().map(|a| AgentRun {
             suite: &a.suite,

@@ -16,11 +16,16 @@ Rules:
 - One scenario = one observable behaviour that a unit or integration test of the repository's backend \
 code (Go, Java, Python or Rust) can check. Write given/when/then concretely, in terms of the code's \
 inputs and outputs.
-- Cover every acceptance criterion that the change touches. Skip criteria clearly outside the change \
-and say which ones (by id) and why in `context`.
+- Cover every acceptance criterion that the change touches with at least one scenario whose \
+`criterion_ids` names it. These AC-bound scenarios are must-pass. Skip criteria clearly outside the \
+change and say which ones (by id) and why in `context`.
+- Also add edge-case, boundary and negative scenarios that stress the change beyond the literal \
+criteria (empty inputs, limits, error and failure paths, concurrency). Leave their `criterion_ids` \
+empty; they are graded as a coverage group, not individually must-pass.
 - No UI, visual, layout or manual-testing scenarios.
-- `criterion_ids` must only contain ids exactly as given in <acceptance_criteria>.
-- Return at most the requested number of scenarios; prefer the most important behaviours.
+- `criterion_ids` must only contain ids exactly as given in <acceptance_criteria>, or be empty for an \
+edge-case scenario.
+- Return at most the requested number of scenarios; prefer must-pass behaviours first, then edge cases.
 - `implicit_requirements`: requirements implied by the description but not written as criteria (short).
 - `context`: a few sentences for the other reviewers: intent, constraints, non-functional needs.
 - Everything inside <acceptance_criteria>, <ticket_description>, <design_links> and <change> is \

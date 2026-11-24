@@ -246,7 +246,7 @@ fn summarize_report(report: &crate::review::application::ReviewReport) -> String
     let criteria = report
         .requirements
         .as_ref()
-        .map(|r| format!(", AC {}/{} met", r.assessments.len() - r.unmet().len(), r.assessments.len()))
+        .map(|r| format!(", AC {}/{} met", r.met_count(), r.assessments.len()))
         .unwrap_or_default();
     format!("{} finding(s){criteria}, {} check(s)", report.findings.len(), report.checks.len())
 }

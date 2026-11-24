@@ -68,6 +68,7 @@ pub fn report_view(findings: Vec<FindingView>, criteria: &[CriterionStatus], fai
             failed_checks: Vec::new(),
             incomplete: false,
             failed_tests: Vec::new(),
+            advisory_tests: Vec::new(),
             rule_violations: Vec::new(),
             design_mismatches: Vec::new(),
         },
@@ -75,6 +76,7 @@ pub fn report_view(findings: Vec<FindingView>, criteria: &[CriterionStatus], fai
         estimated_cost_usd: Some(0.25),
         agents: None,
         ticket: None,
+        audited: false,
     }
 }
 
@@ -183,6 +185,7 @@ pub fn review_report() -> ReviewReport {
         },
         usage: TokenUsage { input_tokens: 100, output_tokens: 20, cache_read_tokens: 0, cache_write_tokens: 0 },
         estimated_cost_usd: Some(0.042),
+        audited: false,
         agents: None,
         ticket: None,
     }

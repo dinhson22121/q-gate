@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use super::change_set::{ChangeSet, FileChange};
-use super::finding::Finding;
+use super::finding::{Confidence, Finding};
 
 pub const LINE_TOLERANCE: u32 = 3;
 pub const EVIDENCE_WINDOW: u32 = 12;
@@ -18,6 +18,8 @@ pub enum RejectReason {
     MissingEvidence,
     TrivialEvidence,
     EvidenceNotFound,
+    ContradictedByCode,
+    Unsupported,
 }
 
 impl RejectReason {
@@ -28,6 +30,8 @@ impl RejectReason {
             Self::MissingEvidence => "no code quoted as evidence",
             Self::TrivialEvidence => "quoted code is too short to identify a location",
             Self::EvidenceNotFound => "quoted code does not exist near the reported line",
+            Self::ContradictedByCode => "the change already does what the finding says is missing",
+            Self::Unsupported => "the finding's claim is not supported by the quoted code",
         }
     }
 }
@@ -54,6 +58,41 @@ pub fn verify_findings(changes: &ChangeSet, findings: Vec<Finding>) -> Verificat
         }
     }
     Verification { accepted: deduplicate(accepted), rejected }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditVerdict {
+    Upheld,
+    Contradicted,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingAudit {
+    pub index: usize,
+    pub verdict: AuditVerdict,
+    pub counter_file: String,
+    pub counter_line: u32,
+    pub counter_quote: String,
+}
+
+pub fn apply_audit(changes: &ChangeSet, verification: Verification, audits: Vec<FindingAudit>) -> Verification {
+    let Verification { accepted, mut rejected } = verification;
+    let mut survivors = Vec::new();
+    for (index, finding) in accepted.into_iter().enumerate() {
+        let verdicts: Vec<&FindingAudit> = audits.iter().filter(|a| a.index == index).collect();
+        let refuted = verdicts.iter().any(|a| {
+            a.verdict == AuditVerdict::Contradicted
+                && evidence_exists(changes, &a.counter_file, a.counter_line, &a.counter_quote)
+        });
+        if refuted {
+            rejected.push(RejectedFinding { finding, reason: RejectReason::ContradictedByCode });
+            continue;
+        }
+        let unsupported = verdicts.iter().any(|a| a.verdict == AuditVerdict::Unsupported);
+        survivors.push(if unsupported { Finding { confidence: Confidence::Low, ..finding } } else { finding });
+    }
+    Verification { accepted: deduplicate(survivors), rejected }
 }
 
 fn check(changes: &ChangeSet, finding: &Finding) -> Result<(), RejectReason> {
@@ -229,6 +268,8 @@ mod tests {
         assert!(!RejectReason::UnknownFile.describe().is_empty());
         assert!(!RejectReason::LineOutsideChange.describe().is_empty());
         assert!(!RejectReason::MissingEvidence.describe().is_empty());
+        assert!(!RejectReason::ContradictedByCode.describe().is_empty());
+        assert!(!RejectReason::Unsupported.describe().is_empty());
     }
 
     #[test]
@@ -265,5 +306,73 @@ mod tests {
         assert_eq!(verify_findings(&set, vec![f]).accepted.len(), 1);
         assert!(evidence_exists(&set, "auth.go", 11, "if !u.Verified { return ErrUnverified }"));
         assert!(!evidence_exists(&set, "auth.go", 11, "}"));
+    }
+
+    fn audit(index: usize, verdict: AuditVerdict, file: &str, line: u32, quote: &str) -> FindingAudit {
+        FindingAudit { index, verdict, counter_file: file.into(), counter_line: line, counter_quote: quote.into() }
+    }
+
+    fn two_accepted() -> Verification {
+        let first = finding("main.go", 4, Severity::Critical, "q := \"SELECT * FROM u WHERE id=\" + id");
+        let second = finding("main.go", 5, Severity::Major, "db.Query(q)");
+        verify_findings(&changes(), vec![first, second])
+    }
+
+    #[test]
+    fn contradicted_with_grounded_counter_evidence_moves_finding_to_rejected() {
+        let verification = two_accepted();
+        let audits = vec![audit(1, AuditVerdict::Contradicted, "main.go", 5, "db.Query(q)")];
+        let result = apply_audit(&changes(), verification, audits);
+        assert_eq!(result.accepted.len(), 1);
+        assert_eq!(result.accepted[0].line, 4);
+        assert_eq!(result.rejected.len(), 1);
+        assert_eq!(result.rejected[0].reason, RejectReason::ContradictedByCode);
+        assert_eq!(result.rejected[0].finding.line, 5);
+    }
+
+    #[test]
+    fn contradicted_with_ungrounded_counter_evidence_keeps_finding() {
+        let audits = vec![audit(0, AuditVerdict::Contradicted, "main.go", 4, "sanitize(id)")];
+        let result = apply_audit(&changes(), two_accepted(), audits);
+        assert_eq!(result.accepted.len(), 2);
+        assert!(result.rejected.is_empty());
+    }
+
+    #[test]
+    fn unsupported_keeps_finding_with_low_confidence() {
+        let audits = vec![audit(0, AuditVerdict::Unsupported, "", 0, "")];
+        let result = apply_audit(&changes(), two_accepted(), audits);
+        assert_eq!(result.accepted.len(), 2);
+        assert_eq!(result.accepted[0].confidence, Confidence::Low);
+        assert_ne!(result.accepted[1].confidence, Confidence::Low);
+        assert!(result.rejected.is_empty());
+    }
+
+    #[test]
+    fn upheld_and_missing_audits_leave_findings_unchanged() {
+        let before = two_accepted();
+        let audits = vec![audit(0, AuditVerdict::Upheld, "", 0, "")];
+        let result = apply_audit(&changes(), before.clone(), audits);
+        assert_eq!(result, before);
+    }
+
+    #[test]
+    fn out_of_range_index_is_ignored() {
+        let before = two_accepted();
+        let audits = vec![audit(9, AuditVerdict::Contradicted, "main.go", 5, "db.Query(q)")];
+        assert_eq!(apply_audit(&changes(), before.clone(), audits), before);
+    }
+
+    #[test]
+    fn previous_rejections_are_preserved() {
+        let mut before = two_accepted();
+        before.rejected.push(RejectedFinding {
+            finding: finding("main.go", 4, Severity::Minor, "x"),
+            reason: RejectReason::EvidenceNotFound,
+        });
+        let audits = vec![audit(1, AuditVerdict::Contradicted, "main.go", 5, "db.Query(q)")];
+        let result = apply_audit(&changes(), before, audits);
+        let reasons: Vec<_> = result.rejected.iter().map(|r| r.reason).collect();
+        assert_eq!(reasons, vec![RejectReason::EvidenceNotFound, RejectReason::ContradictedByCode]);
     }
 }

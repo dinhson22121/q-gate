@@ -146,6 +146,7 @@ mod tests {
             },
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
+            audited: false,
         };
         report.findings.push(crate::review::domain::finding::fixtures::finding(
             "a.go",

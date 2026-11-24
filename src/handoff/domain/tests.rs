@@ -138,6 +138,23 @@ Change the production code so this test passes. Do not weaken, skip or delete th
 }
 
 #[test]
+fn advisory_edge_test_is_flagged_as_non_blocking_warning() {
+    let mut report = failing_report();
+    report.gate.advisory_tests = vec!["S2".into()];
+    let doc = HandoffDocument::build(&input(&report));
+    assert!(!doc.blocking.iter().any(|t| t.kind == TaskKind::FailedTest));
+    let s2 = doc
+        .warnings
+        .iter()
+        .find(|t| t.kind == TaskKind::FailedTest && t.title.contains("S2"))
+        .expect("S2 should be a warning under the default policy");
+    assert!(
+        s2.facts.iter().any(|f| f.label == "Advisory" && f.value.contains("coverage above threshold")),
+        "advisory edge test must carry the Advisory fact"
+    );
+}
+
+#[test]
 fn evidence_with_backticks_gets_a_longer_fence() {
     let report = failing_report();
     let markdown = render_markdown(&HandoffDocument::build(&input(&report)));

@@ -453,6 +453,11 @@ p { margin: 4px 0; }
       add("policy", "tests", "Failed generated test ", el("strong", {}, id), sc ? ": " + sc.title : "",
         sc && sc.criterion_ids.length ? el("span", { class: "muted" }, " (" + sc.criterion_ids.join(", ") + ")") : null);
     }
+    for (const id of gate.advisory_tests || []) {
+      const sc = scenarios.get(id);
+      add("advisory", "tests", "Edge-case test not passing (advisory, coverage above threshold) ",
+        el("strong", {}, id), sc ? ": " + sc.title : "");
+    }
     for (const id of gate.rule_violations) {
       const v = agents && agents.violations.find((x) => x.rule_id === id);
       add("policy", "rules", "Approved rule violated: ", el("strong", {}, id), v && v.rule_title ? " — " + v.rule_title : "",
@@ -473,6 +478,7 @@ p { margin: 4px 0; }
     const policyGroups = new Set(reasons.filter((r) => r.kind === "policy").map((r) => r.group));
     const soleCause = !reasons.some((r) => r.kind === "hard") && policyGroups.size === 1;
     const label = (r) => {
+      if (r.kind === "advisory") return chip("advisory", "warn");
       if (gate.passed) return chip("warning", "warn");
       if (r.kind === "hard" || soleCause) return chip("blocking", "bad");
       return chip("blocking or warning (per policy)", "warn");
@@ -642,7 +648,7 @@ p { margin: 4px 0; }
     passed: ["passed", "ok"], failed_assertion: ["failed", "bad"], inconclusive: ["inconclusive", "warn"],
   };
 
-  function testCard(scenario, result, failedInGate) {
+  function testCard(scenario, result, failedInGate, advisory) {
     const [label, cls] = result ? (VERDICT[result.verdict] || [result.verdict, "neutral"]) : ["not run", "neutral"];
     const showEvidence = result && result.evidence && result.verdict !== "passed";
     return el("div", { class: "card" },
@@ -650,6 +656,7 @@ p { margin: 4px 0; }
         el("span", { class: "card-title" }, scenario.title),
         scenario.criterion_ids.map((id) => chip(id, "info")),
         failedInGate ? chip("listed by gate", "bad") : null,
+        advisory ? chip("advisory (edge)", "warn") : null,
         result && result.language ? el("span", { class: "muted" }, result.language) : null),
       el("dl", { class: "gwt" }, el("dt", {}, "Given"), el("dd", {}, scenario.given),
         el("dt", {}, "When"), el("dd", {}, scenario.when), el("dt", {}, "Then"), el("dd", {}, scenario.then)),
@@ -670,9 +677,10 @@ p { margin: 4px 0; }
       return section;
     }
     const failed = new Set(report.gate.failed_tests);
+    const advisory = new Set(report.gate.advisory_tests || []);
     for (const id of ids) {
       const scenario = scenarios.get(id) || { id, title: "", criterion_ids: [], given: "", when: "", then: "" };
-      section.append(testCard(scenario, results.get(id), failed.has(id)));
+      section.append(testCard(scenario, results.get(id), failed.has(id), advisory.has(id)));
     }
     return section;
   }

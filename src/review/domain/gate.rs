@@ -11,8 +11,11 @@ pub struct GatePolicy {
     pub categories: Vec<Category>,
     pub min_confidence: Confidence,
     pub fail_on_unmet_criteria: bool,
+    pub require_all_criteria_met: bool,
     pub fail_on_incomplete: bool,
     pub fail_on_test_failure: bool,
+    pub require_must_pass_tests: bool,
+    pub min_edge_pass_pct: u32,
     pub fail_on_rule_violation: bool,
     pub fail_on_design: Vec<DesignMismatchKind>,
 }
@@ -30,8 +33,11 @@ impl Default for GatePolicy {
             ],
             min_confidence: Confidence::High,
             fail_on_unmet_criteria: true,
+            require_all_criteria_met: true,
             fail_on_incomplete: true,
             fail_on_test_failure: false,
+            require_must_pass_tests: true,
+            min_edge_pass_pct: 80,
             fail_on_rule_violation: false,
             fail_on_design: Vec::new(),
         }
@@ -48,6 +54,8 @@ pub struct GateDecision {
     pub incomplete: bool,
     #[serde(default)]
     pub failed_tests: Vec<String>,
+    #[serde(default)]
+    pub advisory_tests: Vec<String>,
     #[serde(default)]
     pub rule_violations: Vec<String>,
     #[serde(default)]
@@ -72,15 +80,21 @@ impl GatePolicy {
     pub fn decide(&self, input: GateInput<'_>) -> GateDecision {
         let blocking: Vec<usize> =
             input.findings.iter().enumerate().filter(|(_, f)| self.is_blocking(f)).map(|(i, _)| i).collect();
-        let unmet_criteria: Vec<String> =
-            input.requirements.map(|r| r.unmet().into_iter().map(str::to_string).collect()).unwrap_or_default();
+        let unmet_criteria: Vec<String> = input
+            .requirements
+            .map(|r| {
+                let ids = if self.require_all_criteria_met { r.unsatisfied() } else { r.unmet() };
+                ids.into_iter().map(str::to_string).collect()
+            })
+            .unwrap_or_default();
         let failed_checks: Vec<String> =
             input.checks.iter().filter(|c| c.is_blocking()).map(|c| c.name.clone()).collect();
         let criteria_ok = !self.fail_on_unmet_criteria || unmet_criteria.is_empty();
         let completeness_ok = !self.fail_on_incomplete || !input.incomplete;
         let (failed_tests, rule_violations, design_mismatches) =
             input.agents.map_or_else(Default::default, |a| self.agent_failures(a));
-        let agents_ok = (!self.fail_on_test_failure || failed_tests.is_empty())
+        let (tests_block, advisory_tests) = input.agents.map_or((false, Vec::new()), |a| self.test_gate(a));
+        let agents_ok = !tests_block
             && (!self.fail_on_rule_violation || rule_violations.is_empty())
             && design_mismatches.is_empty();
         GateDecision {
@@ -90,9 +104,42 @@ impl GatePolicy {
             failed_checks,
             incomplete: input.incomplete,
             failed_tests,
+            advisory_tests,
             rule_violations,
             design_mismatches,
         }
+    }
+
+    fn test_gate(&self, agents: &AgentReport) -> (bool, Vec<String>) {
+        let Some(brief) = &agents.brief else {
+            let any_failed = agents.tests.iter().any(|t| t.verdict == TestVerdict::FailedAssertion);
+            return (self.fail_on_test_failure && any_failed, Vec::new());
+        };
+        let must_pass =
+            |id: &str| brief.scenarios.iter().find(|s| s.id == id).is_some_and(|s| !s.criterion_ids.is_empty());
+        let mut must_fail = false;
+        let mut edge_total = 0u32;
+        let mut edge_pass = 0u32;
+        let mut edge_unpassed = Vec::new();
+        for test in &agents.tests {
+            if must_pass(&test.scenario_id) {
+                if test.verdict != TestVerdict::Passed {
+                    must_fail = true;
+                }
+            } else {
+                edge_total += 1;
+                if test.verdict == TestVerdict::Passed {
+                    edge_pass += 1;
+                } else {
+                    edge_unpassed.push(test.scenario_id.clone());
+                }
+            }
+        }
+        let edge_ok = edge_total == 0 || edge_pass * 100 >= edge_total * self.min_edge_pass_pct;
+        let strict_edge = self.fail_on_test_failure && !edge_unpassed.is_empty();
+        let block = (self.require_must_pass_tests && must_fail) || !edge_ok || strict_edge;
+        let advisory = if edge_ok && !strict_edge { edge_unpassed } else { Vec::new() };
+        (block, advisory)
     }
 
     fn agent_failures(&self, agents: &AgentReport) -> (Vec<String>, Vec<String>, Vec<String>) {
@@ -185,6 +232,116 @@ mod tests {
                 })
                 .passed
         );
+    }
+
+    #[test]
+    fn unclear_criterion_blocks_only_when_all_criteria_must_be_met() {
+        use crate::review::domain::requirements::*;
+        let report = RequirementsReport {
+            requirements: Requirements { key: "K-1".into(), title: "t".into(), url: None, criteria: vec![] },
+            assessments: vec![
+                CriterionAssessment {
+                    criterion_id: "AC-1".into(),
+                    status: CriterionStatus::Met,
+                    explanation: String::new(),
+                    evidence: vec![],
+                },
+                CriterionAssessment {
+                    criterion_id: "AC-2".into(),
+                    status: CriterionStatus::Unclear,
+                    explanation: String::new(),
+                    evidence: vec![],
+                },
+            ],
+        };
+        let input = |p: &GatePolicy| {
+            p.decide(GateInput {
+                findings: &[],
+                requirements: Some(&report),
+                checks: &[],
+                incomplete: false,
+                agents: None,
+            })
+        };
+        let strict = input(&GatePolicy::default());
+        assert!(!strict.passed, "an unclear AC is not demonstrably met, so it blocks");
+        assert_eq!(strict.unmet_criteria, vec!["AC-2"]);
+        let lenient = input(&GatePolicy { require_all_criteria_met: false, ..GatePolicy::default() });
+        assert!(lenient.passed, "with the relaxed policy only not_met blocks");
+        assert!(lenient.unmet_criteria.is_empty());
+    }
+
+    #[test]
+    fn test_tiers_block_must_pass_and_enforce_edge_coverage() {
+        use crate::review::domain::agent_results::*;
+
+        let scenario = |id: &str, acs: &[&str]| TestScenario {
+            id: id.into(),
+            criterion_ids: acs.iter().map(|a| (*a).to_string()).collect(),
+            title: id.into(),
+            given: String::new(),
+            when: String::new(),
+            then: String::new(),
+        };
+        let result = |id: &str, verdict: TestVerdict| TestResult {
+            scenario_id: id.into(),
+            language: "go".into(),
+            verdict,
+            evidence: None,
+            note: String::new(),
+        };
+        let report = |scenarios: Vec<TestScenario>, tests: Vec<TestResult>| AgentReport {
+            brief: Some(TicketBrief { scenarios, ..TicketBrief::default() }),
+            tests,
+            ..AgentReport::default()
+        };
+        let decide = |agents: &AgentReport| {
+            GatePolicy::default().decide(GateInput {
+                findings: &[],
+                requirements: None,
+                checks: &[],
+                incomplete: false,
+                agents: Some(agents),
+            })
+        };
+
+        let must_fail = report(vec![scenario("M1", &["AC-1"])], vec![result("M1", TestVerdict::FailedAssertion)]);
+        assert!(!decide(&must_fail).passed, "a must-pass (AC-bound) scenario that fails blocks");
+
+        let edges = vec![
+            scenario("E1", &[]),
+            scenario("E2", &[]),
+            scenario("E3", &[]),
+            scenario("E4", &[]),
+            scenario("E5", &[]),
+        ];
+        let at_threshold = report(
+            edges.clone(),
+            vec![
+                result("E1", TestVerdict::Passed),
+                result("E2", TestVerdict::Passed),
+                result("E3", TestVerdict::Passed),
+                result("E4", TestVerdict::Passed),
+                result("E5", TestVerdict::FailedAssertion),
+            ],
+        );
+        let decision = decide(&at_threshold);
+        assert!(decision.passed, "edge coverage at 80% passes");
+        assert_eq!(decision.advisory_tests, vec!["E5"], "the un-passed edge case is a red-warning advisory");
+
+        let below_threshold = report(
+            edges,
+            vec![
+                result("E1", TestVerdict::Passed),
+                result("E2", TestVerdict::Passed),
+                result("E3", TestVerdict::Passed),
+                result("E4", TestVerdict::FailedAssertion),
+                result("E5", TestVerdict::FailedAssertion),
+            ],
+        );
+        let decision = decide(&below_threshold);
+        assert!(!decision.passed, "edge coverage below 80% blocks");
+        assert!(decision.advisory_tests.is_empty());
     }
 
     #[test]

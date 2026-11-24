@@ -69,6 +69,7 @@ pub struct ReviewReport {
     pub gate: GateDecision,
     pub usage: TokenUsage,
     pub estimated_cost_usd: Option<f64>,
+    pub audited: bool,
 }
 
 impl ReviewReport {
@@ -113,6 +114,7 @@ mod tests {
             },
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
+            audited: false,
         };
         assert!(!report.is_incomplete());
         report.skipped.push(SkippedFile { path: "b".into(), reason: SkipReason::ReviewFailed("x".into()) });

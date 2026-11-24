@@ -34,6 +34,7 @@ pub enum FieldAccess {
 }
 
 const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
+    ("llm.audit_findings", None),
     ("agents.enabled", None),
     ("agents.model", None),
     ("agents.effort", None),

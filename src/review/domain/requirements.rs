@@ -66,6 +66,14 @@ impl RequirementsReport {
             .map(|a| a.criterion_id.as_str())
             .collect()
     }
+
+    pub fn unsatisfied(&self) -> Vec<&str> {
+        self.assessments.iter().filter(|a| a.status != CriterionStatus::Met).map(|a| a.criterion_id.as_str()).collect()
+    }
+
+    pub fn met_count(&self) -> usize {
+        self.assessments.iter().filter(|a| a.status == CriterionStatus::Met).count()
+    }
 }
 
 pub fn verify_assessments(

@@ -301,6 +301,7 @@ mod tests {
             },
             usage: TokenUsage { input_tokens: 12_300, output_tokens: 2_100, ..TokenUsage::default() },
             estimated_cost_usd: Some(0.09),
+            audited: false,
         }
     }
 

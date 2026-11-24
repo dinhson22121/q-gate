@@ -26,6 +26,8 @@ pub struct ReportView {
     pub agents: Option<AgentReportView>,
     #[serde(default)]
     pub ticket: Option<TicketContextView>,
+    #[serde(default)]
+    pub audited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +158,8 @@ pub struct GateView {
     pub incomplete: bool,
     #[serde(default)]
     pub failed_tests: Vec<String>,
+    #[serde(default)]
+    pub advisory_tests: Vec<String>,
     #[serde(default)]
     pub rule_violations: Vec<String>,
     #[serde(default)]

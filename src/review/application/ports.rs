@@ -1,10 +1,13 @@
 use std::future::Future;
 
+use futures::future::BoxFuture;
+
 use crate::review::domain::change_set::{ChangeSet, FileChange};
 use crate::review::domain::checks::{CheckResult, CheckSpec};
 use crate::review::domain::finding::Finding;
 use crate::review::domain::report::TokenUsage;
 use crate::review::domain::requirements::{CriterionAssessment, Requirements};
+use crate::review::domain::verification::FindingAudit;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
@@ -77,4 +80,20 @@ pub trait CodeReviewer {
 
 pub trait CheckRunner {
     fn run(&self, checks: &[CheckSpec]) -> impl Future<Output = Vec<CheckResult>> + Send;
+}
+
+pub struct AuditInput<'a> {
+    pub files: &'a [FileChange],
+    pub findings: &'a [Finding],
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AuditOutput {
+    pub audits: Vec<FindingAudit>,
+    pub usage: TokenUsage,
+    pub cost_usd: Option<f64>,
+}
+
+pub trait FindingAuditor: Send + Sync {
+    fn audit<'a>(&'a self, input: AuditInput<'a>) -> BoxFuture<'a, Result<AuditOutput, ReviewerError>>;
 }

@@ -39,8 +39,13 @@ pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
     tests.sort_by(|a, b| a.scenario_id.cmp(&b.scenario_id));
     for test in tests.iter().filter(|t| t.verdict == TestVerdict::FailedAssertion) {
         let blocks = rules.failed_tests && report.gate.failed_tests.contains(&test.scenario_id);
+        let mut task = test_task(test, TaskKind::FailedTest);
+        if !blocks && report.gate.advisory_tests.contains(&test.scenario_id) {
+            task.facts
+                .push(fact("Advisory", "edge-case; group coverage above threshold, fix recommended but not blocking"));
+        }
         let target = if blocks { &mut blocking } else { &mut warnings };
-        target.push(test_task(test, TaskKind::FailedTest));
+        target.push(task);
     }
 
     let mut criteria_warnings = Vec::new();

@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use futures::future::BoxFuture;
 use futures::{StreamExt, stream};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::batching::plan_batches;
 use super::ports::{
-    AssessmentOutput, ChangeSource, CheckRunner, CodeReviewer, RequirementsInput, ReviewInput, ReviewerError,
-    ReviewerOutput, SourceError,
+    AssessmentOutput, AuditInput, ChangeSource, CheckRunner, CodeReviewer, FindingAuditor, RequirementsInput,
+    ReviewInput, ReviewerError, ReviewerOutput, SourceError,
 };
 use super::run_agents::{AgentRun, run_agents};
 use crate::review::domain::agent_results::{TicketContext, verify_agent_report};
@@ -15,7 +17,7 @@ use crate::review::domain::finding::Finding;
 use crate::review::domain::gate::{GateInput, GatePolicy};
 use crate::review::domain::report::{ReviewReport, SkipReason, SkippedFile, TokenUsage};
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, Requirements, verify_assessments};
-use crate::review::domain::verification::verify_findings;
+use crate::review::domain::verification::{Verification, apply_audit, verify_findings};
 
 #[derive(Debug, Clone)]
 pub struct ReviewSettings {
@@ -72,6 +74,7 @@ pub struct ReviewChanges<S, R, C> {
     checks: C,
     settings: ReviewSettings,
     ignore: GlobSet,
+    auditor: Option<Arc<dyn FindingAuditor>>,
 }
 
 #[derive(Default)]
@@ -106,6 +109,13 @@ impl BatchOutcome {
     }
 }
 
+#[derive(Default)]
+struct AuditSpend {
+    performed: bool,
+    usage: TokenUsage,
+    cost_usd: Option<f64>,
+}
+
 fn add_costs(a: Option<f64>, b: Option<f64>) -> Option<f64> {
     match (a, b) {
         (None, None) => None,
@@ -121,7 +131,29 @@ where
 {
     pub fn new(source: S, reviewer: R, checks: C, settings: ReviewSettings) -> Result<Self, ReviewError> {
         let ignore = build_globset(&settings.ignore_patterns)?;
-        Ok(Self { source, reviewer, checks, settings, ignore })
+        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None })
+    }
+
+    pub fn with_auditor(mut self, auditor: Arc<dyn FindingAuditor>) -> Self {
+        self.auditor = Some(auditor);
+        self
+    }
+
+    async fn audit(&self, change_set: &ChangeSet, verification: Verification) -> (Verification, AuditSpend) {
+        let Some(auditor) = &self.auditor else {
+            return (verification, AuditSpend::default());
+        };
+        if verification.accepted.is_empty() {
+            return (verification, AuditSpend::default());
+        }
+        let input = AuditInput { files: &change_set.files, findings: &verification.accepted };
+        match auditor.audit(input).await {
+            Ok(output) => {
+                let spend = AuditSpend { performed: true, usage: output.usage, cost_usd: output.cost_usd };
+                (apply_audit(change_set, verification, output.audits), spend)
+            }
+            Err(_) => (verification, AuditSpend::default()),
+        }
     }
 
     fn effective_gate(&self) -> GatePolicy {
@@ -182,6 +214,7 @@ where
 
         let change_set = ChangeSet { files: reviewable };
         let verification = verify_findings(&change_set, outcome.findings);
+        let (verification, audit) = self.audit(&change_set, verification).await;
         let requirements_report = requirements.map(|r| verify_assessments(&change_set, r, assessment.assessments));
         let incomplete = skipped.iter().any(|s| matches!(s.reason, SkipReason::ReviewFailed(_)));
         let agent_report = agent_report.map(|report| verify_agent_report(&change_set, report));
@@ -194,6 +227,7 @@ where
         });
         let mut usage = outcome.usage;
         usage += assessment.usage;
+        usage += audit.usage;
         Ok(ReviewReport {
             files_reviewed,
             skipped,
@@ -205,7 +239,8 @@ where
             ticket,
             gate,
             usage,
-            estimated_cost_usd: add_costs(outcome.cost_usd, assessment.cost_usd),
+            estimated_cost_usd: add_costs(add_costs(outcome.cost_usd, assessment.cost_usd), audit.cost_usd),
+            audited: audit.performed,
         })
     }
 
@@ -230,6 +265,7 @@ where
             gate,
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
+            audited: false,
         }
     }
 
@@ -322,11 +358,13 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::review::application::ports::AuditOutput;
     use crate::review::domain::change_set::fixtures::{added, file};
     use crate::review::domain::checks::{CheckOutcome, CheckResult};
     use crate::review::domain::finding::Severity;
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::requirements::{AcceptanceCriterion, EvidenceRef};
+    use crate::review::domain::verification::{AuditVerdict, FindingAudit, RejectReason};
 
     struct FakeSource(ChangeSet);
 
@@ -432,6 +470,81 @@ mod tests {
         assert_eq!(report.estimated_cost_usd, Some(0.05));
     }
 
+    struct FakeAuditor(Result<AuditOutput, ReviewerError>);
+
+    impl FindingAuditor for FakeAuditor {
+        fn audit<'a>(&'a self, _input: AuditInput<'a>) -> BoxFuture<'a, Result<AuditOutput, ReviewerError>> {
+            let result = match &self.0 {
+                Ok(output) => Ok(output.clone()),
+                Err(error) => Err(error.clone()),
+            };
+            Box::pin(async move { result })
+        }
+    }
+
+    fn contradiction(index: usize) -> FindingAudit {
+        FindingAudit {
+            index,
+            verdict: AuditVerdict::Contradicted,
+            counter_file: "a.go".into(),
+            counter_line: 1,
+            counter_quote: "total := compute(1)".into(),
+        }
+    }
+
+    fn audit_output(audits: Vec<FindingAudit>) -> AuditOutput {
+        AuditOutput { audits, usage: TokenUsage { input_tokens: 3, ..TokenUsage::default() }, cost_usd: Some(0.02) }
+    }
+
+    fn audited_use_case(auditor: FakeAuditor) -> ReviewChanges<FakeSource, FakeReviewer, FakeChecks> {
+        let reviewer = FakeReviewer::new(vec![Ok(output(
+            vec![finding("a.go", 1, Severity::Critical, "total := compute(1)")],
+            0.05,
+        ))]);
+        use_case(vec![go_file("a.go")], reviewer, sequential()).with_auditor(Arc::new(auditor))
+    }
+
+    #[tokio::test]
+    async fn grounded_contradiction_rejects_the_finding_and_marks_report_audited() {
+        let auditor = FakeAuditor(Ok(audit_output(vec![contradiction(0)])));
+        let report = audited_use_case(auditor).execute(None, &NoProgress).await.unwrap();
+        assert!(report.findings.is_empty());
+        assert_eq!(report.rejected[0].reason, RejectReason::ContradictedByCode);
+        assert!(report.audited);
+        assert!(report.gate.passed);
+        assert_eq!(report.usage.input_tokens, 13);
+        assert!((report.estimated_cost_usd.unwrap() - 0.07).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn failed_audit_keeps_findings_and_leaves_report_unaudited() {
+        let auditor = FakeAuditor(Err(ReviewerError::Unavailable("down".into())));
+        let report = audited_use_case(auditor).execute(None, &NoProgress).await.unwrap();
+        assert_eq!(report.findings.len(), 1);
+        assert!(!report.audited);
+        assert_eq!(report.estimated_cost_usd, Some(0.05));
+    }
+
+    #[tokio::test]
+    async fn auditor_is_skipped_when_no_finding_survives_verification() {
+        let auditor = FakeAuditor(Err(ReviewerError::Rejected("must not be called".into())));
+        let reviewer = FakeReviewer::new(vec![Ok(output(vec![], 0.05))]);
+        let use_case = use_case(vec![go_file("a.go")], reviewer, sequential()).with_auditor(Arc::new(auditor));
+        let report = use_case.execute(None, &NoProgress).await.unwrap();
+        assert!(!report.audited);
+    }
+
+    #[tokio::test]
+    async fn report_is_unaudited_without_an_auditor() {
+        let reviewer = FakeReviewer::new(vec![Ok(output(
+            vec![finding("a.go", 1, Severity::Critical, "total := compute(1)")],
+            0.05,
+        ))]);
+        let report = use_case(vec![go_file("a.go")], reviewer, sequential()).execute(None, &NoProgress).await.unwrap();
+        assert!(!report.audited);
+        assert_eq!(report.findings.len(), 1);
+    }
+
     #[tokio::test]
     async fn skips_deleted_binary_ignored_and_large_files_without_calling_reviewer() {
         let mut deleted = go_file("gone.go");
@@ -457,8 +570,10 @@ mod tests {
             ]
         );
         assert!(use_case.reviewer.calls.lock().unwrap().is_empty());
-        assert_eq!(report.requirements.unwrap().assessments[0].status, CriterionStatus::Unclear);
-        assert!(report.gate.passed);
+        let requirements = report.requirements.unwrap();
+        assert_eq!(requirements.assessments[0].status, CriterionStatus::Unclear);
+        assert!(!report.gate.passed, "an unaddressed acceptance criterion blocks under the strict policy");
+        assert_eq!(report.gate.unmet_criteria, vec!["AC-1"]);
         assert_eq!(report.estimated_cost_usd, None);
     }
 
@@ -572,7 +687,8 @@ mod tests {
         assert_eq!(req.assessments[0].status, CriterionStatus::Met);
         assert_eq!(req.assessments[1].status, CriterionStatus::Unclear);
         assert_eq!(report.usage.input_tokens, 7);
-        assert!(report.gate.passed, "unclear is not unmet");
+        assert!(!report.gate.passed, "an unclear acceptance criterion is not demonstrably met, so it blocks");
+        assert_eq!(report.gate.unmet_criteria, vec!["AC-2"]);
     }
 
     #[tokio::test]

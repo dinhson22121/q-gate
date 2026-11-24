@@ -120,6 +120,7 @@ pub fn failing_report() -> ReviewReport {
             failed_checks: vec!["unit".into()],
             incomplete: false,
             failed_tests: vec!["S2".into()],
+            advisory_tests: Vec::new(),
             rule_violations: vec!["R1".into()],
             design_mismatches: vec!["copy:1:2".into()],
         },
@@ -127,6 +128,7 @@ pub fn failing_report() -> ReviewReport {
         ticket: Some(ticket()),
         usage: TokenUsage::default(),
         estimated_cost_usd: Some(0.12),
+        audited: true,
     }
 }
 
@@ -229,5 +231,6 @@ pub fn passing_report() -> ReviewReport {
         gate: GateDecision { passed: true, ..GateDecision::default() },
         usage: TokenUsage::default(),
         estimated_cost_usd: None,
+        audited: true,
     }
 }

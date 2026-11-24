@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use crate::review::domain::finding::{Category, Confidence, Finding, FindingSource, PreventionRule, Severity};
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, EvidenceRef};
+use crate::review::domain::verification::{AuditVerdict, FindingAudit};
 
 pub fn review_schema() -> Value {
     let finding = strict_object(json!({
@@ -37,6 +38,23 @@ pub fn assessment_schema() -> Value {
         "evidence": array(evidence),
     }));
     strict_object(json!({ "assessments": array(assessment) }))
+}
+
+pub fn audit_schema() -> Value {
+    let audit = strict_object(json!({
+        "index": integer("Zero-based position of the finding in the findings list, exactly as given."),
+        "verdict": string_enum(["upheld", "contradicted", "unsupported"]),
+        "counter_file": string(
+            "Path (exactly as given) of the file whose code contradicts the finding; empty unless verdict is contradicted."
+        ),
+        "counter_line": integer("Line in the new file where that contradicting code is; 0 unless contradicted."),
+        "counter_quote": string(
+            "1-3 lines copied verbatim from the diff proving the change already handles what the finding claims is \
+             missing/wrong; empty unless contradicted."
+        ),
+        "reason": string("One line: why this verdict."),
+    }));
+    strict_object(json!({ "audits": array(audit) }))
 }
 
 fn strict_object(properties: Value) -> Value {
@@ -159,6 +177,47 @@ impl AssessmentAnswer {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditAnswer {
+    audits: Vec<AuditItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuditItem {
+    index: i64,
+    verdict: String,
+    counter_file: String,
+    counter_line: i64,
+    counter_quote: String,
+    #[serde(default, rename = "reason")]
+    _reason: String,
+}
+
+impl AuditAnswer {
+    pub fn into_audits(self) -> Vec<FindingAudit> {
+        self.audits.into_iter().filter_map(AuditItem::into_audit).collect()
+    }
+}
+
+impl AuditItem {
+    fn into_audit(self) -> Option<FindingAudit> {
+        let verdict = match self.verdict.as_str() {
+            "contradicted" => AuditVerdict::Contradicted,
+            "unsupported" => AuditVerdict::Unsupported,
+            _ => AuditVerdict::Upheld,
+        };
+        Some(FindingAudit {
+            index: usize::try_from(self.index).ok()?,
+            verdict,
+            counter_file: self.counter_file.trim().to_string(),
+            counter_line: to_line_number(self.counter_line),
+            counter_quote: self.counter_quote,
+        })
+    }
+}
+
 fn to_line_number(raw: i64) -> u32 {
     u32::try_from(raw).unwrap_or(0)
 }
@@ -191,6 +250,7 @@ mod tests {
     fn schemas_follow_structured_output_rules() {
         assert_strict(&review_schema());
         assert_strict(&assessment_schema());
+        assert_strict(&audit_schema());
     }
 
     #[test]
@@ -262,5 +322,29 @@ mod tests {
         assert_eq!(to_line_number(-3), 0);
         assert_eq!(to_line_number(i64::from(u32::MAX) + 1), 0);
         assert_eq!(to_line_number(12), 12);
+    }
+
+    #[test]
+    fn audit_answer_maps_verdicts_and_ignores_unknown_ones() {
+        let item = |index: i64, verdict: &str| {
+            json!({"index": index, "verdict": verdict, "counter_file": " a.py ", "counter_line": 4,
+                   "counter_quote": "x = 1", "reason": "r"})
+        };
+        let answer: AuditAnswer = serde_json::from_value(json!({"audits": [
+            item(0, "contradicted"), item(1, "unsupported"), item(2, "upheld"), item(3, "mystery"), item(-1, "contradicted")
+        ]}))
+        .unwrap();
+        let audits = answer.into_audits();
+        let verdicts: Vec<_> = audits.iter().map(|a| (a.index, a.verdict)).collect();
+        assert_eq!(
+            verdicts,
+            vec![
+                (0, AuditVerdict::Contradicted),
+                (1, AuditVerdict::Unsupported),
+                (2, AuditVerdict::Upheld),
+                (3, AuditVerdict::Upheld)
+            ]
+        );
+        assert_eq!((audits[0].counter_file.as_str(), audits[0].counter_line), ("a.py", 4));
     }
 }

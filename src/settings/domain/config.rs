@@ -82,6 +82,7 @@ pub struct LlmConfig {
     pub model: String,
     pub effort: Effort,
     pub concurrency: usize,
+    pub audit_findings: bool,
     #[serde(default, skip_serializing, rename = "max_tokens")]
     legacy_max_tokens: LegacyField,
     #[serde(default, skip_serializing, rename = "fallbacks")]
@@ -94,6 +95,7 @@ impl Default for LlmConfig {
             model: DEFAULT_MODEL.into(),
             effort: Effort::default(),
             concurrency: DEFAULT_CONCURRENCY,
+            audit_findings: true,
             legacy_max_tokens: LegacyField,
             legacy_fallbacks: LegacyField,
         }

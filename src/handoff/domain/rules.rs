@@ -4,7 +4,8 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::review::application::{Finding, ReviewReport, RuleViolation, Severity};
+use crate::review::application::{Confidence, Finding, ReviewReport, RuleViolation, Severity};
+use crate::review::domain::finding::FindingSource;
 
 pub const RULES_SCHEMA: &str = "qgate.rules/v1";
 const STATE_EXTENSION: &str = ".json";
@@ -91,7 +92,11 @@ pub fn candidates(report: &ReviewReport) -> Vec<RuleCandidate> {
     let shown = |(index, finding): &(usize, &Finding)| {
         report.gate.blocking.contains(index) || finding.severity >= Severity::Minor
     };
-    let from_findings = report.findings.iter().enumerate().filter(shown).filter_map(|(_, f)| finding_candidate(f));
+    let trusted = |(_, finding): &(usize, &Finding)| {
+        finding.source != FindingSource::Llm || (report.audited && finding.confidence != Confidence::Low)
+    };
+    let from_findings =
+        report.findings.iter().enumerate().filter(shown).filter(trusted).filter_map(|(_, f)| finding_candidate(f));
     let violations = report.agents.iter().flat_map(|a| a.violations.iter()).map(violation_candidate);
     let mut out: Vec<RuleCandidate> = Vec::new();
     for candidate in from_findings.chain(violations) {
@@ -265,6 +270,34 @@ mod tests {
         assert!(rules[0].example.as_ref().unwrap().evidence.starts_with("query := "), "first evidence line only");
         assert_eq!((rules[2].category.as_str(), rules[2].severity), ("architecture", Severity::Major), "approved");
         assert_eq!((rules[3].category.as_str(), rules[3].severity), ("architecture", Severity::Minor), "inferred");
+    }
+
+    #[test]
+    fn unaudited_llm_findings_are_not_promoted_to_rules() {
+        let mut report = failing_report();
+        report.audited = false;
+        let texts: Vec<String> = candidates(&report).into_iter().map(|c| c.text).collect();
+        assert_eq!(texts, vec!["R1 title", "R2 title"]);
+    }
+
+    #[test]
+    fn audited_llm_findings_are_promoted_but_low_confidence_ones_are_not() {
+        let mut report = failing_report();
+        report.findings[1].confidence = Confidence::Low;
+        let texts: Vec<String> = candidates(&report).into_iter().map(|c| c.text).collect();
+        assert!(texts.contains(&"Build SQL with bound parameters only.".to_string()));
+        assert!(!texts.contains(&"Name constants instead of magic numbers.".to_string()));
+    }
+
+    #[test]
+    fn static_tool_findings_are_promoted_regardless_of_audit() {
+        let mut report = failing_report();
+        report.audited = false;
+        report.findings[0].source = FindingSource::StaticTool("clippy".into());
+        report.findings[0].confidence = Confidence::Low;
+        let texts: Vec<String> = candidates(&report).into_iter().map(|c| c.text).collect();
+        assert!(texts.contains(&"Build SQL with bound parameters only.".to_string()));
+        assert!(!texts.contains(&"Name constants instead of magic numbers.".to_string()));
     }
 
     #[test]

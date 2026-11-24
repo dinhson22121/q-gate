@@ -9,6 +9,8 @@ effort = "high"
 # The `claude` binary is not set here: for security it can only be set in the server config (qgate.toml).
 # Parallel review requests (1..=16).
 concurrency = 4
+# Second LLM pass that drops hallucinated or contradicted findings (never drops without grounded counter-evidence).
+audit_findings = true
 
 [gate]
 # Findings at or above this severity block the gate: info | minor | major | critical

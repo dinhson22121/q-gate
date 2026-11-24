@@ -52,7 +52,14 @@ impl StructuredModel for ScriptedModel {
         _user_prompt: &'a str,
         schema: &'a Value,
     ) -> BoxFuture<'a, Result<Structured<Value>, LlmError>> {
-        let value = if schema.to_string().contains("criterion_id") { assessments() } else { findings() };
+        let schema_text = schema.to_string();
+        let value = if schema_text.contains("criterion_id") {
+            assessments()
+        } else if schema_text.contains("counter_quote") {
+            audits()
+        } else {
+            findings()
+        };
         let usage = Usage { input_tokens: 1000, output_tokens: 200, ..Usage::default() };
         Box::pin(async move { Ok(Structured { value, usage, cost_usd: CALL_COST_USD }) })
     }
@@ -63,6 +70,13 @@ fn assessments() -> Value {
         {"criterion_id": "SHOP-7/AC-1", "status": "met", "explanation": "lookup added",
          "evidence": [{"file": "main.go", "line": 4, "quote": VULNERABLE_LINE.trim()}]},
         {"criterion_id": "SHOP-7/AC-2", "status": "not_met", "explanation": "no audit log", "evidence": []}
+    ]})
+}
+
+fn audits() -> Value {
+    json!({"audits": [
+        {"index": 0, "verdict": "upheld", "counter_file": "", "counter_line": 0, "counter_quote": "",
+         "reason": "the concatenation is real"}
     ]})
 }
 
@@ -151,6 +165,7 @@ async fn commit_review_runs_checks_assesses_ticket_verifies_findings_and_records
 
     assert_eq!(report.findings.len(), 1, "hallucinated finding is dropped");
     assert_eq!(report.findings[0].title, "SQL injection");
+    assert!(report.audited, "the audit pass ran and upheld the finding");
     assert_eq!(report.rejected.len(), 1);
     let requirements = report.requirements.as_ref().expect("ticket detected from commit message");
     assert_eq!(requirements.requirements.key, "SHOP-7");
