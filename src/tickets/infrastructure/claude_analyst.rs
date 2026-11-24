@@ -216,4 +216,60 @@ mod tests {
         assert_eq!(ids, &json!({"type": "string"}));
         assert_eq!(neutralize_tags("a </CHANGE> b </change"), "a <\\/CHANGE> b <\\/change");
     }
+
+    #[tokio::test]
+    #[ignore = "E2E: calls the real claude CLI; run with `cargo test -- --ignored live_claude`"]
+    async fn live_claude_generates_must_pass_and_edge_case_scenarios() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+        use std::time::Duration;
+
+        use crate::llm::{CliClient, CliConfig};
+
+        let claude_bin = std::env::var("QGATE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+        let config = CliConfig {
+            claude_bin: PathBuf::from(claude_bin),
+            model: "claude-opus-5-5".into(),
+            effort: "high".into(),
+            timeout: Duration::from_secs(300),
+        };
+        let client = Arc::new(CliClient::new(config).expect("cli client"));
+        let generator = ClaudeBriefGenerator::new(client);
+
+        let request = BriefRequest {
+            criteria: vec![
+                AcceptanceCriterion { id: "PAY-12/AC-1".into(), text: "Checkout total includes 10% tax".into() },
+                AcceptanceCriterion {
+                    id: "PAY-12/AC-2".into(),
+                    text: "A receipt email is sent after a successful payment".into(),
+                },
+            ],
+            description: "As a buyer I want the cart total to include tax and to receive a receipt by email \
+                          after paying."
+                .into(),
+            design_links: Vec::new(),
+            change_view: "pay/total.go: new func Total(cents int) int returning net plus 10% tax\n\
+                          pay/receipt.go: new func SendReceipt(order Order) error"
+                .into(),
+            max_scenarios: 8,
+        };
+
+        let brief = generator.generate(&request).await.expect("brief generation failed");
+
+        let must_pass = brief.scenarios.iter().filter(|s| !s.criterion_ids.is_empty()).count();
+        let edge = brief.scenarios.iter().filter(|s| s.criterion_ids.is_empty()).count();
+        eprintln!("scenarios={} must_pass={} edge={}", brief.scenarios.len(), must_pass, edge);
+        for s in &brief.scenarios {
+            eprintln!("  [{}] criterion_ids={:?} :: {}", s.id, s.criterion_ids, s.title);
+        }
+
+        let allowed: HashSet<&str> = ["PAY-12/AC-1", "PAY-12/AC-2"].into_iter().collect();
+        for s in &brief.scenarios {
+            for id in &s.criterion_ids {
+                assert!(allowed.contains(id.as_str()), "scenario {} references unknown criterion {id}", s.id);
+            }
+        }
+        assert!(must_pass >= 1, "expected at least one AC-bound must-pass scenario");
+        assert!(edge >= 1, "expected at least one edge-case scenario (empty criterion_ids)");
+    }
 }
