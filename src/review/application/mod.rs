@@ -11,8 +11,8 @@ pub mod supplementary_ports;
 pub mod work_in_progress;
 
 pub use crate::review::domain::agent_results::{
-    AgentReport, DesignMismatch, DesignMismatchKind, RuleViolation, TestEvidence, TestResult, TestScenario,
-    TestVerdict, TicketBrief, TicketContext,
+    AgentReport, DesignMismatch, DesignMismatchKind, RuleAssessment, RuleComplianceStatus, RuleViolation, TestEvidence,
+    TestResult, TestScenario, TestVerdict, TicketBrief, TicketContext,
 };
 pub use crate::review::domain::checks::{CheckOutcome, CheckResult, CheckSpec};
 pub use crate::review::domain::finding::{Category, Confidence, Finding, PreventionRule, Severity};

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::report_view::EvidenceView;
-use crate::review::application::{DesignMismatchKind, TestVerdict};
+use crate::review::application::{DesignMismatchKind, RuleComplianceStatus, TestVerdict};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketContextView {
@@ -23,6 +23,8 @@ pub struct AgentReportView {
     pub tests: Vec<TestResultView>,
     #[serde(default)]
     pub violations: Vec<RuleViolationView>,
+    #[serde(default)]
+    pub rule_assessments: Vec<RuleAssessmentView>,
     #[serde(default)]
     pub design: Vec<DesignMismatchView>,
     #[serde(default)]
@@ -111,6 +113,14 @@ pub struct RuleViolationView {
     pub explanation: String,
     #[serde(default)]
     pub suggestion: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleAssessmentView {
+    pub rule_id: String,
+    #[serde(default)]
+    pub rule_title: String,
+    pub status: RuleComplianceStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

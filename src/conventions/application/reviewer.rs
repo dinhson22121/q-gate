@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
@@ -8,9 +9,8 @@ use super::service::RulebookService;
 use crate::conventions::domain::evidence::{ChangedFile, quote_in_added_code};
 use crate::conventions::domain::rulebook::{Rule, RuleStatus, Rulebook};
 use crate::conventions::domain::scope::select_rules;
-use crate::review::application::RuleViolation;
-use crate::review::application::TicketBrief;
-use crate::review::application::agent_ports::{AgentError, AgentInput, ArchitectureReviewer};
+use crate::review::application::agent_ports::{AgentError, AgentInput, ArchitectureReview, ArchitectureReviewer};
+use crate::review::application::{RuleAssessment, RuleComplianceStatus, RuleViolation, TicketBrief};
 
 pub struct RulebookReviewer {
     service: Arc<RulebookService>,
@@ -27,25 +27,43 @@ impl RulebookReviewer {
         &self,
         input: &AgentInput<'_>,
         brief: Option<&TicketBrief>,
-    ) -> Result<Vec<RuleViolation>, ConventionsError> {
+    ) -> Result<ArchitectureReview, ConventionsError> {
         let files = changed_files(input.files);
         if files.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ArchitectureReview::default());
         }
         let rulebook = self.service.current(input.repo_root, self.refresh_days).await?;
         let usable: Vec<Rule> =
             rulebook.rules.iter().filter(|r| r.is_usable(self.use_inferred_rules)).cloned().collect();
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        let selected: Vec<&str> =
-            select_rules(&usable, &paths, self.use_inferred_rules).iter().map(|r| r.id.as_str()).collect();
+        let selected_rules = select_rules(&usable, &paths, self.use_inferred_rules);
+        let selected: Vec<&str> = selected_rules.iter().map(|r| r.id.as_str()).collect();
         if selected.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ArchitectureReview::default());
         }
         let context = brief.map(|b| b.context.as_str()).filter(|c| !c.trim().is_empty());
         let request = CheckRequest { rules: &usable, selected: &selected, files: &files, context };
         let drafts = self.service.model().find_violations(request).await?;
-        Ok(ground_violations(&rulebook, &selected, &files, drafts))
+        let violations = ground_violations(&rulebook, &selected, &files, drafts);
+        let assessments = assess_rules(&selected_rules, &violations);
+        Ok(ArchitectureReview { violations, assessments })
     }
+}
+
+fn assess_rules(selected: &[&Rule], violations: &[RuleViolation]) -> Vec<RuleAssessment> {
+    let violated: HashSet<&str> = violations.iter().map(|v| v.rule_id.as_str()).collect();
+    selected
+        .iter()
+        .map(|rule| RuleAssessment {
+            rule_id: rule.id.clone(),
+            rule_title: rule.title.clone(),
+            status: if violated.contains(rule.id.as_str()) {
+                RuleComplianceStatus::Violated
+            } else {
+                RuleComplianceStatus::Compliant
+            },
+        })
+        .collect()
 }
 
 fn ground_violations(
@@ -82,7 +100,7 @@ impl ArchitectureReviewer for RulebookReviewer {
         &'a self,
         input: &'a AgentInput<'a>,
         brief: Option<&'a TicketBrief>,
-    ) -> BoxFuture<'a, Result<Vec<RuleViolation>, AgentError>> {
+    ) -> BoxFuture<'a, Result<ArchitectureReview, AgentError>> {
         Box::pin(async move { self.check(input, brief).await.map_err(|e| AgentError(e.to_string())) })
     }
 }

@@ -4,8 +4,8 @@ use super::document::RunMeta;
 use crate::review::application::{
     AcceptanceCriterion, AgentReport, Category, CheckOutcome, CheckResult, Confidence, CriterionStatus, DesignMismatch,
     DesignMismatchKind, EvidenceRef, Finding, PreventionRule, Requirements, RequirementsReport, ReviewReport,
-    RuleViolation, Severity, TestEvidence, TestResult, TestScenario, TestVerdict, TicketBrief, TicketContext,
-    TokenUsage,
+    RuleAssessment, RuleComplianceStatus, RuleViolation, Severity, TestEvidence, TestResult, TestScenario, TestVerdict,
+    TicketBrief, TicketContext, TokenUsage,
 };
 use crate::review::domain::finding::FindingSource;
 use crate::review::domain::gate::GateDecision;
@@ -203,6 +203,23 @@ pub fn agents() -> AgentReport {
             },
         ],
         violations: vec![violation("R2", false, 3), violation("R1", true, 42)],
+        rule_assessments: vec![
+            RuleAssessment {
+                rule_id: "R1".into(),
+                rule_title: "R1 title".into(),
+                status: RuleComplianceStatus::Violated,
+            },
+            RuleAssessment {
+                rule_id: "R2".into(),
+                rule_title: "R2 title".into(),
+                status: RuleComplianceStatus::Violated,
+            },
+            RuleAssessment {
+                rule_id: "R5".into(),
+                rule_title: "Bound SQL parameters".into(),
+                status: RuleComplianceStatus::Compliant,
+            },
+        ],
         design: vec![mismatch(DesignMismatchKind::States, "1:9"), mismatch(DesignMismatchKind::Copy, "1:2")],
         notes: vec!["architecture: rulebook rebuilt".into()],
         cost_usd: None,

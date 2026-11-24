@@ -8,8 +8,8 @@ use chrono::Utc;
 use super::fakes::{FakeModel, MemoryRepo, MemoryStore};
 use super::*;
 use crate::conventions::domain::rulebook::{FileLine, RuleDraft, RuleKind, RuleStatus, Rulebook};
-use crate::review::application::TicketBrief;
 use crate::review::application::agent_ports::{AgentInput, ArchitectureReviewer};
+use crate::review::application::{RuleComplianceStatus, TicketBrief};
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::change_set::fixtures::{added, context, file};
 
@@ -290,7 +290,8 @@ async fn reviewer_grounds_violations_against_selected_rules_and_new_code() {
     ];
     let files = [change()];
     let brief = TicketBrief { context: "checkout".into(), ..TicketBrief::default() };
-    let found = reviewer.review(&input(&files, &h.root), Some(&brief)).await.unwrap();
+    let review = reviewer.review(&input(&files, &h.root), Some(&brief)).await.unwrap();
+    let found = &review.violations;
     assert_eq!(found.len(), 2);
     assert_eq!(found[0].rule_id, "R1");
     assert_eq!(found[0].rule_title, "Domain never imports infrastructure");
@@ -301,6 +302,9 @@ async fn reviewer_grounds_violations_against_selected_rules_and_new_code() {
     assert!(!found[1].approved);
     assert_eq!(*h.model.last_selected.lock().unwrap(), ["R1", "R2"]);
     assert_eq!(*h.model.last_rule_ids.lock().unwrap(), ["R1", "R2", "R4"], "rejected rules are never sent");
+    let enumerated: Vec<(&str, RuleComplianceStatus)> =
+        review.assessments.iter().map(|a| (a.rule_id.as_str(), a.status)).collect();
+    assert_eq!(enumerated, vec![("R1", RuleComplianceStatus::Violated), ("R2", RuleComplianceStatus::Violated)]);
 }
 
 #[tokio::test]
@@ -308,8 +312,13 @@ async fn reviewer_skips_inferred_rules_when_disabled() {
     let (h, reviewer) = reviewer_with_rejected("review-approved-only", false).await;
     *h.model.violations.lock().unwrap() = vec![violation("R2", "use crate::infra::db::Pool;")];
     let files = [change()];
-    let found = reviewer.review(&input(&files, &h.root), None).await.unwrap();
-    assert!(found.is_empty());
+    let review = reviewer.review(&input(&files, &h.root), None).await.unwrap();
+    assert!(review.violations.is_empty(), "R2 is not selected, so its draft is dropped");
+    assert_eq!(
+        review.assessments.iter().map(|a| (a.rule_id.as_str(), a.status)).collect::<Vec<_>>(),
+        vec![("R1", RuleComplianceStatus::Compliant)],
+        "the one selected rule is enumerated as compliant"
+    );
     assert_eq!(*h.model.last_selected.lock().unwrap(), ["R1"]);
 }
 
@@ -317,7 +326,7 @@ async fn reviewer_skips_inferred_rules_when_disabled() {
 async fn reviewer_without_reviewable_files_or_matching_rules_makes_no_call() {
     let h = standard("review-empty");
     let reviewer = RulebookReviewer::with_service(h.service.clone(), true, 7);
-    assert!(reviewer.review(&input(&[], &h.root), None).await.unwrap().is_empty());
+    assert!(reviewer.review(&input(&[], &h.root), None).await.unwrap().violations.is_empty());
     assert_eq!(h.model.draft_calls(), 0);
 
     let only_web = harness(
@@ -331,7 +340,7 @@ async fn reviewer_without_reviewable_files_or_matching_rules_makes_no_call() {
     );
     let reviewer = RulebookReviewer::with_service(only_web.service.clone(), true, 7);
     let files = [change()];
-    assert!(reviewer.review(&input(&files, &only_web.root), None).await.unwrap().is_empty());
+    assert!(reviewer.review(&input(&files, &only_web.root), None).await.unwrap().violations.is_empty());
     assert_eq!(only_web.model.check_calls.load(Ordering::SeqCst), 0);
 }
 

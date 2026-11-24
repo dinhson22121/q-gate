@@ -217,6 +217,7 @@ mod tests {
                 explanation: S.into(),
                 suggestion: Some(S.into()),
             }],
+            rule_assessments: Vec::new(),
             design: vec![DesignMismatch {
                 kind: DesignMismatchKind::Copy,
                 frame: "f".into(),

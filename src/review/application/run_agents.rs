@@ -61,13 +61,13 @@ pub async fn run_agents(run: &AgentRun<'_>, files: &[FileChange], requirements: 
     let (mut tests, architecture, design) = futures::join!(tests, architecture, design);
     tests.sort_by_key(|t| natural_key(&t.scenario_id));
 
-    let violations = match architecture {
-        Some(Ok(violations)) => violations,
+    let (violations, rule_assessments) = match architecture {
+        Some(Ok(review)) => (review.violations, review.assessments),
         Some(Err(e)) => {
             notes.push(format!("architecture review failed: {e}"));
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
-        None => Vec::new(),
+        None => (Vec::new(), Vec::new()),
     };
     let design = match design {
         Some(Ok(mismatches)) => mismatches,
@@ -77,7 +77,7 @@ pub async fn run_agents(run: &AgentRun<'_>, files: &[FileChange], requirements: 
         }
         None => Vec::new(),
     };
-    AgentReport { brief, tests, violations, design, notes, cost_usd: None }
+    AgentReport { brief, tests, violations, rule_assessments, design, notes, cost_usd: None }
 }
 
 async fn analyze(suite: &AgentSuite, input: &AgentInput<'_>, notes: &mut Vec<String>) -> Option<TicketBrief> {
@@ -142,7 +142,7 @@ mod tests {
     use futures::future::BoxFuture;
 
     use super::*;
-    use crate::review::application::agent_ports::AgentError;
+    use crate::review::application::agent_ports::{AgentError, ArchitectureReview};
     use crate::review::domain::agent_results::*;
     use crate::review::domain::requirements::AcceptanceCriterion;
 
@@ -203,9 +203,9 @@ mod tests {
             &'a self,
             _input: &'a AgentInput<'a>,
             brief: Option<&'a TicketBrief>,
-        ) -> BoxFuture<'a, Result<Vec<RuleViolation>, AgentError>> {
+        ) -> BoxFuture<'a, Result<ArchitectureReview, AgentError>> {
             assert!(brief.is_some(), "architecture sees the brief");
-            let result = self.0.clone();
+            let result = self.0.clone().map(|violations| ArchitectureReview { violations, assessments: Vec::new() });
             Box::pin(async move { result })
         }
     }

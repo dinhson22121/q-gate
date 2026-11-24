@@ -3,7 +3,7 @@ use std::path::Path;
 use futures::future::BoxFuture;
 
 use crate::review::domain::agent_results::{
-    DesignMismatch, RuleViolation, TestResult, TestScenario, TicketBrief, TicketContext,
+    DesignMismatch, RuleAssessment, RuleViolation, TestResult, TestScenario, TicketBrief, TicketContext,
 };
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::requirements::Requirements;
@@ -29,12 +29,18 @@ pub trait TestAgent: Send + Sync {
     fn run<'a>(&'a self, input: &'a AgentInput<'a>, scenario: &'a TestScenario) -> BoxFuture<'a, TestResult>;
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchitectureReview {
+    pub violations: Vec<RuleViolation>,
+    pub assessments: Vec<RuleAssessment>,
+}
+
 pub trait ArchitectureReviewer: Send + Sync {
     fn review<'a>(
         &'a self,
         input: &'a AgentInput<'a>,
         brief: Option<&'a TicketBrief>,
-    ) -> BoxFuture<'a, Result<Vec<RuleViolation>, AgentError>>;
+    ) -> BoxFuture<'a, Result<ArchitectureReview, AgentError>>;
 }
 
 pub trait DesignReviewer: Send + Sync {

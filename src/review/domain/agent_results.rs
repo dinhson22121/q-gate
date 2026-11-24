@@ -118,11 +118,36 @@ pub struct DesignMismatch {
     pub explanation: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleComplianceStatus {
+    Compliant,
+    Violated,
+}
+
+impl RuleComplianceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Compliant => "compliant",
+            Self::Violated => "violated",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleAssessment {
+    pub rule_id: String,
+    pub rule_title: String,
+    pub status: RuleComplianceStatus,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AgentReport {
     pub brief: Option<TicketBrief>,
     pub tests: Vec<TestResult>,
     pub violations: Vec<RuleViolation>,
+    #[serde(default)]
+    pub rule_assessments: Vec<RuleAssessment>,
     pub design: Vec<DesignMismatch>,
     pub notes: Vec<String>,
     pub cost_usd: Option<f64>,
@@ -141,6 +166,12 @@ pub fn verify_agent_report(changes: &ChangeSet, mut report: AgentReport) -> Agen
     }
     report.violations.retain(|v| evidence_exists(changes, &v.file, v.line, &v.evidence));
     report.design.retain(|d| evidence_exists(changes, &d.file, d.line, &d.code_evidence));
+    let violated: std::collections::HashSet<&str> = report.violations.iter().map(|v| v.rule_id.as_str()).collect();
+    for assessment in &mut report.rule_assessments {
+        if assessment.status == RuleComplianceStatus::Violated && !violated.contains(assessment.rule_id.as_str()) {
+            assessment.status = RuleComplianceStatus::Compliant;
+        }
+    }
     report
 }
 
@@ -239,15 +270,35 @@ mod tests {
             code_evidence: quote.into(),
             explanation: String::new(),
         };
+        let assess = |id: &str, status: RuleComplianceStatus| RuleAssessment {
+            rule_id: id.into(),
+            rule_title: format!("{id} title"),
+            status,
+        };
         let report = verify_agent_report(
             &changes(),
             AgentReport {
                 violations: vec![violation("total := price * qty"), violation("invented code here")],
+                rule_assessments: vec![
+                    assess("R1", RuleComplianceStatus::Violated),
+                    assess("R9", RuleComplianceStatus::Violated),
+                    assess("R2", RuleComplianceStatus::Compliant),
+                ],
                 design: vec![mismatch("total := price * qty"), mismatch("nothing like this")],
                 ..AgentReport::default()
             },
         );
         assert_eq!(report.violations.len(), 1);
         assert_eq!(report.design.len(), 1);
+        let statuses: Vec<_> = report.rule_assessments.iter().map(|a| (a.rule_id.as_str(), a.status)).collect();
+        assert_eq!(
+            statuses,
+            vec![
+                ("R1", RuleComplianceStatus::Violated),
+                ("R9", RuleComplianceStatus::Compliant),
+                ("R2", RuleComplianceStatus::Compliant),
+            ],
+            "an assessment loses Violated when its only violation fails grounding"
+        );
     }
 }

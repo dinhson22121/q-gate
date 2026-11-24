@@ -694,11 +694,23 @@ p { margin: 4px 0; }
   function architectureSection(report, repoName) {
     const agents = report.agents;
     if (!agents) return null;
+    const assessments = agents.rule_assessments || [];
     const section = el("section", { "aria-label": "Architecture" },
       el("h3", {}, "Architecture conformance (" + agents.violations.length + ")"),
       el("p", {}, el("a", { href: "/rulebook?repo=" + encodeURIComponent(repoName) }, "Open the rulebook for " + repoName)));
+    if (assessments.length) {
+      const checklist = el("div", { class: "file-group" },
+        el("div", { class: "card-head" }, el("strong", {}, "Rules checked for this change (" + assessments.length + ")")));
+      for (const a of assessments) {
+        const ok = a.status === "compliant";
+        checklist.append(el("div", { class: "card" },
+          ok ? chip("compliant", "ok") : chip("violated", "bad"), el("strong", {}, a.rule_id), " ",
+          el("span", { class: "card-title" }, a.rule_title)));
+      }
+      section.append(checklist);
+    }
     if (!agents.violations.length) {
-      section.append(empty("No rule violations."));
+      section.append(empty(assessments.length ? "No violations among the rules checked above." : "No rule violations."));
       return section;
     }
     for (const [ruleId, items] of groupBy(agents.violations, (v) => v.rule_id)) {
