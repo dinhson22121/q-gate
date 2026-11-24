@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use super::args::{AuthAction, OutputFormat, ReposAction, ReviewArgs, SecretKind};
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest};
 use super::render::{DisplayFilter, TerminalView, render_json, render_terminal};
-use super::serve::{REPOS_FILE, repo_source};
+use super::serve::{REPOS_FILE, repo_source, resolve_base_target};
 use super::tickets::build_source;
 use super::{EXIT_GATE_FAILED, EXIT_OK};
 use crate::history::application::Trigger;
@@ -38,7 +38,8 @@ pub async fn review(context: Arc<AppContext>, args: ReviewArgs) -> Result<ExitCo
     let target = match (args.base, args.commit) {
         (Some(base), _) => DiffTarget::Base(base),
         (None, Some(rev)) => DiffTarget::Commit(resolve_commit(&root, &rev).await?),
-        (None, None) => DiffTarget::WorkingTree,
+        (None, None) if args.working_tree => DiffTarget::WorkingTree,
+        (None, None) => resolve_base_target(&root, &context).await,
     };
     let history = if args.no_record {
         None
@@ -50,6 +51,7 @@ pub async fn review(context: Arc<AppContext>, args: ReviewArgs) -> Result<ExitCo
         target,
         trigger: Trigger::Manual,
         explicit_ticket: args.ticket,
+        branch: None,
         ticket_in_progress: false,
     };
     let progress = StderrProgress { enabled: args.format == OutputFormat::Terminal };

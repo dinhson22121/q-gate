@@ -154,6 +154,13 @@ mod tests {
     }
 
     #[test]
+    fn ticket_branch_forms_yield_the_key() {
+        for branch in ["KAN-4", "feature/KAN-4", "bugfix/KAN-4", "hotfix/KAN-4", "feature/KAN-4-login-logout"] {
+            assert_eq!(implements(Some(branch), &["work in progress"]), vec!["KAN-4"], "{branch}");
+        }
+    }
+
+    #[test]
     fn collects_over_the_whole_range_with_dedup() {
         let range = ["SHOP-9: second", "fix typo mentioning SHOP-9", "SHOP-7: first", "SHOP-9 again"];
         let (implemented, referenced, capped) = keys(Some("feature/SHOP-1"), &range, &[]);

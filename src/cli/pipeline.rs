@@ -44,6 +44,7 @@ use crate::settings::infrastructure::{
     process_env, resolve_credential,
 };
 use crate::tickets::application::{LoadOptions, TicketCache};
+use crate::tickets::domain::extract_implemented_keys;
 use crate::tickets::infrastructure::SqliteTicketCache;
 
 pub(super) const HISTORY_DB_FILE: &str = "qgate.db";
@@ -130,6 +131,7 @@ pub struct ReviewRequest {
     pub target: DiffTarget,
     pub trigger: Trigger,
     pub explicit_ticket: Option<String>,
+    pub branch: Option<String>,
     pub ticket_in_progress: bool,
 }
 
@@ -145,6 +147,7 @@ struct RunMeta {
     commit: Option<String>,
     branch: Option<String>,
     commit_messages: Vec<String>,
+    detected_ticket: Option<String>,
 }
 
 pub struct ReviewPipeline {
@@ -421,7 +424,8 @@ fn build_run(request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutc
         .as_ref()
         .and_then(|r| r.requirements.as_ref())
         .map(|r| r.requirements.key.clone())
-        .or_else(|| request.explicit_ticket.clone());
+        .or_else(|| request.explicit_ticket.clone())
+        .or_else(|| meta.detected_ticket.clone());
     let report_md = report.as_ref().map(|r| {
         let handoff_meta = HandoffRunMeta {
             repo: meta.repo_name.clone(),
@@ -473,7 +477,7 @@ fn short(rev: &str) -> &str {
 async fn collect_meta(request: &ReviewRequest) -> RunMeta {
     let repo_name = repo_name(&request.repo_root);
     let Ok(git) = LocalGit::new(request.repo_root.clone(), DiffTarget::WorkingTree) else {
-        return RunMeta { repo_name, commit: None, branch: None, commit_messages: Vec::new() };
+        return RunMeta { repo_name, commit: None, branch: None, commit_messages: Vec::new(), detected_ticket: None };
     };
     let commit = match &request.target {
         DiffTarget::Commit(sha) | DiffTarget::Range { head: sha, .. } => Some(sha.clone()),
@@ -486,7 +490,13 @@ async fn collect_meta(request: &ReviewRequest) -> RunMeta {
         DiffTarget::WorkingTree => commit_messages(&request.repo_root, None, "HEAD").await,
     }
     .unwrap_or_default();
-    RunMeta { repo_name, commit, branch: git.current_branch().await.ok().flatten(), commit_messages }
+    let branch = match &request.branch {
+        Some(branch) => Some(branch.clone()),
+        None => git.current_branch().await.ok().flatten(),
+    };
+    let detected_ticket =
+        extract_implemented_keys(branch.as_deref(), &commit_messages, &[]).implements.first().map(ToString::to_string);
+    RunMeta { repo_name, commit, branch, commit_messages, detected_ticket }
 }
 
 fn ticket_in_progress_from_range(target: &DiffTarget, meta: &RunMeta) -> bool {
@@ -513,6 +523,7 @@ mod tests {
             target: DiffTarget::Commit("abc1234".into()),
             trigger: Trigger::Commit,
             explicit_ticket: Some("SHOP-7".into()),
+            branch: None,
             ticket_in_progress: false,
         }
     }
@@ -523,6 +534,7 @@ mod tests {
             commit: Some("abc1234".into()),
             branch: Some("feature/SHOP-7".into()),
             commit_messages: Vec::new(),
+            detected_ticket: None,
         }
     }
 
@@ -552,6 +564,7 @@ mod tests {
             commit: None,
             branch: None,
             commit_messages: vec![subject.into()],
+            detected_ticket: None,
         };
         let range = DiffTarget::Range { base: "b".into(), head: "h".into() };
         assert!(ticket_in_progress_from_range(&range, &meta("[WIP] x")));

@@ -165,6 +165,7 @@ impl CommitReviewer for PipelineReviewer {
             target: review_target(event),
             trigger: Trigger::Push,
             explicit_ticket: None,
+            branch: event.branch.clone(),
             ticket_in_progress: false,
         };
         let outcome =
@@ -190,12 +191,13 @@ impl ManualScanner for PipelineScanner {
         let context = self.context.clone();
         let history = self.history.clone();
         tokio::spawn(async move {
-            let target = resolve_manual_target(&repo_root, &context).await;
+            let target = resolve_base_target(&repo_root, &context).await;
             let request = ReviewRequest {
                 repo_root,
                 target,
                 trigger: Trigger::Manual,
                 explicit_ticket: None,
+                branch: None,
                 ticket_in_progress: false,
             };
             if let Err(e) = ReviewPipeline::new(context, Some(history)).run(&request, &NoProgress).await {
@@ -205,10 +207,10 @@ impl ManualScanner for PipelineScanner {
     }
 }
 
-async fn resolve_manual_target(root: &Path, context: &AppContext) -> DiffTarget {
+pub(super) async fn resolve_base_target(root: &Path, context: &AppContext) -> DiffTarget {
     let head = git_rev(root, "HEAD").await;
     let configured = context.server().watch.base_branch;
-    for candidate in [configured.as_str(), "origin/main", "origin/master"] {
+    for candidate in [configured.as_str(), "origin/main", "main", "origin/master", "master"] {
         if candidate.is_empty() {
             continue;
         }

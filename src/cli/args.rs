@@ -63,6 +63,8 @@ pub struct ReviewArgs {
     pub format: OutputFormat,
     #[arg(long)]
     pub no_record: bool,
+    #[arg(long, conflicts_with_all = ["base", "commit"])]
+    pub working_tree: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

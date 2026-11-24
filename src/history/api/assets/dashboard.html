@@ -155,6 +155,22 @@ ul.plain > li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 ul.plain > li:last-child { border-bottom: 0; }
 ul.reasons { margin: 4px 0; padding-left: 20px; }
 .card { background: var(--main); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+.ac-card { background: var(--sub); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 10px 0; transition: transform .15s var(--ease), box-shadow .15s var(--ease), border-color .15s var(--ease); }
+.ac-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--primary-light); }
+.advisory-card { list-style: none; margin: 8px 0 8px -20px; background: var(--sub); border: 1px solid var(--line); border-left: 3px solid var(--warn-fg); border-radius: var(--radius); padding: 10px 12px; transition: transform .15s var(--ease), box-shadow .15s var(--ease); }
+.advisory-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.chart { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0 4px; }
+.chart .metric { flex: 1 1 200px; min-width: 180px; background: var(--sub); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; transition: transform .15s var(--ease), box-shadow .15s var(--ease); }
+.chart .metric:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.chart .metric h4 { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.chart .big { font-size: 22px; font-weight: 700; }
+.bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--main); }
+.bar > span { display: block; height: 100%; }
+.meter { height: 14px; border-radius: 7px; background: var(--main); overflow: hidden; margin-top: 6px; }
+.meter > span { display: block; height: 100%; background: var(--ok-fg); }
+.bar-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.bar-legend .k { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .card.bad { background: var(--bad-bg); border-color: transparent; color: var(--bad-fg); }
 .card-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .card-title { font-weight: 700; }
@@ -409,7 +425,7 @@ p { margin: 4px 0; }
     }
     nodes.push(el("div", { class: "detail-actions" },
       el("button", { type: "button", class: "btn-link", title: "Download the review as Markdown", onclick: () => exportRun(run.id) }, "⬇ Export .md")));
-    nodes.push(verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
+    nodes.push(overviewChart(report), verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
       testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
       architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
       skippedSection(report.skipped), rejectedSection(report.rejected), usageSection(report));
@@ -472,6 +488,38 @@ p { margin: 4px 0; }
     return reasons;
   }
 
+  function overviewChart(report) {
+    const findings = report.findings || [];
+    const sev = [["critical", "var(--bad-fg)"], ["major", "var(--warn-fg)"], ["minor", "var(--info-fg)"], ["info", "var(--muted)"]]
+      .map(([k, color]) => ({ k, color, n: findings.filter((f) => f.severity === k).length }));
+    const total = sev.reduce((s, x) => s + x.n, 0);
+    const metrics = [];
+    metrics.push(el("div", { class: "metric" }, el("h4", {}, "Findings (" + total + ")"),
+      total
+        ? el("div", {}, el("div", { class: "bar" }, sev.filter((x) => x.n).map((x) =>
+            el("span", { style: "width:" + (x.n / total * 100) + "%;background:" + x.color, title: x.k + " " + x.n }))),
+          el("div", { class: "bar-legend" }, sev.filter((x) => x.n).map((x) =>
+            el("span", { class: "k" }, el("span", { class: "swatch", style: "background:" + x.color }), x.k + " " + x.n))))
+        : el("p", { class: "muted" }, "None")));
+    const req = report.requirements;
+    if (req && req.assessments.length) {
+      const met = req.assessments.filter((a) => a.status === "met").length;
+      const tot = req.assessments.length;
+      metrics.push(el("div", { class: "metric" }, el("h4", {}, "Acceptance criteria"),
+        el("div", {}, el("span", { class: "big" }, met + "/" + tot), " met"),
+        el("div", { class: "meter" }, el("span", { style: "width:" + (met / tot * 100) + "%" }))));
+    }
+    const tests = report.agents && report.agents.tests ? report.agents.tests : [];
+    if (tests.length) {
+      const passed = tests.filter((t) => t.verdict === "passed").length;
+      const adv = (report.gate && report.gate.advisory_tests || []).length;
+      metrics.push(el("div", { class: "metric" }, el("h4", {}, "Generated tests"),
+        el("div", {}, el("span", { class: "big" }, passed + "/" + tests.length), " passed"),
+        adv ? el("div", { class: "bar-legend" }, el("span", { class: "k" }, adv + " advisory (not verified)")) : null));
+    }
+    return el("section", { "aria-label": "Overview" }, el("h3", {}, "Overview"), el("div", { class: "chart" }, metrics));
+  }
+
   function verdictSection(report) {
     const gate = report.gate;
     const reasons = gateReasons(report);
@@ -483,7 +531,8 @@ p { margin: 4px 0; }
       if (r.kind === "hard" || soleCause) return chip("blocking", "bad");
       return chip("blocking or warning (per policy)", "warn");
     };
-    const items = reasons.map((r) => el("li", {}, label(r), " ", r.content));
+    const items = reasons.map((r) =>
+      el("li", { class: r.kind === "advisory" ? "advisory-card" : null }, label(r), " ", r.content));
     return el("div", {},
       el("h3", {}, "Gate verdict"),
       el("div", { class: "verdict" }, chip(gate.passed ? "PASSED" : "FAILED", gate.passed ? "ok" : "bad"),
@@ -569,7 +618,7 @@ p { margin: 4px 0; }
   }
 
   function assessmentItem(requirements, a) {
-    return el("li", {},
+    return el("li", { class: "ac-card" },
       el("div", { class: "card-head" }, chip(CRITERION_LABEL[a.status] || a.status, CRITERION_CLASS[a.status]),
         el("strong", {}, a.criterion_id), criterionText(requirements, a.criterion_id)),
       a.explanation ? el("p", {}, a.explanation) : null,

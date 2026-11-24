@@ -127,6 +127,7 @@ async fn commit_review_runs_checks_verifies_findings_and_records_history() {
         target: DiffTarget::Commit(sha.clone()),
         trigger: Trigger::Commit,
         explicit_ticket: None,
+        branch: None,
         ticket_in_progress: false,
     };
     let outcome = pipeline.run(&request, &NoProgress).await.unwrap();
@@ -148,7 +149,7 @@ async fn commit_review_runs_checks_verifies_findings_and_records_history() {
     let run_id = outcome.run_id.expect("run recorded");
     let stored = GetRun::new(history).execute(run_id).unwrap().expect("run exists");
     assert_eq!(stored.commit.as_deref(), Some(sha.as_str()));
-    assert_eq!(stored.ticket_key, None);
+    assert_eq!(stored.ticket_key.as_deref(), Some("SHOP-7"), "detected ticket key is recorded even without a ticket source");
     assert_eq!(stored.status, RunStatus::Failed);
     let leftovers = std::fs::read_dir(work.path().join("data/work")).map(|d| d.count()).unwrap_or(0);
     assert_eq!(leftovers, 0, "snapshot cleaned up");
@@ -179,6 +180,7 @@ async fn review_error_is_recorded_and_returned() {
         target: DiffTarget::Commit(sha),
         trigger: Trigger::Commit,
         explicit_ticket: Some("not a key".into()),
+        branch: None,
         ticket_in_progress: false,
     };
     let error = pipeline.run(&request, &NoProgress).await.err().expect("invalid ignore pattern fails");
@@ -235,6 +237,7 @@ async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks
                 target: DiffTarget::Commit(head.clone()),
                 trigger: Trigger::Commit,
                 explicit_ticket: None,
+                branch: None,
                 ticket_in_progress: false,
             };
             let server = pipeline.context.server();
@@ -318,6 +321,7 @@ async fn a_rate_limited_preflight_aborts_the_review_before_any_agent_and_records
         target: DiffTarget::Commit(sha),
         trigger: Trigger::Push,
         explicit_ticket: None,
+        branch: None,
         ticket_in_progress: false,
     };
 
