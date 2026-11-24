@@ -16,7 +16,7 @@ pub use config::{
     WatchConfig,
 };
 pub use credentials::{CredentialName, Secret};
-pub use jira::{JiraConfig, JiraMcpConfig, JiraOverride, JiraProvider};
+pub use jira::{JiraConfig, JiraOverride, JiraProvider};
 pub use output::{OUTPUT_PLACEHOLDERS, OutputConfig, OutputFormat, validate_path_template};
 pub use server::{
     ADMIN_ONLY_FIELDS, DashboardConfig, ENV_OVERRIDES, EnvOverride, NotifyConfig, RESTART_REQUIRED_FIELDS,

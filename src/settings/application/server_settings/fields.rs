@@ -64,12 +64,12 @@ mod tests {
     fn reads_copies_and_diffs_by_dotted_path() {
         let a = to_json(&ServerConfig::default()).unwrap();
         let mut changed = ServerConfig::default();
-        changed.jira.email = "x@y.z".into();
+        changed.jira.ac_field = "customfield_1".into();
         changed.figma.block_on = vec![crate::settings::domain::DesignCheck::Copy];
         let mut b = to_json(&changed).unwrap();
-        assert_eq!(get(&b, "jira.email"), Some(&Value::from("x@y.z")));
-        assert_eq!(changed_paths(&a, &b), vec!["figma.block_on".to_string(), "jira.email".to_string()]);
-        copy(&a, &mut b, "jira.email");
+        assert_eq!(get(&b, "jira.ac_field"), Some(&Value::from("customfield_1")));
+        assert_eq!(changed_paths(&a, &b), vec!["figma.block_on".to_string(), "jira.ac_field".to_string()]);
+        copy(&a, &mut b, "jira.ac_field");
         assert_eq!(changed_paths(&a, &b), vec!["figma.block_on".to_string()]);
         assert_eq!(from_json(b).unwrap().figma.block_on.len(), 1);
         assert!(from_json(Value::from(1)).is_err());

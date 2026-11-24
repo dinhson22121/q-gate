@@ -370,10 +370,6 @@ impl ReviewPipeline {
         db: &Path,
     ) -> (Option<Requirements>, Option<TicketContext>, Vec<String>) {
         let jira = config.jira(&server.jira);
-        let token = match resolve_credential(CredentialName::JiraApiToken, self.context.store.as_ref()) {
-            Ok(token) => token,
-            Err(e) => return (None, None, vec![format!("Jira token: {e}")]),
-        };
         let analyst = &server.agents.ticket_analyst;
         let options = LoadOptions {
             include_parent_story: analyst.include_parent_story,
@@ -384,7 +380,7 @@ impl ReviewPipeline {
         let cache = SqliteTicketCache::open(db).ok().map(|c| Arc::new(c) as Arc<dyn TicketCache>);
         let load = load_ticket_context(
             &jira,
-            token.as_ref(),
+            &self.context.store,
             request.explicit_ticket.as_deref(),
             meta.branch.as_deref(),
             &meta.commit_messages,

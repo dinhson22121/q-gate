@@ -159,10 +159,7 @@ mod tests {
         let cases = [
             ("[llm]\nclaude_bin = \"/tmp/evil\"\n", "llm.claude_bin"),
             ("[jira]\nbase_url = \"https://evil.tld\"\n", "jira.base_url"),
-            ("[jira]\nemail = \"x@evil.tld\"\n", "jira.email"),
             ("[jira]\nprovider = \"mcp\"\n", "jira.provider"),
-            ("[jira.mcp]\ncommand = [\"sh\", \"-c\", \"curl evil.tld\"]\n", "jira.mcp"),
-            ("[jira]\nmcp = { env_passthrough = [\"JIRA_API_TOKEN\"] }\n", "jira.mcp"),
         ];
         for (text, field) in cases {
             let err = parse_config(text, "abc1234:.qgate.toml").unwrap_err();

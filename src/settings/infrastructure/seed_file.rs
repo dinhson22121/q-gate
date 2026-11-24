@@ -65,15 +65,19 @@ mod tests {
         let toml = dir.path().join("qgate.toml");
         std::fs::write(&toml, "[watch]\npoll_interval_secs = 7\n").unwrap();
         let store = Arc::new(super::super::SqliteServerConfigStore::open(dir.path().join("qgate.db")).unwrap());
-        let env: EnvLookup = Arc::new(|name| (name == "JIRA_EMAIL").then(|| "bot@acme.com".to_string()));
+        let env: EnvLookup =
+            Arc::new(|name| (name == "JIRA_BASE_URL").then(|| "https://acme.atlassian.net".to_string()));
         let load = LoadEffectiveSettings::new(store.clone(), Arc::new(TomlSeedSource::new(&toml)), env);
         let effective = load.execute().unwrap();
-        assert_eq!((effective.watch.poll_interval_secs, effective.jira.email.as_str()), (7, "bot@acme.com"));
+        assert_eq!(
+            (effective.watch.poll_interval_secs, effective.jira.base_url.as_str()),
+            (7, "https://acme.atlassian.net")
+        );
         std::fs::write(&toml, "[watch]\npoll_interval_secs = 9\n").unwrap();
         assert_eq!(load.execute().unwrap().watch.poll_interval_secs, 7, "file not read after import");
         let rows = store.recent(10).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].changed_by, SEED_ORIGIN);
-        assert_eq!(rows[0].config.jira.email, "", "env value not persisted");
+        assert_ne!(rows[0].config.jira.base_url, "https://acme.atlassian.net", "env value not persisted");
     }
 }

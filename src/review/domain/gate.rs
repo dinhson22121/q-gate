@@ -91,9 +91,10 @@ impl GatePolicy {
             input.checks.iter().filter(|c| c.is_blocking()).map(|c| c.name.clone()).collect();
         let criteria_ok = !self.fail_on_unmet_criteria || unmet_criteria.is_empty();
         let completeness_ok = !self.fail_on_incomplete || !input.incomplete;
-        let (failed_tests, rule_violations, design_mismatches) =
-            input.agents.map_or_else(Default::default, |a| self.agent_failures(a));
-        let (tests_block, advisory_tests) = input.agents.map_or((false, Vec::new()), |a| self.test_gate(a));
+        let (rule_violations, design_mismatches) =
+            input.agents.map_or_else(Default::default, |a| self.agent_violations(a));
+        let (tests_block, failed_tests, advisory_tests) =
+            input.agents.map_or((false, Vec::new(), Vec::new()), |a| self.test_gate(a));
         let agents_ok = !tests_block
             && (!self.fail_on_rule_violation || rule_violations.is_empty())
             && design_mismatches.is_empty();
@@ -110,21 +111,29 @@ impl GatePolicy {
         }
     }
 
-    fn test_gate(&self, agents: &AgentReport) -> (bool, Vec<String>) {
+    fn test_gate(&self, agents: &AgentReport) -> (bool, Vec<String>, Vec<String>) {
+        let failed: Vec<String> = agents
+            .tests
+            .iter()
+            .filter(|t| t.verdict == TestVerdict::FailedAssertion)
+            .map(|t| t.scenario_id.clone())
+            .collect();
         let Some(brief) = &agents.brief else {
-            let any_failed = agents.tests.iter().any(|t| t.verdict == TestVerdict::FailedAssertion);
-            return (self.fail_on_test_failure && any_failed, Vec::new());
+            return (self.fail_on_test_failure && !failed.is_empty(), failed, Vec::new());
         };
         let must_pass =
             |id: &str| brief.scenarios.iter().find(|s| s.id == id).is_some_and(|s| !s.criterion_ids.is_empty());
-        let mut must_fail = false;
+        let mut must_failed = false;
+        let mut unverified = Vec::new();
         let mut edge_total = 0u32;
         let mut edge_pass = 0u32;
         let mut edge_unpassed = Vec::new();
         for test in &agents.tests {
             if must_pass(&test.scenario_id) {
-                if test.verdict != TestVerdict::Passed {
-                    must_fail = true;
+                match test.verdict {
+                    TestVerdict::Passed => {}
+                    TestVerdict::FailedAssertion => must_failed = true,
+                    _ => unverified.push(test.scenario_id.clone()),
                 }
             } else {
                 edge_total += 1;
@@ -136,19 +145,17 @@ impl GatePolicy {
             }
         }
         let edge_ok = edge_total == 0 || edge_pass * 100 >= edge_total * self.min_edge_pass_pct;
-        let strict_edge = self.fail_on_test_failure && !edge_unpassed.is_empty();
-        let block = (self.require_must_pass_tests && must_fail) || !edge_ok || strict_edge;
-        let advisory = if edge_ok && !strict_edge { edge_unpassed } else { Vec::new() };
-        (block, advisory)
+        let must_unverified_blocks = self.fail_on_test_failure && !unverified.is_empty();
+        let edge_blocks = !edge_ok || (self.fail_on_test_failure && !edge_unpassed.is_empty());
+        let block = (self.require_must_pass_tests && must_failed) || edge_blocks || must_unverified_blocks;
+        let mut advisory = unverified;
+        if !edge_blocks {
+            advisory.extend(edge_unpassed);
+        }
+        (block, failed, advisory)
     }
 
-    fn agent_failures(&self, agents: &AgentReport) -> (Vec<String>, Vec<String>, Vec<String>) {
-        let failed_tests = agents
-            .tests
-            .iter()
-            .filter(|t| t.verdict == TestVerdict::FailedAssertion)
-            .map(|t| t.scenario_id.clone())
-            .collect();
+    fn agent_violations(&self, agents: &AgentReport) -> (Vec<String>, Vec<String>) {
         let mut rule_violations: Vec<String> =
             agents.violations.iter().filter(|v| v.approved).map(|v| v.rule_id.clone()).collect();
         rule_violations.dedup();
@@ -158,7 +165,7 @@ impl GatePolicy {
             .filter(|d| d.kind != DesignMismatchKind::States && self.fail_on_design.contains(&d.kind))
             .map(|d| format!("{:?}:{}", d.kind, d.node_id).to_lowercase())
             .collect();
-        (failed_tests, rule_violations, design_mismatches)
+        (rule_violations, design_mismatches)
     }
 }
 
@@ -342,6 +349,23 @@ mod tests {
         let decision = decide(&below_threshold);
         assert!(!decision.passed, "edge coverage below 80% blocks");
         assert!(decision.advisory_tests.is_empty());
+
+        let unrunnable = report(
+            vec![scenario("M1", &["AC-1"]), scenario("M2", &["AC-2"])],
+            vec![result("M1", TestVerdict::Inconclusive), result("M2", TestVerdict::Inconclusive)],
+        );
+        let lenient = decide(&unrunnable);
+        assert!(lenient.passed, "must-pass tests that could not run are advisory, not blocking, by default");
+        assert_eq!(lenient.advisory_tests, vec!["M1", "M2"]);
+        assert!(lenient.failed_tests.is_empty());
+        let strict = GatePolicy { fail_on_test_failure: true, ..GatePolicy::default() }.decide(GateInput {
+            findings: &[],
+            requirements: None,
+            checks: &[],
+            incomplete: false,
+            agents: Some(&unrunnable),
+        });
+        assert!(!strict.passed, "strict policy blocks when must-pass tests cannot be verified");
     }
 
     #[test]

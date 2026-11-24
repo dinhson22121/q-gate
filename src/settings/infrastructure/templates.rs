@@ -51,7 +51,7 @@ max_file_kb = 300
 
 [jira]
 # Unset keys fall back to the server configuration (qgate.toml).
-# The connection (base_url, email, provider, [jira.mcp]) can only be set in the server config, for security.
+# The connection (base_url, provider) can only be set in the server config, for security.
 # enabled = false
 # Custom field holding the acceptance criteria, e.g. "customfield_10050" (empty: parse the description).
 # ac_field = ""
@@ -70,8 +70,8 @@ pub const SERVER_CONFIG_TEMPLATE: &str = r#"# qgate server configuration (user l
 # Change settings on the Settings page of the dashboard (/settings).
 # Every section and key is optional; the values below are the defaults.
 # Environment overrides: QGATE_BIND, QGATE_REPOS_ROOT (comma-separated), QGATE_WEBHOOK_URL,
-# QGATE_CLAUDE_BIN, QGATE_CLI_TIMEOUT_SECS, JIRA_BASE_URL, JIRA_EMAIL, QGATE_JIRA_ENABLED, QGATE_OUTPUT_DIR. Secrets come from
-# JIRA_API_TOKEN / FIGMA_TOKEN, their *_FILE variants (Docker secrets) or the credential store - never from here.
+# QGATE_CLAUDE_BIN, QGATE_CLI_TIMEOUT_SECS, JIRA_BASE_URL, QGATE_JIRA_ENABLED, QGATE_OUTPUT_DIR. Secrets come from
+# FIGMA_TOKEN, their *_FILE variants (Docker secrets) or the credential store - never from here.
 
 [dashboard]
 # Address the dashboard listens on. Use "0.0.0.0:8080" inside a container.
@@ -126,16 +126,10 @@ timeout_secs = 600
 # enabled, ac_field and key_pattern_projects.
 enabled = false
 base_url = "https://yourcompany.atlassian.net"
-email = ""
-# rest | mcp
-provider = "rest"
+# Atlassian Remote MCP, connected from the Settings page.
+provider = "mcp_oauth"
 ac_field = ""
 key_pattern_projects = []
-
-[jira.mcp]
-command = ["uvx", "mcp-atlassian==0.23.1"]  # pinned: unpinned uvx runs whatever PyPI serves, with your Jira token
-tool = "jira_get_issue"
-env_passthrough = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
 
 [agents]
 # Multi-agent ticket review: ticket analysis, generated tests and architecture conformance.

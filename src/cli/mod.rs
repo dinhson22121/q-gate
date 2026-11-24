@@ -41,6 +41,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Repos { action } => commands::repos(context, action).await,
         Command::Auth { action } => commands::auth(&context, action),
         Command::LoginUrl => login::print_login_url(&context),
+        Command::Ticket { key } => commands::fetch_ticket(context, key).await,
         Command::Init { .. } | Command::Runner(_) => unreachable!("handled above"),
     }
 }

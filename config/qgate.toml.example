@@ -7,15 +7,15 @@
 # Every setting is optional: delete a line to get the default shown here.
 #
 # Per-repository settings (model, gate policy, checks, Jira overrides) belong in each repo's .qgate.toml.
-# Endpoints and credentials-related settings ([llm] claude_bin/timeout_secs, [jira] base_url/email/provider/[jira.mcp])
+# Endpoints and credentials-related settings ([llm] claude_bin/timeout_secs, [jira] base_url/provider)
 # can only be set here, never in a repository's .qgate.toml (see README "Security notes").
 #
 # Environment variables from qgate.env win over this file:
 #   QGATE_BIND -> dashboard.bind     QGATE_REPOS_ROOT -> repos.roots    QGATE_WEBHOOK_URL -> notify.webhook_url
-#   JIRA_BASE_URL -> jira.base_url   JIRA_EMAIL -> jira.email       QGATE_CLAUDE_BIN -> llm.claude_bin
+#   JIRA_BASE_URL -> jira.base_url   QGATE_CLAUDE_BIN -> llm.claude_bin
 #   QGATE_JIRA_ENABLED -> jira.enabled   QGATE_OUTPUT_DIR -> output.dir
 # Fields set by these variables are shown locked on the Settings page.
-# Secrets (JIRA_API_TOKEN, FIGMA_TOKEN) are never read from this file - keep them in qgate.env,
+# Secrets (FIGMA_TOKEN) are never read from this file - keep them in qgate.env,
 # use their *_FILE variants (Docker secrets, see README "Security notes") or set them on the Settings page.
 
 [dashboard]
@@ -74,24 +74,16 @@ timeout_secs = 600
 
 [jira]
 # Fetch acceptance criteria for the ticket referenced in the branch name / commit message.
-# Needs JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in qgate.env (REST provider).
+# The default provider connects to Atlassian's Remote MCP server over OAuth (connect it in Settings).
 enabled = false
 base_url = "https://yourcompany.atlassian.net"
-email = ""
-# "rest" (Jira Cloud REST API, email + API token) or "mcp" (an MCP server such as mcp-atlassian).
-provider = "rest"
+# Atlassian Remote MCP over OAuth (connect it in Settings).
+provider = "mcp_oauth"
 # Custom field holding the acceptance criteria, e.g. "customfield_10050". Empty = standard fields only
 # (summary, description).
 ac_field = ""
 # Only recognise ticket keys of these projects, e.g. ["PROJ", "OPS"]. Empty = any key.
 key_pattern_projects = []
-
-# Used only when provider = "mcp". `uvx` needs the python toolchain (QGATE_TOOLCHAINS=...,python).
-[jira.mcp]
-command = ["uvx", "mcp-atlassian==0.23.1"]  # pinned: unpinned uvx runs whatever PyPI serves, with your Jira token
-tool = "jira_get_issue"
-# Environment variables passed to the MCP server; everything else is cleared.
-env_passthrough = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
 
 [agents]
 # Multi-agent ticket review: ticket analysis, generated tests and architecture conformance.

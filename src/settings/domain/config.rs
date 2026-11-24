@@ -402,12 +402,12 @@ mod tests {
 
     #[test]
     fn jira_merges_repo_overrides_onto_server_defaults() {
-        let server = JiraConfig { email: "bot@acme.com".into(), ..JiraConfig::default() };
+        let server = JiraConfig { base_url: "https://acme.atlassian.net".into(), ..JiraConfig::default() };
         let config =
             Config { jira: JiraOverride { enabled: Some(true), ..JiraOverride::default() }, ..Config::default() };
         let merged = config.jira(&server);
         assert!(merged.enabled);
-        assert_eq!(merged.email, "bot@acme.com");
+        assert_eq!(merged.base_url, "https://acme.atlassian.net");
         let bad = Config {
             jira: JiraOverride { ac_field: Some("summary".into()), ..JiraOverride::default() },
             ..Config::default()

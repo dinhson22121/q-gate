@@ -66,7 +66,7 @@ const SETTABLE_FIELDS: &[(&str, Option<Sensitivity>)] = &[
 ];
 
 const ADMIN_ONLY_FIELDS: &[&str] =
-    &["llm.claude_bin", "llm.timeout_secs", "jira.base_url", "jira.mcp.command", "figma.api_base_url", "figma.mcp_url"];
+    &["llm.claude_bin", "llm.timeout_secs", "jira.base_url", "figma.api_base_url", "figma.mcp_url"];
 
 pub const RUN_REPO_CHECKS_FIELD: &str = "watch.run_repo_checks";
 pub const ADMIN_ONLY_REASON: &str =
@@ -110,15 +110,14 @@ mod tests {
     fn classifies_paths_by_allow_list() {
         assert_eq!(classify("agents.tests.on_fail"), FieldAccess::Settable(None));
         assert_eq!(classify("llm.claude_bin"), FieldAccess::AdminOnly);
-        assert_eq!(classify("jira.mcp.command"), FieldAccess::AdminOnly);
+        assert_eq!(classify("jira.base_url"), FieldAccess::AdminOnly);
         assert_eq!(classify("figma.mcp_url"), FieldAccess::AdminOnly);
         assert_eq!(classify("watch.run_repo_checks"), FieldAccess::Settable(Some(Sensitivity::RepoChecks)));
         assert_eq!(classify("output.formats"), FieldAccess::Settable(None));
         assert_eq!(classify("secrets.jira_api_token"), FieldAccess::Credential);
-        assert_eq!(classify("jira.mcp.env_passthrough"), FieldAccess::Credential);
         assert_eq!(classify("figma.token"), FieldAccess::Credential);
         assert_eq!(classify("dashboard.allowed_hosts"), FieldAccess::NotAllowed);
-        assert_eq!(classify("jira.email"), FieldAccess::NotAllowed);
+        assert_eq!(classify("jira.provider"), FieldAccess::NotAllowed);
     }
 
     #[test]

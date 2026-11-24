@@ -9,6 +9,7 @@ use super::args::{AuthAction, OutputFormat, ReposAction, ReviewArgs, SecretKind}
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest};
 use super::render::{DisplayFilter, TerminalView, render_json, render_terminal};
 use super::serve::{REPOS_FILE, repo_source};
+use super::tickets::build_source;
 use super::{EXIT_GATE_FAILED, EXIT_OK};
 use crate::history::application::Trigger;
 use crate::review::application::ReviewProgress;
@@ -16,6 +17,7 @@ use crate::review::infrastructure::local_git::{DiffTarget, discover_root};
 use crate::review::infrastructure::snapshot::resolve_commit;
 use crate::settings::application::{CredentialName, delete_secret, store_secret};
 use crate::settings::infrastructure::write_template;
+use crate::tickets::application::{TicketKey, TicketSource};
 use crate::watch::application::ports::{RepoRegistry, RepoSource};
 use crate::watch::infrastructure::toml_registry::TomlRepoRegistry;
 
@@ -137,6 +139,37 @@ fn read_secret(kind: SecretKind) -> Result<String> {
         bail!("no secret provided on stdin");
     }
     Ok(value)
+}
+
+pub async fn fetch_ticket(context: Arc<AppContext>, key: String) -> Result<ExitCode> {
+    let ticket_key = TicketKey::parse(&key).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let server = context.server();
+    let source = build_source(&server.jira, &context.store)
+        .context("building the Jira source (check [jira] provider in the server config)")?;
+    let ticket = source.fetch(&ticket_key).await.context("fetching the ticket from Jira")?;
+    println!("Key:     {}", ticket.key);
+    println!("Title:   {}", ticket.title);
+    if let Some(status) = &ticket.status {
+        println!("Status:  {status}");
+    }
+    if let Some(issue_type) = &ticket.issue_type {
+        println!("Type:    {issue_type}");
+    }
+    if let Some(url) = &ticket.url {
+        println!("URL:     {url}");
+    }
+    if ticket.criteria.is_empty() {
+        println!("Acceptance criteria: (none)");
+    } else {
+        println!("Acceptance criteria ({}):", ticket.criteria.len());
+        for criterion in &ticket.criteria {
+            println!("  - {criterion}");
+        }
+    }
+    for link in &ticket.design_links {
+        println!("Design:  {link}");
+    }
+    Ok(ExitCode::from(EXIT_OK))
 }
 
 #[cfg(test)]

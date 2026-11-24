@@ -14,6 +14,7 @@ use crate::settings::application::credentials::fakes::MemoryStore;
 use crate::settings::application::server_settings::fakes::{FixedSeed, env};
 use crate::settings::application::{CredentialName, CredentialStore, LoadEffectiveSettings, Secret, ServerConfigStore};
 use crate::settings::infrastructure::SqliteServerConfigStore;
+use crate::tickets::infrastructure::JiraOauthClient;
 use crate::web::{ApiToken, TOKEN_HEADER};
 
 const WEBHOOK: &str = "https://hooks.slack.com/services/T0/B0/webhook-token-xyz";
@@ -47,7 +48,12 @@ impl TestServer {
         let shared = Arc::new(RwLock::new(effective));
         let deps = Arc::new(SettingsDeps::new(store.clone(), credentials.clone(), shared, environment));
         let token = ApiToken::generate().unwrap();
-        let extra = router(SettingsApiState::new(deps, hosts.clone(), token.clone()));
+        let extra = router(SettingsApiState::new(
+            deps,
+            hosts.clone(),
+            token.clone(),
+            Arc::new(JiraOauthClient::new("http://127.0.0.1:1/mcp")),
+        ));
         let dashboard = DashboardState::with_allowed_hosts(repository, hosts);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -100,7 +106,7 @@ fn parse(text: &str) -> Value {
 
 #[tokio::test]
 async fn get_returns_view_without_secret_or_webhook_values() {
-    let server = TestServer::start(&[("JIRA_EMAIL", "bot@acme.com")]).await;
+    let server = TestServer::start(&[("JIRA_BASE_URL", "https://acme.atlassian.net")]).await;
     let response = server.client.get(server.url("/api/settings")).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().contains_key(CONTENT_SECURITY_POLICY), "dashboard security headers apply");
@@ -109,8 +115,8 @@ async fn get_returns_view_without_secret_or_webhook_values() {
     let body = parse(&text);
     assert_eq!(body["config"]["notify"]["webhook_url"], "");
     assert_eq!(body["webhook_configured"], true);
-    assert_eq!(body["config"]["jira"]["email"], "bot@acme.com");
-    assert_eq!(body["locked"], json!([{ "field": "jira.email", "env_var": "JIRA_EMAIL" }]));
+    assert_eq!(body["config"]["jira"]["base_url"], "https://acme.atlassian.net");
+    assert_eq!(body["locked"], json!([{ "field": "jira.base_url", "env_var": "JIRA_BASE_URL" }]));
     assert_eq!(body["restart_required_fields"].as_array().unwrap().len(), 9);
     assert_eq!(
         body["secrets"][0],
@@ -381,28 +387,18 @@ async fn endpoints_commands_and_webhook_are_read_only_over_http() {
     for (field, env_var) in [
         ("llm.claude_bin", "QGATE_CLAUDE_BIN"),
         ("llm.timeout_secs", "QGATE_CLI_TIMEOUT_SECS"),
-        ("jira.mcp.command", "QGATE_JIRA_MCP_COMMAND"),
+        ("jira.base_url", "JIRA_BASE_URL"),
         ("notify.webhook_url", "QGATE_WEBHOOK_URL"),
         ("watch.run_repo_checks", "QGATE_RUN_REPO_CHECKS"),
     ] {
         assert!(admin_only.contains(&json!({ "field": field, "env_var": env_var })), "{field}");
     }
     let base = settings["config"].clone();
-    let changes: [(&str, &str, Value); 6] = [
+    let changes: [(&str, &str, Value); 4] = [
         ("llm", "claude_bin", json!("/tmp/evil")),
         ("jira", "base_url", json!("https://attacker.example")),
         ("figma", "api_base_url", json!("https://attacker.example")),
         ("figma", "mcp_url", json!("https://attacker.example/mcp")),
-        ("jira", "mcp", json!({ "command": ["sh", "-c", "id"], "tool": "jira_get_issue", "env_passthrough": [] })),
-        (
-            "jira",
-            "mcp",
-            json!({
-                "command": ["uvx", "mcp-atlassian==0.23.1"],
-                "tool": "jira_get_issue",
-                "env_passthrough": ["ANTHROPIC_API_KEY"],
-            }),
-        ),
     ];
     for (section, key, value) in changes {
         let mut config = base.clone();
@@ -466,4 +462,70 @@ async fn quality_and_regression_toggles_default_on_save_over_http_and_lock_to_en
     let settings = locked.settings().await;
     assert_eq!(settings["config"]["regression"]["enabled"], json!(false));
     assert!(settings["locked"].as_array().unwrap().iter().any(|l| l["field"] == "regression.enabled"), "{settings}");
+}
+
+#[tokio::test]
+async fn jira_oauth_status_is_not_connected_initially() {
+    let server = TestServer::start(&[]).await;
+    let response = server.client.get(server.url("/api/jira/oauth/status")).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(parse(&response.text().await.unwrap()), json!({ "connected": false, "site": null }));
+}
+
+#[tokio::test]
+async fn jira_oauth_status_reports_the_site_but_never_a_token() {
+    let server = TestServer::start(&[]).await;
+    let bundle = crate::tickets::domain::TokenBundle {
+        client_id: "cid".into(),
+        token_endpoint: "https://auth.example/token".into(),
+        access_token: "access-token-value".into(),
+        refresh_token: Some("refresh-token-value".into()),
+        expires_at: chrono::Utc::now(),
+        site_hostname: "acme.atlassian.net".into(),
+    };
+    crate::tickets::application::save_bundle(&bundle, server.credentials.as_ref()).unwrap();
+    let text = server.client.get(server.url("/api/jira/oauth/status")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(parse(&text), json!({ "connected": true, "site": "acme.atlassian.net" }));
+    assert!(!text.contains("token-value"), "{text}");
+}
+
+#[tokio::test]
+async fn jira_oauth_connect_rejects_a_bad_site() {
+    let server = TestServer::start(&[]).await;
+    for site in ["http://acme.atlassian.net", "acme.atlassian.net", ""] {
+        let response = server
+            .page(reqwest::Method::POST, "/api/jira/oauth/connect")
+            .json(&json!({ "site": site }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY, "{site}");
+    }
+    let wrong_body =
+        server.page(reqwest::Method::POST, "/api/jira/oauth/connect").json(&json!({})).send().await.unwrap();
+    assert_eq!(wrong_body.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn jira_oauth_connect_requires_the_mutation_guard() {
+    let server = TestServer::start(&[]).await;
+    let response = server
+        .without_token(reqwest::Method::POST, "/api/jira/oauth/connect", "application/json", "http://localhost")
+        .json(&json!({ "site": "https://acme.atlassian.net" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn jira_oauth_callback_rejects_unknown_state_and_stores_nothing() {
+    let server = TestServer::start(&[]).await;
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    for query in ["code=abc&state=unknown", "code=abc", ""] {
+        let response = client.get(server.url(&format!("/api/jira/oauth/callback?{query}"))).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{query}");
+        assert_eq!(response.headers()["location"], "/settings?jira=error", "{query}");
+    }
+    assert!(server.credentials.get(CredentialName::JiraOauth).unwrap().is_none());
 }

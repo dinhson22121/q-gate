@@ -9,7 +9,7 @@ fn settings() -> Value {
         "llm": {"claude_bin": "claude", "timeout_secs": 600},
         "notify": {"webhook_url": ""},
         "watch": {"run_repo_checks": true},
-        "jira": {"base_url": "https://acme.atlassian.net", "mcp": {"command": ["uvx"]}},
+        "jira": {"base_url": "https://acme.atlassian.net"},
         "output": {"dir": "/data/reviews", "enabled": false},
         "dashboard": {"bind": "127.0.0.1:8080"}
     })
@@ -66,7 +66,7 @@ fn settings_are_allow_listed_typed_and_flagged() {
             setting("agents.max_parallel", "3"),
             setting("notify.webhook_url", "\"https://hooks.example/t\""),
             setting("notify.webhook_url", "\"\""),
-            setting("jira.mcp.command", "[\"sh\"]"),
+            setting("jira.base_url", "\"https://evil.example\""),
         ],
         ..ProposalDraft::default()
     };
@@ -85,7 +85,7 @@ fn settings_are_allow_listed_typed_and_flagged() {
     assert!(reasons.iter().any(|(s, r)| *s == "output.missing" && r.contains("unknown")));
     assert!(reasons.iter().any(|(_, r)| r.contains("twice")));
     assert!(reasons.iter().any(|(s, r)| *s == "notify.webhook_url" && r.contains("Settings page")));
-    for admin in ["llm.claude_bin", "jira.mcp.command"] {
+    for admin in ["llm.claude_bin", "jira.base_url"] {
         assert!(reasons.iter().any(|(s, r)| *s == admin && r.starts_with("admin-only")), "{admin}");
     }
     assert_eq!(content.rejected.len(), 9, "unchanged agents.enabled=true is silently dropped");

@@ -1,5 +1,6 @@
 pub mod analyze_ticket;
 pub mod fetch_requirements;
+pub mod jira_oauth;
 pub mod load_ticket_context;
 pub mod ports;
 
@@ -9,6 +10,10 @@ pub use crate::tickets::domain::{
 };
 pub use analyze_ticket::{AnalyzeTicket, MAX_CHANGE_VIEW_CHARS};
 pub use fetch_requirements::{FetchRequirements, to_requirements};
+pub use jira_oauth::{
+    Authorization, ConnectionStatus, JiraOauthGateway, JiraOauthService, OauthError, PendingAuthorization, load_bundle,
+    save_bundle,
+};
 pub use load_ticket_context::{LoadOptions, LoadTicketContext, LoadedTickets};
 pub use ports::{
     BriefCache, BriefGenerator, BriefRequest, CacheError, CachedTicket, TicketCache, TicketError, TicketSource,

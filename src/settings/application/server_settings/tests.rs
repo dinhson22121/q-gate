@@ -86,14 +86,17 @@ fn load_rejects_invalid_seed_and_invalid_env() {
 fn view_masks_webhook_and_lists_locks_and_secrets() {
     let mut raw = ServerConfig::default();
     raw.notify.webhook_url = WEBHOOK.into();
-    let f = fixture_with(raw, &[("JIRA_EMAIL", "bot@acme.com"), ("FIGMA_TOKEN_FILE", "/run/secrets/figma")]);
+    let f = fixture_with(
+        raw,
+        &[("JIRA_BASE_URL", "https://acme.atlassian.net"), ("FIGMA_TOKEN_FILE", "/run/secrets/figma")],
+    );
     f.credentials.set(CredentialName::JiraApiToken, &crate::settings::domain::Secret::new("tok")).unwrap();
     let view = GetSettings::new(&f.deps).execute().unwrap();
     assert_eq!(view.config.notify.webhook_url, "");
     assert!(view.webhook_configured);
-    assert_eq!(view.config.jira.email, "bot@acme.com");
-    assert_eq!(view.locked, vec![LockedField { field: "jira.email", env_var: "JIRA_EMAIL" }]);
-    assert_eq!(view.admin_only.len(), 13);
+    assert_eq!(view.config.jira.base_url, "https://acme.atlassian.net");
+    assert_eq!(view.locked, vec![LockedField { field: "jira.base_url", env_var: "JIRA_BASE_URL" }]);
+    assert_eq!(view.admin_only.len(), 11);
     assert!(view.admin_only.contains(&LockedField { field: "llm.claude_bin", env_var: "QGATE_CLAUDE_BIN" }));
     assert!(view.admin_only.contains(&LockedField { field: "watch.base_branch", env_var: "QGATE_WATCH_BASE_BRANCH" }));
     assert_eq!(view.restart_required_fields.len(), 9);
@@ -116,7 +119,7 @@ fn store_errors_show_as_missing_with_message() {
 
 #[test]
 fn update_saves_raw_config_and_replaces_live_config() {
-    let f = fixture(&[("JIRA_EMAIL", "bot@acme.com")]);
+    let f = fixture(&[("JIRA_BASE_URL", "https://acme.atlassian.net")]);
     let mut patch = page_patch(&f);
     patch.agents.max_parallel = 5;
     patch.jira.enabled = true;
@@ -124,9 +127,9 @@ fn update_saves_raw_config_and_replaces_live_config() {
     assert_eq!(applied.version, Some(2));
     assert_eq!(applied.changed_fields, vec!["agents.max_parallel".to_string(), "jira.enabled".to_string()]);
     assert!(applied.restart_required.is_empty());
-    assert_eq!(latest(&f).jira.email, "", "env value is not written");
+    assert_eq!(latest(&f).jira.base_url, ServerConfig::default().jira.base_url, "env value is not written");
     let live = f.shared.read().unwrap().clone();
-    assert_eq!((live.agents.max_parallel, live.jira.email.as_str()), (5, "bot@acme.com"));
+    assert_eq!((live.agents.max_parallel, live.jira.base_url.as_str()), (5, "https://acme.atlassian.net"));
 }
 
 #[test]
@@ -307,11 +310,9 @@ fn output_dir_is_env_locked_and_restart_only_while_the_rest_is_live() {
 #[test]
 fn admin_only_fields_cannot_change_over_http() {
     let f = fixture(&[("QGATE_CLAUDE_BIN", "/opt/claude/bin/claude")]);
-    let cases: [fn(&mut ServerConfig); 6] = [
+    let cases: [fn(&mut ServerConfig); 4] = [
         |c| c.llm.claude_bin = "/tmp/evil".into(),
         |c| c.jira.base_url = "https://attacker.example".into(),
-        |c| c.jira.mcp.command = vec!["sh".into()],
-        |c| c.jira.mcp.env_passthrough.push("ANTHROPIC_API_KEY".into()),
         |c| c.figma.api_base_url = "https://attacker.example".into(),
         |c| c.figma.mcp_url = "https://attacker.example/mcp".into(),
     ];
@@ -362,7 +363,7 @@ fn repository_checks_can_be_turned_off_but_not_on() {
 fn rollback_keeps_current_admin_only_values() {
     let mut old = ServerConfig::default();
     old.llm.claude_bin = "/old/claude".into();
-    old.jira.mcp.command = vec!["old-mcp".into()];
+    old.jira.base_url = "https://old.atlassian.net".into();
     old.notify.webhook_url = WEBHOOK.into();
     old.agents.max_parallel = 5;
     let f = fixture_with(old, &[]);
@@ -374,7 +375,7 @@ fn rollback_keeps_current_admin_only_values() {
     let rolled = latest(&f);
     assert_eq!(rolled.agents.max_parallel, 5, "ordinary fields are restored");
     assert_eq!(rolled.llm.claude_bin, "claude");
-    assert_eq!(rolled.jira.mcp.command, ServerConfig::default().jira.mcp.command);
+    assert_eq!(rolled.jira.base_url, ServerConfig::default().jira.base_url);
     assert_eq!(rolled.notify.webhook_url, "");
     assert!(!rolled.watch.run_repo_checks, "a rollback never turns repository checks on");
 

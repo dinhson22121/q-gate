@@ -83,6 +83,15 @@ async fn api_without_a_valid_session_is_401_json() {
 }
 
 #[tokio::test]
+async fn public_oauth_callback_skips_the_session_guard() {
+    let server = TestServer::start().await;
+    let response = server.get("/api/jira/oauth/callback?state=x&code=y", None).await;
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED, "callback must not be gated by the session");
+    assert_ne!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND, "reaches the app (unregistered here) rather than the guard");
+}
+
+#[tokio::test]
 async fn a_valid_session_cookie_passes_among_other_cookies() {
     let server = TestServer::start().await;
     let cookie = format!("theme=dark; {}; x=y", server.session_cookie());

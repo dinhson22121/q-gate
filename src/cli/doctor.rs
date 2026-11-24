@@ -4,8 +4,6 @@ use std::time::Duration;
 use super::pipeline::AppContext;
 use super::serve::repo_source;
 use super::{EXIT_ERROR, EXIT_OK};
-use crate::settings::application::CredentialName;
-use crate::settings::infrastructure::resolve_credential;
 use crate::watch::application::ports::RepoSource;
 
 const TOOLCHAINS: &[(&str, &str)] = &[
@@ -39,7 +37,7 @@ pub async fn doctor(context: &AppContext) -> ExitCode {
     ];
     lines.push(claude_line(context).await);
     if context.server().jira.enabled {
-        lines.push(credential_line(context, CredentialName::JiraApiToken, Level::Fail));
+        lines.push(Line { level: Level::Ok, text: "jira provider: Atlassian Remote MCP (OAuth)".into() });
     }
     lines.push(match context.open_history() {
         Ok(_) => Line { level: Level::Ok, text: "history database is writable".into() },
@@ -59,14 +57,6 @@ pub async fn doctor(context: &AppContext) -> ExitCode {
     print_lines(&lines);
     let failed = lines.iter().any(|l| l.level == Level::Fail);
     ExitCode::from(if failed { EXIT_ERROR } else { EXIT_OK })
-}
-
-fn credential_line(context: &AppContext, name: CredentialName, missing: Level) -> Line {
-    match resolve_credential(name, context.store.as_ref()) {
-        Ok(Some(_)) => Line { level: Level::Ok, text: format!("{} is configured", name.as_str()) },
-        Ok(None) => Line { level: missing, text: format!("{} is missing (set {})", name.as_str(), name.env_var()) },
-        Err(e) => Line { level: Level::Fail, text: format!("{}: {e}", name.as_str()) },
-    }
 }
 
 async fn claude_line(context: &AppContext) -> Line {

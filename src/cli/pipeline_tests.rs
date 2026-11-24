@@ -5,14 +5,11 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use serde_json::json;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 use crate::history::application::GetRun;
 use crate::llm::{LlmError, Structured, Usage};
-use crate::review::application::{CriterionStatus, NoProgress, ToolOutcome};
-use crate::settings::application::{JiraConfig, store_secret};
+use crate::review::application::{NoProgress, ToolOutcome};
 use crate::settings::infrastructure::FileStore;
 
 const VULNERABLE_LINE: &str = "\tdb.Query(\"SELECT * FROM users WHERE id=\" + id)";
@@ -93,42 +90,15 @@ fn findings() -> Value {
     ]})
 }
 
-async fn mock_services() -> MockServer {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/rest/api/3/issue/SHOP-7"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "key": "SHOP-7",
-            "fields": {
-                "summary": "User lookup",
-                "status": {"name": "In Progress"},
-                "description": "Acceptance Criteria:\n- Users can be looked up by id\n- Lookup is audited"
-            }
-        })))
-        .mount(&server)
-        .await;
-    server
-}
-
 fn agents_disabled() -> crate::settings::application::AgentsConfig {
     let mut agents = crate::settings::application::AgentsConfig::default();
     agents.enabled = false;
     agents
 }
 
-fn context(dir: &Path, mock_uri: &str) -> AppContext {
+fn context(dir: &Path) -> AppContext {
     let store = FileStore::new(dir.join("config/credentials.toml"));
-    store_secret(CredentialName::JiraApiToken, "jira-token", &store).unwrap();
-    let server = ServerConfig {
-        agents: agents_disabled(),
-        jira: JiraConfig {
-            enabled: true,
-            base_url: mock_uri.to_string(),
-            email: "dev@example.com".into(),
-            ..JiraConfig::default()
-        },
-        ..ServerConfig::default()
-    };
+    let server = ServerConfig { agents: agents_disabled(), ..ServerConfig::default() };
     AppContext {
         paths: AppPaths::with_dirs(dir.join("config"), dir.join("data")),
         server: Arc::new(std::sync::RwLock::new(server)),
@@ -142,14 +112,13 @@ fn context(dir: &Path, mock_uri: &str) -> AppContext {
 }
 
 #[tokio::test]
-async fn commit_review_runs_checks_assesses_ticket_verifies_findings_and_records_history() {
-    let mock = mock_services().await;
+async fn commit_review_runs_checks_verifies_findings_and_records_history() {
     let repo = tempfile::tempdir().unwrap();
     let config =
         "[[checks]]\nname = \"has-main\"\ncommand = [\"git\", \"--version\"]\nrequired = true\ntimeout_secs = 30\n";
     let sha = repo_with_commit(repo.path(), config);
     let work = tempfile::tempdir().unwrap();
-    let context = Arc::new(context(work.path(), &mock.uri()));
+    let context = Arc::new(context(work.path()));
     let history = context.open_history().unwrap();
     let pipeline = ReviewPipeline::new(context.clone(), Some(history.clone()));
 
@@ -167,22 +136,19 @@ async fn commit_review_runs_checks_assesses_ticket_verifies_findings_and_records
     assert_eq!(report.findings[0].title, "SQL injection");
     assert!(report.audited, "the audit pass ran and upheld the finding");
     assert_eq!(report.rejected.len(), 1);
-    let requirements = report.requirements.as_ref().expect("ticket detected from commit message");
-    assert_eq!(requirements.requirements.key, "SHOP-7");
-    let statuses: Vec<_> = requirements.assessments.iter().map(|a| a.status).collect();
-    assert_eq!(statuses, vec![CriterionStatus::Met, CriterionStatus::NotMet]);
+    assert!(report.requirements.is_none(), "no ticket source is configured");
     assert_eq!(report.checks.len(), 1);
     assert!(!report.checks[0].is_blocking(), "check ran in the snapshot: {:?}", report.checks[0]);
     assert!(!report.gate.passed);
     assert_eq!(report.gate.blocking, vec![0]);
-    assert_eq!(report.gate.unmet_criteria, vec!["SHOP-7/AC-2"]);
+    assert!(report.gate.unmet_criteria.is_empty());
     let cost = report.estimated_cost_usd.expect("CLI cost is summed into the report");
-    assert!(cost >= 2.0 * CALL_COST_USD - 1e-9, "review + assessment costs are summed: {cost}");
+    assert!(cost >= CALL_COST_USD - 1e-9, "review cost is reported: {cost}");
 
     let run_id = outcome.run_id.expect("run recorded");
     let stored = GetRun::new(history).execute(run_id).unwrap().expect("run exists");
     assert_eq!(stored.commit.as_deref(), Some(sha.as_str()));
-    assert_eq!(stored.ticket_key.as_deref(), Some("SHOP-7"));
+    assert_eq!(stored.ticket_key, None);
     assert_eq!(stored.status, RunStatus::Failed);
     let leftovers = std::fs::read_dir(work.path().join("data/work")).map(|d| d.count()).unwrap_or(0);
     assert_eq!(leftovers, 0, "snapshot cleaned up");
@@ -205,7 +171,7 @@ async fn review_error_is_recorded_and_returned() {
     let repo = tempfile::tempdir().unwrap();
     let sha = repo_with_commit(repo.path(), "[review]\nignore = [\"a[\"]\n");
     let work = tempfile::tempdir().unwrap();
-    let context = Arc::new(context(work.path(), "https://example.atlassian.net"));
+    let context = Arc::new(context(work.path()));
     let history = context.open_history().unwrap();
     let pipeline = ReviewPipeline::new(context, Some(history.clone()));
     let request = ReviewRequest {
@@ -256,7 +222,7 @@ async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks
     let run = |quality: bool, regression: bool| {
         let (repo, data, head) = (repo.path().to_path_buf(), data.path().to_path_buf(), head.clone());
         async move {
-            let mut ctx = context(&data, "http://127.0.0.1:1");
+            let mut ctx = context(&data);
             {
                 let mut server = ctx.server.write().unwrap();
                 server.quality.enabled = quality;
@@ -296,7 +262,7 @@ async fn quality_and_regression_flags_from_the_server_settings_skip_their_checks
 #[test]
 fn structured_model_uses_the_override_else_validates_the_cli_settings() {
     let work = tempfile::tempdir().unwrap();
-    let mut ctx = context(work.path(), "http://127.0.0.1:1");
+    let mut ctx = context(work.path());
     assert!(ctx.structured_model("claude-opus-5-5", "high").is_ok(), "the override is returned as is");
 
     ctx.model_override = None;
@@ -342,7 +308,7 @@ async fn a_rate_limited_preflight_aborts_the_review_before_any_agent_and_records
     let sha = repo_with_commit(repo.path(), "");
     let work = tempfile::tempdir().unwrap();
     let limited = Arc::new(LimitedModel { calls: Default::default() });
-    let mut context = context(work.path(), "http://127.0.0.1:1");
+    let mut context = context(work.path());
     context.model_override = Some(limited.clone());
     let context = Arc::new(context);
     let history = context.open_history().unwrap();

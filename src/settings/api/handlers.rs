@@ -23,7 +23,7 @@ pub(super) fn error_response(status: StatusCode, message: &str, field: Option<&s
 pub(super) struct ApiError(Box<Response>);
 
 impl ApiError {
-    fn new(response: Response) -> Self {
+    pub(super) fn new(response: Response) -> Self {
         Self(Box::new(response))
     }
 }
@@ -58,9 +58,9 @@ impl From<SettingsError> for ApiError {
     }
 }
 
-type ApiResult = Result<Json<Value>, ApiError>;
+pub(super) type ApiResult = Result<Json<Value>, ApiError>;
 
-async fn blocking<F>(state: &SettingsApiState, work: F) -> ApiResult
+pub(super) async fn blocking<F>(state: &SettingsApiState, work: F) -> ApiResult
 where
     F: FnOnce(&SettingsDeps) -> Result<Value, SettingsError> + Send + 'static,
 {

@@ -191,12 +191,37 @@ fn render_verdict(out: &mut String, report: &ReviewReport, color: bool) {
     if gate.incomplete {
         reasons.push("review incomplete (some files could not be reviewed)".into());
     }
+    if !gate.failed_tests.is_empty() {
+        reasons.push(format!("generated tests failed: {}", gate.failed_tests.join(", ")));
+    }
+    if !gate.rule_violations.is_empty() {
+        reasons.push(format!("architecture rules violated: {}", gate.rule_violations.join(", ")));
+    }
+    if !gate.design_mismatches.is_empty() {
+        reasons.push(format!("design mismatches: {}", gate.design_mismatches.join(", ")));
+    }
+    if !gate.passed && reasons.is_empty() {
+        let fallback = if gate.advisory_tests.is_empty() {
+            "the gate failed (see the dashboard for details)".to_string()
+        } else {
+            format!("generated tests could not be verified: {}", gate.advisory_tests.join(", "))
+        };
+        reasons.push(fallback);
+    }
     let verdict = if gate.passed {
         paint("PASSED", Tone::Good, color)
     } else {
         format!("{} — {}", paint("FAILED", Tone::Bad, color), reasons.join("; "))
     };
     let _ = writeln!(out, "\nGate: {verdict}");
+    if !gate.advisory_tests.is_empty() {
+        let line = format!(
+            "Advisory: {} generated test(s) not verified (not blocking): {}",
+            gate.advisory_tests.len(),
+            gate.advisory_tests.join(", ")
+        );
+        let _ = writeln!(out, "{}", paint(&line, Tone::Warn, color));
+    }
     if report.is_incomplete() {
         let _ = writeln!(
             out,

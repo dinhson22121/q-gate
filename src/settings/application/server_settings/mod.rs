@@ -43,6 +43,10 @@ impl SettingsDeps {
         Self { store, credentials, shared, env, boot, write_lock: Mutex::new(()) }
     }
 
+    pub fn credentials(&self) -> &dyn CredentialStore {
+        self.credentials.as_ref()
+    }
+
     fn write_guard(&self) -> MutexGuard<'_, ()> {
         self.write_lock.lock().unwrap_or_else(PoisonError::into_inner)
     }

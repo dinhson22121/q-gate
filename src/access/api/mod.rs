@@ -16,6 +16,7 @@ use page::LoginPage;
 pub const SESSION_COOKIE: &str = "qgate_session";
 pub const LOGIN_PATH: &str = "/login";
 pub const HEALTH_PATH: &str = "/healthz";
+const PUBLIC_PATHS: &[&str] = &["/api/jira/oauth/callback"];
 pub const SESSION_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 const API_PREFIX: &str = "/api/";
 const LOGIN_REQUIRED: &str =
@@ -51,7 +52,11 @@ async fn require_session(State(state): State<AccessState>, request: Request, nex
     if has_session(request.headers(), &state.session) {
         return next.run(request).await;
     }
-    if request.uri().path().starts_with(API_PREFIX) {
+    let path = request.uri().path();
+    if PUBLIC_PATHS.contains(&path) {
+        return next.run(request).await;
+    }
+    if path.starts_with(API_PREFIX) {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": LOGIN_REQUIRED }))).into_response();
     }
     Redirect::to(LOGIN_PATH).into_response()

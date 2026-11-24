@@ -31,6 +31,9 @@ pub enum Command {
         action: AuthAction,
     },
     LoginUrl,
+    Ticket {
+        key: String,
+    },
     Runner(RunnerArgs),
 }
 

@@ -1,89 +1,15 @@
-use std::process::Stdio;
-use std::time::Duration;
-
-use rmcp::ServiceExt;
-use rmcp::model::{CallToolRequestParams, CallToolResult, JsonObject};
-use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::model::CallToolResult;
 use serde_json::Value;
 
-use crate::tickets::application::{TicketError, TicketSource};
+use crate::tickets::application::TicketError;
 use crate::tickets::domain::{
     ParentRef, Ticket, TicketKey, extract_figma_links, parse_acceptance_criteria, parse_criteria_list,
 };
 
 use super::adf::{all_strings, field_to_text};
 
-const CALL_TIMEOUT: Duration = Duration::from_secs(30);
-const ISSUE_KEY_ARGUMENT: &str = "issue_key";
-const INHERITED_ENV: &[&str] = &["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG"];
 const NOT_FOUND_MARKERS: &[&str] = &["not found", "does not exist", "404"];
 const UNAUTHORIZED_MARKERS: &[&str] = &["unauthorized", "forbidden", "401", "403", "permission"];
-
-#[derive(Clone)]
-pub struct JiraMcpSource {
-    command: Vec<String>,
-    tool: String,
-    env: Vec<(String, String)>,
-    timeout: Duration,
-}
-
-impl std::fmt::Debug for JiraMcpSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let env_names: Vec<&str> = self.env.iter().map(|(name, _)| name.as_str()).collect();
-        f.debug_struct("JiraMcpSource")
-            .field("command", &self.command)
-            .field("tool", &self.tool)
-            .field("env", &env_names)
-            .finish()
-    }
-}
-
-impl JiraMcpSource {
-    pub fn new(command: Vec<String>, tool: String, env: Vec<(String, String)>) -> Result<Self, TicketError> {
-        if command.first().is_none_or(|program| program.trim().is_empty()) {
-            return Err(TicketError::Config("Jira MCP command is empty".into()));
-        }
-        if tool.trim().is_empty() {
-            return Err(TicketError::Config("Jira MCP tool name is empty".into()));
-        }
-        Ok(Self { command, tool: tool.trim().to_string(), env, timeout: CALL_TIMEOUT })
-    }
-
-    fn spawn(&self) -> Result<TokioChildProcess, TicketError> {
-        let (program, args) =
-            self.command.split_first().ok_or_else(|| TicketError::Config("Jira MCP command is empty".into()))?;
-        let inherited: Vec<(&str, String)> =
-            INHERITED_ENV.iter().filter_map(|name| std::env::var(name).ok().map(|value| (*name, value))).collect();
-        let command = tokio::process::Command::new(program).configure(|cmd| {
-            cmd.args(args).env_clear().envs(inherited).envs(self.env.iter().cloned()).kill_on_drop(true);
-        });
-        let (transport, _stderr) = TokioChildProcess::builder(command)
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| TicketError::Config(format!("cannot start Jira MCP server {program:?}: {e}")))?;
-        Ok(transport)
-    }
-
-    async fn call(&self, key: &TicketKey) -> Result<CallToolResult, TicketError> {
-        let transport = self.spawn()?;
-        let client =
-            ().serve(transport).await.map_err(|e| TicketError::Unavailable(format!("MCP initialize failed: {e}")))?;
-        let mut arguments = JsonObject::new();
-        arguments.insert(ISSUE_KEY_ARGUMENT.into(), Value::String(key.to_string()));
-        let result = client.call_tool(CallToolRequestParams::new(self.tool.clone()).with_arguments(arguments)).await;
-        let _ = client.cancel().await;
-        result.map_err(|e| TicketError::Unavailable(format!("MCP tool {:?} failed: {e}", self.tool)))
-    }
-}
-
-impl TicketSource for JiraMcpSource {
-    async fn fetch(&self, key: &TicketKey) -> Result<Ticket, TicketError> {
-        let result = tokio::time::timeout(self.timeout, self.call(key)).await.map_err(|_| {
-            TicketError::Unavailable(format!("Jira MCP server did not answer within {}s", self.timeout.as_secs()))
-        })??;
-        map_tool_result(key, &result)
-    }
-}
 
 pub fn map_tool_result(key: &TicketKey, result: &CallToolResult) -> Result<Ticket, TicketError> {
     let text = result
@@ -104,7 +30,7 @@ pub fn map_tool_result(key: &TicketKey, result: &CallToolResult) -> Result<Ticke
     Ok(ticket_from_text(key, &text))
 }
 
-fn classify_tool_error(key: &TicketKey, text: &str) -> TicketError {
+pub fn classify_tool_error(key: &TicketKey, text: &str) -> TicketError {
     let lower = text.to_lowercase();
     let summary = text.lines().next().unwrap_or("MCP tool reported an error").to_string();
     if NOT_FOUND_MARKERS.iter().any(|m| lower.contains(m)) {
@@ -280,102 +206,5 @@ mod tests {
         assert_eq!(other, Err(TicketError::Unavailable("boom".into())));
         let empty = map_tool_result(&key(), &CallToolResult::success(vec![]));
         assert!(matches!(empty, Err(TicketError::Invalid(_))));
-    }
-
-    #[test]
-    fn validates_config_and_redacts_env_values() {
-        assert!(matches!(JiraMcpSource::new(vec![], "t".into(), vec![]), Err(TicketError::Config(_))));
-        assert!(matches!(JiraMcpSource::new(vec![" ".into()], "t".into(), vec![]), Err(TicketError::Config(_))));
-        assert!(matches!(JiraMcpSource::new(vec!["uvx".into()], " ".into(), vec![]), Err(TicketError::Config(_))));
-        let source = JiraMcpSource::new(
-            vec!["uvx".into()],
-            "jira_get_issue".into(),
-            vec![("JIRA_API_TOKEN".into(), "s3cret".into())],
-        )
-        .unwrap();
-        let debug = format!("{source:?}");
-        assert!(debug.contains("JIRA_API_TOKEN") && !debug.contains("s3cret"), "{debug}");
-    }
-
-    #[tokio::test]
-    async fn missing_program_is_config_error() {
-        let source = JiraMcpSource::new(vec!["/nonexistent/qgate-mcp".into()], "t".into(), vec![]).unwrap();
-        assert!(matches!(source.fetch(&key()).await, Err(TicketError::Config(_))));
-    }
-
-    const LEAK_PROBE: &str = "CARGO_MANIFEST_DIR";
-
-    const FAKE_SERVER: &str = r#"
-import json, os, sys
-for line in sys.stdin:
-    msg = json.loads(line)
-    if "id" not in msg:
-        continue
-    if msg["method"] == "initialize":
-        result = {"protocolVersion": msg["params"]["protocolVersion"], "capabilities": {"tools": {}},
-                  "serverInfo": {"name": "fake-jira", "version": "0.0.1"}}
-    elif msg["method"] == "tools/call":
-        if os.environ.get("FAKE_HANG"):
-            continue
-        args = msg["params"]["arguments"]
-        issue = {"summary": "Fake " + args["issue_key"], "status": {"name": os.environ.get("FAKE_TOKEN", "")},
-                 "description": "Acceptance Criteria:\n- leaked=" + str("CARGO_MANIFEST_DIR" in os.environ)}
-        result = {"content": [{"type": "text", "text": json.dumps(issue)}], "isError": False}
-    else:
-        result = {}
-    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\n")
-    sys.stdout.flush()
-"#;
-
-    fn fake_server(dir: &tempfile::TempDir, env: Vec<(String, String)>) -> Option<JiraMcpSource> {
-        if std::process::Command::new("python3").arg("--version").output().is_err() {
-            eprintln!("python3 not available; skipping MCP process test");
-            return None;
-        }
-        let script = dir.path().join("fake_server.py");
-        std::fs::write(&script, FAKE_SERVER).unwrap();
-        let command = vec!["python3".into(), "-I".into(), script.display().to_string()];
-        Some(JiraMcpSource::new(command, "jira_get_issue".into(), env).unwrap())
-    }
-
-    #[tokio::test]
-    async fn fetches_from_fake_mcp_server_with_only_configured_env() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(source) = fake_server(&dir, vec![("FAKE_TOKEN".into(), "configured".into())]) else {
-            return;
-        };
-
-        let ticket = source.fetch(&key()).await.unwrap();
-
-        assert_eq!(ticket.title, "Fake ABC-1");
-        assert_eq!(ticket.status.as_deref(), Some("configured"));
-        assert!(std::env::var_os(LEAK_PROBE).is_some(), "precondition: {LEAK_PROBE} set in the test process");
-        assert_eq!(ticket.criteria, vec!["leaked=False"]);
-    }
-
-    #[tokio::test]
-    async fn times_out_when_server_hangs() {
-        let dir = tempfile::tempdir().unwrap();
-        let Some(mut source) = fake_server(&dir, vec![("FAKE_HANG".into(), "1".into())]) else {
-            return;
-        };
-        source.timeout = Duration::from_millis(1500);
-        let err = source.fetch(&key()).await.unwrap_err();
-        assert!(matches!(err, TicketError::Unavailable(ref m) if m.contains("did not answer")), "{err}");
-    }
-
-    #[tokio::test]
-    #[ignore = "needs uvx, network and real Jira credentials"]
-    async fn real_mcp_atlassian() {
-        let env = ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"]
-            .iter()
-            .map(|name| (name.to_string(), std::env::var(name).unwrap()))
-            .collect();
-        let source =
-            JiraMcpSource::new(vec!["uvx".into(), "mcp-atlassian".into()], "jira_get_issue".into(), env).unwrap();
-        let key = TicketKey::parse(&std::env::var("QGATE_TEST_ISSUE").unwrap()).unwrap();
-        let ticket = source.fetch(&key).await.unwrap();
-        println!("{ticket:#?}");
-        assert!(!ticket.title.is_empty());
     }
 }

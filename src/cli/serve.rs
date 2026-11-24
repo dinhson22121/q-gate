@@ -21,6 +21,7 @@ use crate::review::infrastructure::local_git::DiffTarget;
 use crate::review::infrastructure::snapshot::sweep_stale_snapshots;
 use crate::settings::api::{SettingsApiState, router as settings_router};
 use crate::settings::domain::ReposConfig;
+use crate::tickets::infrastructure::JiraOauthClient;
 use crate::watch::api::{ReposApiState, router as repos_router};
 use crate::watch::application::ports::{
     CommitEvent, CommitReviewer, CommitVerdict, ManualScanner, Notifier, WatchError,
@@ -68,19 +69,24 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     let scanner: Arc<dyn ManualScanner> =
         Arc::new(PipelineScanner { context: context.clone(), history: history.clone() });
     let token = ApiToken::generate().context("cannot generate the dashboard API token")?;
-    let settings_page = settings_router(SettingsApiState::new(settings_deps, hosts.clone(), token.clone()))
-        .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
-        .merge(repos_router(
-            ReposApiState::new(
-                TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
-                repos_root_from_env(),
-                hosts.clone(),
-                token.clone(),
-            )
-            .with_scanner(scanner),
-        ))
-        .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
-        .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
+    let settings_page = settings_router(SettingsApiState::new(
+        settings_deps,
+        hosts.clone(),
+        token.clone(),
+        Arc::new(JiraOauthClient::atlassian()),
+    ))
+    .merge(rulebook_router(RulebookApiState::new(rulebooks, hosts.clone(), token.clone())))
+    .merge(repos_router(
+        ReposApiState::new(
+            TomlRepoRegistry::new(context.paths.config_dir.join(REPOS_FILE)),
+            repos_root_from_env(),
+            hosts.clone(),
+            token.clone(),
+        )
+        .with_scanner(scanner),
+    ))
+    .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
+    .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
     let dashboard_shutdown = stopped(stop_rx.clone());
     let access = AccessState::new(secret);

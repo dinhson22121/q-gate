@@ -1,50 +1,20 @@
-use crate::settings::application::{JiraConfig, JiraProvider, Secret};
+use crate::settings::application::{CredentialStore, JiraConfig};
 use std::sync::Arc;
+use std::time::Duration;
 
-use crate::tickets::application::{
-    LoadOptions, LoadTicketContext, LoadedTickets, Ticket, TicketCache, TicketError, TicketKey, TicketSource,
-};
+use crate::tickets::application::{LoadOptions, LoadTicketContext, LoadedTickets, TicketCache, TicketError, TicketKey};
 use crate::tickets::domain::{MAX_IMPLEMENTED_KEYS, extract_implemented_keys};
-use crate::tickets::infrastructure::{JiraMcpSource, JiraRestConfig, JiraRestSource, Secret as TicketSecret};
+use crate::tickets::infrastructure::{ATLASSIAN_MCP_URL, JiraMcpHttpSource, JiraOauthClient};
 
-pub enum AnyTicketSource {
-    Rest(JiraRestSource),
-    Mcp(JiraMcpSource),
-}
+const MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
-impl TicketSource for AnyTicketSource {
-    async fn fetch(&self, key: &TicketKey) -> Result<Ticket, TicketError> {
-        match self {
-            Self::Rest(source) => source.fetch(key).await,
-            Self::Mcp(source) => source.fetch(key).await,
-        }
-    }
-}
-
-pub fn build_source(jira: &JiraConfig, token: Option<&Secret>) -> Result<AnyTicketSource, TicketError> {
-    match jira.provider {
-        JiraProvider::Rest => {
-            let token = token.ok_or_else(|| {
-                TicketError::Config("no Jira API token: set JIRA_API_TOKEN (or JIRA_API_TOKEN_FILE)".into())
-            })?;
-            let config = JiraRestConfig {
-                base_url: jira.base_url.clone(),
-                email: jira.email.clone(),
-                token: TicketSecret::new(token.expose()),
-                ac_field: Some(jira.ac_field.clone()).filter(|f| !f.is_empty()),
-            };
-            JiraRestSource::new(config).map(AnyTicketSource::Rest)
-        }
-        JiraProvider::Mcp => {
-            let env = jira
-                .mcp
-                .env_passthrough
-                .iter()
-                .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
-                .collect();
-            JiraMcpSource::new(jira.mcp.command.clone(), jira.mcp.tool.clone(), env).map(AnyTicketSource::Mcp)
-        }
-    }
+pub fn build_source(_jira: &JiraConfig, store: &Arc<dyn CredentialStore>) -> Result<JiraMcpHttpSource, TicketError> {
+    let http = reqwest::Client::builder()
+        .timeout(MCP_HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| TicketError::Config(format!("cannot build the Jira MCP HTTP client: {e}")))?;
+    let gateway = Arc::new(JiraOauthClient::atlassian());
+    Ok(JiraMcpHttpSource::new(http, ATLASSIAN_MCP_URL, Arc::clone(store), gateway))
 }
 
 pub struct TicketLoad {
@@ -54,7 +24,7 @@ pub struct TicketLoad {
 
 pub async fn load_ticket_context(
     jira: &JiraConfig,
-    token: Option<&Secret>,
+    store: &Arc<dyn CredentialStore>,
     explicit_key: Option<&str>,
     branch: Option<&str>,
     messages: &[String],
@@ -81,7 +51,7 @@ pub async fn load_ticket_context(
         notes.push("no Jira ticket key found in the branch name or commit messages".into());
         return Ok(TicketLoad { loaded: None, notes });
     }
-    let mut use_case = LoadTicketContext::new(build_source(jira, token)?, options);
+    let mut use_case = LoadTicketContext::new(build_source(jira, store)?, options);
     if let Some(cache) = cache {
         use_case = use_case.with_cache(cache);
     }
@@ -93,19 +63,29 @@ pub async fn load_ticket_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::application::credentials::fakes::MemoryStore;
+    use crate::tickets::application::TicketSource;
 
-    #[test]
-    fn rest_provider_requires_a_token() {
+    fn memory_store() -> Arc<dyn CredentialStore> {
+        Arc::new(MemoryStore::default())
+    }
+
+    #[tokio::test]
+    async fn mcp_oauth_provider_builds_and_reports_not_connected() {
+        let store = memory_store();
         let jira = JiraConfig { enabled: true, ..JiraConfig::default() };
-        assert!(matches!(build_source(&jira, None), Err(TicketError::Config(_))));
+        let source = build_source(&jira, &store).unwrap();
+        let key = TicketKey::parse("KAN-1").unwrap();
+        assert!(matches!(source.fetch(&key).await, Err(TicketError::Config(ref m)) if m.contains("not connected")));
     }
 
     #[tokio::test]
     async fn disabled_jira_without_explicit_ticket_loads_nothing() {
+        let store = memory_store();
         let messages = vec!["SHOP-1: add export".to_string()];
         let load = load_ticket_context(
             &JiraConfig::default(),
-            None,
+            &store,
             None,
             Some("main"),
             &messages,
@@ -119,22 +99,24 @@ mod tests {
 
     #[tokio::test]
     async fn no_key_and_invalid_explicit_key_are_reported() {
+        let store = memory_store();
         let jira = JiraConfig { enabled: true, ..JiraConfig::default() };
         let load =
-            load_ticket_context(&jira, None, None, Some("main"), &["tidy up".into()], LoadOptions::default(), None)
+            load_ticket_context(&jira, &store, None, Some("main"), &["tidy up".into()], LoadOptions::default(), None)
                 .await
                 .unwrap();
         assert!(load.notes.iter().any(|n| n.contains("no Jira ticket key")));
         let invalid =
-            load_ticket_context(&jira, None, Some("not a key"), None, &[], LoadOptions::default(), None).await;
+            load_ticket_context(&jira, &store, Some("not a key"), None, &[], LoadOptions::default(), None).await;
         assert!(matches!(invalid, Err(TicketError::Invalid(_))));
     }
 
     #[tokio::test]
     async fn references_are_noted_and_missing_token_is_a_config_error() {
+        let store = memory_store();
         let jira = JiraConfig { enabled: true, ..JiraConfig::default() };
         let messages = vec!["SHOP-7: export\n\nsee PAY-12".to_string()];
-        let result = load_ticket_context(&jira, None, None, None, &messages, LoadOptions::default(), None).await;
+        let result = load_ticket_context(&jira, &store, None, None, &messages, LoadOptions::default(), None).await;
         assert!(matches!(result, Err(TicketError::Config(_))), "REST without a token cannot fetch");
     }
 }

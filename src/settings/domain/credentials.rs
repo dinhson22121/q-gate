@@ -6,6 +6,7 @@ const REDACTED: &str = "***";
 pub enum CredentialName {
     JiraApiToken,
     FigmaToken,
+    JiraOauth,
 }
 
 impl CredentialName {
@@ -15,6 +16,7 @@ impl CredentialName {
         match self {
             Self::JiraApiToken => "jira_api_token",
             Self::FigmaToken => "figma_token",
+            Self::JiraOauth => "jira_oauth",
         }
     }
 
@@ -26,6 +28,7 @@ impl CredentialName {
         match self {
             Self::JiraApiToken => "JIRA_API_TOKEN",
             Self::FigmaToken => "FIGMA_TOKEN",
+            Self::JiraOauth => "QGATE_JIRA_OAUTH",
         }
     }
 
@@ -33,6 +36,7 @@ impl CredentialName {
         match self {
             Self::JiraApiToken => "JIRA_API_TOKEN_FILE",
             Self::FigmaToken => "FIGMA_TOKEN_FILE",
+            Self::JiraOauth => "QGATE_JIRA_OAUTH_FILE",
         }
     }
 }
@@ -88,6 +92,10 @@ mod tests {
         assert_eq!(CredentialName::JiraApiToken.to_string(), "jira_api_token");
         assert_eq!(CredentialName::FigmaToken.env_var(), "FIGMA_TOKEN");
         assert_eq!(CredentialName::ALL.len(), 2);
+        assert_eq!(CredentialName::JiraOauth.to_string(), "jira_oauth");
+        assert_eq!(CredentialName::JiraOauth.env_var(), "QGATE_JIRA_OAUTH");
+        assert_eq!(CredentialName::JiraOauth.file_env_var(), "QGATE_JIRA_OAUTH_FILE");
+        assert_eq!(CredentialName::from_key("jira_oauth"), None, "oauth bundle is not user-editable");
         assert_eq!(CredentialName::from_key("figma_token"), Some(CredentialName::FigmaToken));
         assert_eq!(CredentialName::from_key("nope"), None);
     }

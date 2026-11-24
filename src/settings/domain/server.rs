@@ -31,11 +31,8 @@ pub const ENV_WEBHOOK_URL: &str = "QGATE_WEBHOOK_URL";
 pub const ENV_CLAUDE_BIN: &str = "QGATE_CLAUDE_BIN";
 pub const ENV_CLI_TIMEOUT_SECS: &str = "QGATE_CLI_TIMEOUT_SECS";
 pub const ENV_JIRA_BASE_URL: &str = "JIRA_BASE_URL";
-pub const ENV_JIRA_EMAIL: &str = "JIRA_EMAIL";
 pub const ENV_JIRA_ENABLED: &str = "QGATE_JIRA_ENABLED";
 pub const ENV_OUTPUT_DIR: &str = "QGATE_OUTPUT_DIR";
-pub const ENV_JIRA_MCP_COMMAND: &str = "QGATE_JIRA_MCP_COMMAND";
-pub const ENV_JIRA_MCP_ENV_PASSTHROUGH: &str = "QGATE_JIRA_MCP_ENV_PASSTHROUGH";
 pub const ENV_FIGMA_API_BASE_URL: &str = "QGATE_FIGMA_API_BASE_URL";
 pub const ENV_FIGMA_MCP_URL: &str = "QGATE_FIGMA_MCP_URL";
 pub const ENV_RUN_REPO_CHECKS: &str = "QGATE_RUN_REPO_CHECKS";
@@ -304,7 +301,7 @@ impl std::fmt::Debug for EnvOverride {
     }
 }
 
-pub const ENV_OVERRIDES: [EnvOverride; 20] = [
+pub const ENV_OVERRIDES: [EnvOverride; 17] = [
     EnvOverride { env_var: ENV_BIND, field: "dashboard.bind", apply: |c, v| c.dashboard.bind = v.into() },
     EnvOverride { env_var: ENV_REPOS_ROOT, field: "repos.roots", apply: |c, v| c.repos.roots = split_list(v) },
     EnvOverride {
@@ -324,19 +321,8 @@ pub const ENV_OVERRIDES: [EnvOverride; 20] = [
         apply: |c, v| c.llm.timeout_secs = v.trim().parse().unwrap_or(c.llm.timeout_secs),
     },
     EnvOverride { env_var: ENV_JIRA_BASE_URL, field: "jira.base_url", apply: |c, v| c.jira.base_url = v.into() },
-    EnvOverride { env_var: ENV_JIRA_EMAIL, field: "jira.email", apply: |c, v| c.jira.email = v.into() },
     EnvOverride { env_var: ENV_JIRA_ENABLED, field: "jira.enabled", apply: |c, v| c.jira.enabled = parse_flag(v) },
     EnvOverride { env_var: ENV_OUTPUT_DIR, field: "output.dir", apply: |c, v| c.output.dir = v.into() },
-    EnvOverride {
-        env_var: ENV_JIRA_MCP_COMMAND,
-        field: "jira.mcp.command",
-        apply: |c, v| c.jira.mcp.command = v.split_whitespace().map(str::to_string).collect(),
-    },
-    EnvOverride {
-        env_var: ENV_JIRA_MCP_ENV_PASSTHROUGH,
-        field: "jira.mcp.env_passthrough",
-        apply: |c, v| c.jira.mcp.env_passthrough = split_list(v),
-    },
     EnvOverride {
         env_var: ENV_FIGMA_API_BASE_URL,
         field: "figma.api_base_url",
@@ -375,13 +361,11 @@ pub const ENV_OVERRIDES: [EnvOverride; 20] = [
     },
 ];
 
-pub const ADMIN_ONLY_FIELDS: [&str; 11] = [
+pub const ADMIN_ONLY_FIELDS: [&str; 9] = [
     "repos.auto_scan",
     "llm.claude_bin",
     "llm.timeout_secs",
     "jira.base_url",
-    "jira.mcp.command",
-    "jira.mcp.env_passthrough",
     "figma.api_base_url",
     "figma.mcp_url",
     "watch.base_branch",
@@ -473,7 +457,6 @@ mod tests {
             (ENV_CLAUDE_BIN, "/opt/claude/bin/claude"),
             (ENV_CLI_TIMEOUT_SECS, "900"),
             (ENV_JIRA_BASE_URL, "https://acme.atlassian.net"),
-            (ENV_JIRA_EMAIL, "bot@acme.com"),
             (ENV_OUTPUT_DIR, "/data/reviews"),
         ]));
         assert_eq!(config.dashboard.bind, "0.0.0.0:9000");
@@ -481,7 +464,6 @@ mod tests {
         assert_eq!(config.notify.webhook_url, "http://ntfy/qgate");
         assert_eq!((config.llm.claude_bin.as_str(), config.llm.timeout_secs), ("/opt/claude/bin/claude", 900));
         assert_eq!(config.jira.base_url, "https://acme.atlassian.net");
-        assert_eq!(config.jira.email, "bot@acme.com");
         assert_eq!(config.output.dir, "/data/reviews");
         assert!(config.validate().is_ok());
     }
@@ -547,8 +529,8 @@ mod tests {
         c.llm.timeout_secs = 0;
         cases.push((c, "llm.timeout_secs"));
         let mut c = base.clone();
-        c.jira.enabled = true;
-        cases.push((c, "jira.email"));
+        c.jira.base_url = "http://jira.example.com".into();
+        cases.push((c, "jira.base_url"));
         let mut c = base;
         c.output.path_template = "{repo}/{nope}.md".into();
         cases.push((c, "output.path_template"));
@@ -567,29 +549,25 @@ mod tests {
 
     #[test]
     fn active_overrides_name_their_field_and_skip_blank_values() {
-        let active = active_env_overrides(&env(&[(ENV_JIRA_EMAIL, " a@b.c "), (ENV_BIND, " ")]));
+        let active = active_env_overrides(&env(&[(ENV_JIRA_BASE_URL, " https://a.atlassian.net "), (ENV_BIND, " ")]));
         assert_eq!(active.len(), 1);
         assert_eq!(
             (active[0].0.field, active[0].0.env_var, active[0].1.as_str()),
-            ("jira.email", ENV_JIRA_EMAIL, "a@b.c")
+            ("jira.base_url", ENV_JIRA_BASE_URL, "https://a.atlassian.net")
         );
-        assert!(format!("{:?}", active[0].0).contains("jira.email"));
-        assert_eq!(ENV_OVERRIDES.len(), 20);
+        assert!(format!("{:?}", active[0].0).contains("jira.base_url"));
+        assert_eq!(ENV_OVERRIDES.len(), 17);
     }
 
     #[test]
     fn admin_only_fields_are_settable_from_env() {
         let config = ServerConfig::default().with_env_overrides(env(&[
-            (ENV_JIRA_MCP_COMMAND, " uvx  mcp-atlassian==0.24.0 "),
-            (ENV_JIRA_MCP_ENV_PASSTHROUGH, "JIRA_URL, JIRA_API_TOKEN"),
             (ENV_FIGMA_API_BASE_URL, "https://figma.proxy.example"),
             (ENV_FIGMA_MCP_URL, "https://mcp.proxy.example/mcp"),
             (ENV_RUN_REPO_CHECKS, "off"),
             (ENV_WATCH_BASE_BRANCH, "develop"),
             (ENV_REPOS_AUTO_SCAN, "true"),
         ]));
-        assert_eq!(config.jira.mcp.command, vec!["uvx".to_string(), "mcp-atlassian==0.24.0".into()]);
-        assert_eq!(config.jira.mcp.env_passthrough, vec!["JIRA_URL".to_string(), "JIRA_API_TOKEN".into()]);
         assert_eq!(config.figma.api_base_url, "https://figma.proxy.example");
         assert_eq!(config.figma.mcp_url, "https://mcp.proxy.example/mcp");
         assert!(!config.watch.run_repo_checks);
