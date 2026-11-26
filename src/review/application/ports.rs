@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use crate::review::domain::callers::{CallerContext, CallerSite};
 use crate::review::domain::change_set::{ChangeSet, FileChange};
 use crate::review::domain::checks::{CheckResult, CheckSpec};
+use crate::review::domain::feedback::FindingFeedback;
 use crate::review::domain::finding::Finding;
 use crate::review::domain::report::TokenUsage;
 use crate::review::domain::requirements::{CriterionAssessment, Requirements};
@@ -32,6 +33,10 @@ pub struct ReviewInput<'a> {
 
 pub trait CallerFinder: Send + Sync {
     fn find<'a>(&'a self, files: &'a [FileChange]) -> BoxFuture<'a, CallerContext>;
+}
+
+pub trait FeedbackPolicy: Send + Sync {
+    fn assess<'a>(&'a self, findings: &'a [Finding]) -> BoxFuture<'a, Vec<FindingFeedback>>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

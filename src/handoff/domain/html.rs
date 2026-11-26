@@ -218,6 +218,9 @@ fn finding_card(out: &mut String, f: &Finding, is_blocking: bool) {
     if f.demoted.is_some() {
         tags.push_str(&tag("unclear", "demoted"));
     }
+    if f.feedback.is_some() {
+        tags.push_str(&tag("unclear", "dismissed"));
+    }
     let _ = writeln!(out, "<div class=\"{class}\"><h3>{tags}{}</h3>", escape(&f.title));
     let _ = writeln!(out, "<p class=\"loc\">{}</p>", escape(&location(&f.file, f.line)));
     if !f.evidence.trim().is_empty() {
@@ -225,7 +228,10 @@ fn finding_card(out: &mut String, f: &Finding, is_blocking: bool) {
     }
     out.push_str(&labelled("Explanation", &f.explanation));
     if let Some(demotion) = f.demoted {
-        out.push_str(&labelled("Demoted", demotion.describe()));
+        out.push_str(&labelled("Demoted", &demotion.describe()));
+    }
+    if f.feedback.is_some() {
+        out.push_str(&labelled("Dismissed", "by user"));
     }
     if let Some(reproduce) = &f.reproduce {
         out.push_str("<div class=\"rule\"><span class=\"label\">Reproduce</span>\n");
@@ -425,6 +431,16 @@ mod tests {
         assert!(html.contains("<pre>go test ./x</pre>"));
         assert!(html.contains("tag unclear\">demoted"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn dismissed_finding_is_tagged() {
+        use crate::review::application::FeedbackMark;
+        let mut report = failing_report();
+        report.findings[0].feedback = Some(FeedbackMark::Dismissed);
+        let html = render(&report);
+        assert!(html.contains("tag unclear\">dismissed"));
+        assert!(html.contains("Dismissed"));
     }
 
     fn position(html: &str, needle: &str) -> usize {

@@ -63,8 +63,33 @@ pub struct FindingView {
     pub source: Option<FindingSourceView>,
     #[serde(default)]
     pub reproduce: Option<ReproduceView>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "demotion_name")]
     pub demoted: Option<String>,
+    #[serde(
+        default,
+        rename(serialize = "dismissed", deserialize = "feedback"),
+        alias = "dismissed",
+        deserialize_with = "dismissed_flag"
+    )]
+    pub dismissed: bool,
+}
+
+fn demotion_name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(name)) => Some(name),
+        Some(serde_json::Value::Object(fields)) => fields.keys().next().cloned(),
+        _ => None,
+    })
+}
+
+fn dismissed_flag<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Bool(flag)) => flag,
+        Some(serde_json::Value::String(mark)) => mark == "dismissed",
+        _ => false,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +240,21 @@ mod tests {
         let old = serde_json::json!({"file": "a.go", "line": 1, "severity": "critical", "category": "security",
                                      "confidence": "high", "title": "t"});
         let view: FindingView = serde_json::from_value(old).unwrap();
-        assert_eq!((view.reproduce, view.demoted), (None, None));
+        assert_eq!((view.reproduce, view.demoted, view.dismissed), (None, None, false));
+    }
+
+    #[test]
+    fn dismissed_mark_and_parameterised_demotion_read_into_the_view() {
+        use crate::review::application::FeedbackMark;
+        let live = crate::review::application::Finding {
+            feedback: Some(FeedbackMark::Dismissed),
+            demoted: Some(Demotion::LowPrecision { score: 30 }),
+            ..finding("a.go", 1, Severity::Minor, "x")
+        };
+        let view: FindingView = serde_json::from_value(serde_json::to_value(&live).unwrap()).unwrap();
+        assert!(view.dismissed);
+        assert_eq!(view.demoted.as_deref(), Some("low_precision"));
+        let again: FindingView = serde_json::from_value(serde_json::to_value(&view).unwrap()).unwrap();
+        assert!(again.dismissed);
     }
 }

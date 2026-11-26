@@ -11,6 +11,7 @@ use axum::routing::get;
 use tokio::net::TcpListener;
 
 use crate::history::application::RunRepository;
+use crate::web::ApiToken;
 
 pub const DEFAULT_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
 pub const DEFAULT_ALLOWED_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
@@ -19,6 +20,7 @@ pub const DEFAULT_ALLOWED_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
 pub struct DashboardState {
     repository: Arc<dyn RunRepository>,
     allowed_hosts: Arc<[String]>,
+    token: Option<ApiToken>,
 }
 
 impl DashboardState {
@@ -29,7 +31,12 @@ impl DashboardState {
     pub fn with_allowed_hosts(repository: Arc<dyn RunRepository>, allowed_hosts: Vec<String>) -> Self {
         let allowed_hosts =
             allowed_hosts.iter().map(|h| security::normalize_host(h)).filter(|h| !h.is_empty()).collect();
-        Self { repository, allowed_hosts }
+        Self { repository, allowed_hosts, token: None }
+    }
+
+    pub fn with_token(mut self, token: ApiToken) -> Self {
+        self.token = Some(token);
+        self
     }
 }
 

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
+<meta name="qgate-token" content="__QGATE_TOKEN__">
 <title>qgate dashboard</title>
 <style>
 :root {
@@ -188,6 +189,9 @@ p { margin: 4px 0; }
 .gwt dd { margin: 0; }
 .progress { display: inline-flex; gap: 3px; flex-wrap: wrap; }
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 4px; }
+.fb { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10px; }
+.fb-error { color: var(--error); font-size: 12px; font-weight: 500; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 <script>
@@ -265,7 +269,9 @@ p { margin: 4px 0; }
   const CRITERION_CLASS = { met: "ok", not_met: "bad", unclear: "warn" };
   const CRITERION_LABEL = { met: "Met", not_met: "Not met", unclear: "Unclear" };
   const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,11}$/;
-  const state = { offset: 0, total: 0, selected: null };
+  const TOKEN = (document.querySelector('meta[name="qgate-token"]') || {}).content || "";
+  const FEEDBACK_MIN_JUDGMENTS = 10;
+  const state = { offset: 0, total: 0, selected: null, run: null, feedback: null, nodes: {} };
   const $ = (id) => document.getElementById(id);
 
   function el(tag, attrs, ...children) {
@@ -305,6 +311,18 @@ p { margin: 4px 0; }
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error((body && body.error) || ("HTTP " + response.status));
     return body;
+  }
+
+  async function postJson(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-Qgate-Request": "feedback", "X-Qgate-Token": TOKEN, Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error((data && data.error) || ("HTTP " + response.status));
+    return data;
   }
 
   function severityChips(counts) {
@@ -373,7 +391,10 @@ p { margin: 4px 0; }
       row.setAttribute("aria-selected", String(row.dataset.id === String(id)));
     }
     try {
-      renderDetail(await getJson("/api/runs/" + encodeURIComponent(id)));
+      const key = encodeURIComponent(id);
+      const [run, feedback] = await Promise.all([getJson("/api/runs/" + key), getJson("/api/feedback/runs/" + key).catch(() => null)]);
+      state.feedback = feedback;
+      renderDetail(run);
       showError("");
     } catch (err) {
       replace($("detail"), empty("Could not load run " + id + ": " + err.message));
@@ -418,6 +439,8 @@ p { margin: 4px 0; }
         el("span", {}, "trigger ", run.trigger.replace("_", "-"))),
     ];
     if (run.error) nodes.push(el("div", { class: "card bad", role: "status" }, el("strong", {}, "Error: "), run.error));
+    state.run = run;
+    state.nodes = {};
     if (!report) {
       nodes.push(el("div", { class: "verdict" }, chip(run.status, STATUS_CLASS[run.status]), "No review report"));
       replace($("detail"), nodes);
@@ -427,7 +450,7 @@ p { margin: 4px 0; }
       el("button", { type: "button", class: "btn-link", title: "Download the review as Markdown", onclick: () => exportRun(run.id) }, "⬇ Export .md")));
     nodes.push(overviewChart(report), verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
       testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
-      architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
+      precisionSection(run.id), architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
       skippedSection(report.skipped), rejectedSection(report.rejected), usageSection(report));
     replace($("detail"), nodes);
   }
@@ -827,11 +850,63 @@ p { margin: 4px 0; }
       r.command ? codeBlock(r.command) : null);
   }
 
-  function findingCard(f) {
+  const feedbackItem = (index) => (state.feedback && state.feedback.items.find((item) => item.index === index)) || null;
+  const isSecurity = (category) => category === "security";
+  const isSecurityKind = (kind) => kind.endsWith("/security");
+
+  function isDismissed(f, index) {
+    const item = feedbackItem(index);
+    return item ? item.verdict === "dismissed" : f.dismissed === true;
+  }
+
+  async function refreshFeedback(runId) {
+    const data = await getJson("/api/feedback/runs/" + encodeURIComponent(runId));
+    if (state.selected !== runId || !state.run || !state.run.report) return;
+    state.feedback = data;
+    const { findings, precision } = state.nodes;
+    if (findings) {
+      const next = findingsSection(state.run.report.findings, runId);
+      findings.replaceWith(next);
+    }
+    if (precision) {
+      const next = precisionSection(runId);
+      precision.replaceWith(next);
+    }
+  }
+
+  function feedbackControls(runId, index) {
+    const item = feedbackItem(index);
+    if (!item) return null;
+    const note = el("span", { class: "fb-error", role: "alert", hidden: true });
+    const act = (path, body) => async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      note.hidden = true;
+      try {
+        await postJson(path, { run_id: runId, index, ...body });
+        await refreshFeedback(runId);
+      } catch (err) {
+        note.textContent = err.message;
+        note.hidden = false;
+        button.disabled = false;
+      }
+    };
+    const verdictButton = (label, verdict) =>
+      el("button", { type: "button", class: "small ghost", disabled: item.verdict === verdict, onclick: act("/api/feedback", { verdict }) }, label);
+    return el("div", { class: "fb" },
+      item.verdict ? chip(item.verdict, item.verdict === "accepted" ? "ok" : "neutral") : null,
+      verdictButton("✓ Correct", "accepted"), verdictButton("✗ Dismiss", "dismissed"),
+      item.verdict ? el("button", { type: "button", class: "small ghost", onclick: act("/api/feedback/undo", {}) }, "Undo") : null,
+      note);
+  }
+
+  function findingCard(f, index, runId) {
+    const dismissedSecurity = isSecurity(f.category) && isDismissed(f, index);
     return el("div", { class: "card" },
       el("div", { class: "card-head" }, chip(f.severity, SEVERITY_CLASS[f.severity]), chip(f.category.replace("_", " "), "neutral"),
         el("span", { class: "muted" }, "confidence " + f.confidence), el("span", { class: "mono muted" }, "line " + f.line),
-        f.demoted ? chip("demoted", "warn") : null),
+        f.demoted ? chip("demoted", "warn") : null,
+        dismissedSecurity ? chip("dismissed → warning", "warn") : null),
       el("p", { class: "card-title" }, f.title),
       f.explanation ? el("p", {}, f.explanation) : null,
       f.demoted ? el("p", { class: "muted" }, "Reported as critical without concrete reproduce steps, so it counts as major.") : null,
@@ -839,25 +914,76 @@ p { margin: 4px 0; }
       f.reproduce ? reproduceBlock(f.reproduce) : null,
       f.suggestion ? el("p", {}, el("strong", {}, "Suggestion: "), f.suggestion) : null,
       f.prevention_rule ? el("p", {}, el("strong", {}, "Rule for coding agents: "), f.prevention_rule.text,
-        f.prevention_rule.scope ? el("span", { class: "mono muted" }, " (" + f.prevention_rule.scope + ")") : null) : null);
+        f.prevention_rule.scope ? el("span", { class: "mono muted" }, " (" + f.prevention_rule.scope + ")") : null) : null,
+      feedbackControls(runId, index));
   }
 
   function findingsSection(findings, runId) {
     const section = el("section", { "aria-label": "Code-quality findings" }, el("h3", {}, "Code-quality findings (" + findings.length + ")"));
+    state.nodes.findings = section;
     if (!findings.length) {
       section.append(empty("No verified findings."));
       return section;
     }
-    const byFile = new Map();
-    findings.forEach((f, index) => byFile.set(f.file, [...(byFile.get(f.file) || []), { f, index }]));
     const withPrevent = ({ f, index }) => {
-      const card = findingCard(f);
+      const card = findingCard(f, index, runId);
       card.append(el("p", {}, el("a", { href: "/policy?run=" + encodeURIComponent(runId) + "&finding=" + index }, "Prevent this from happening again →")));
       return card;
     };
+    const entries = findings.map((f, index) => ({ f, index }));
+    const dismissed = entries.filter(({ f, index }) => !isSecurity(f.category) && isDismissed(f, index));
+    const shown = entries.filter((entry) => !dismissed.includes(entry));
+    const byFile = new Map();
+    for (const entry of shown) byFile.set(entry.f.file, [...(byFile.get(entry.f.file) || []), entry]);
     for (const [file, items] of byFile) {
       section.append(el("div", { class: "file-group" }, el("h4", {}, file), items.map(withPrevent)));
     }
+    if (dismissed.length) {
+      section.append(el("details", {}, el("summary", {}, "Dismissed (" + dismissed.length + ")"), dismissed.map(withPrevent)));
+    }
+    return section;
+  }
+
+  function kindState(score) {
+    if (score.judgments < FEEDBACK_MIN_JUDGMENTS || !score.active) return "inactive (<" + FEEDBACK_MIN_JUDGMENTS + " judgments)";
+    if (isSecurityKind(score.kind)) return "never capped";
+    if (score.cap === "major") return "capped at major";
+    if (score.cap === "minor") return "capped at minor";
+    return "ok";
+  }
+
+  function precisionSection(runId) {
+    const section = el("section", { "aria-label": "Finding precision" });
+    state.nodes.precision = section;
+    if (!state.feedback) return section;
+    const scores = state.feedback.scores;
+    section.append(el("h3", {}, "Finding precision"));
+    if (!scores.length) {
+      section.append(empty("No judgments for this repository yet."));
+      return section;
+    }
+    const note = el("p", { class: "fb-error", role: "alert", hidden: true });
+    const reset = (kind) => async (event) => {
+      if (!confirm("Reset all judgments for " + kind + "?")) return;
+      const button = event.currentTarget;
+      button.disabled = true;
+      note.hidden = true;
+      try {
+        await postJson("/api/feedback/reset", { run_id: runId, kind });
+        await refreshFeedback(runId);
+      } catch (err) {
+        note.textContent = err.message;
+        note.hidden = false;
+        button.disabled = false;
+      }
+    };
+    const rows = scores.map((score) => el("tr", {},
+      el("td", { class: "mono" }, score.kind), el("td", { class: "num" }, score.score + "%"), el("td", { class: "num" }, score.judgments),
+      el("td", {}, kindState(score)),
+      el("td", {}, el("button", { type: "button", class: "small ghost", onclick: reset(score.kind) }, "Reset"))));
+    section.append(el("div", { class: "table-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["Kind", "Score", "Judgments", "State", ""].map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows))), note);
     return section;
   }
 

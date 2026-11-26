@@ -4,6 +4,7 @@ pub mod callgraph;
 pub mod cli;
 pub mod conventions;
 pub mod design;
+pub mod feedback;
 pub mod handoff;
 pub mod history;
 pub mod impact;

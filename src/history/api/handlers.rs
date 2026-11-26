@@ -70,8 +70,11 @@ fn parse_param<T: std::str::FromStr>(params: &HashMap<String, String>, name: &st
     }
 }
 
-pub(super) async fn index() -> Html<&'static str> {
-    Html(DASHBOARD_HTML)
+pub(super) async fn index(State(state): State<DashboardState>) -> Html<String> {
+    Html(match &state.token {
+        Some(token) => token.inject(DASHBOARD_HTML),
+        None => DASHBOARD_HTML.to_string(),
+    })
 }
 
 pub(super) async fn not_found() -> ApiError {
