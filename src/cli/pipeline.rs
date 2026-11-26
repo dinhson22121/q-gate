@@ -34,6 +34,7 @@ use crate::review::infrastructure::snapshot::{GitScenarioSnapshots, commit_messa
 use crate::review::infrastructure::tool_checks::{
     GitCommitChanges, QualityTools, RegressionTools, languages_from_settings, rulebook_boundaries,
 };
+use crate::review::infrastructure::working_tree_snapshot::export_working_tree;
 use crate::sandbox::application::ExecBackend;
 use crate::sandbox::infrastructure::{backend_from_env, work_dir};
 use crate::settings::application::{
@@ -227,7 +228,9 @@ impl ReviewPipeline {
         preflight.ensure_available().await?;
         let db = self.context.paths.data_dir.join(HISTORY_DB_FILE);
         let (exec, work_dir) = (self.context.exec_backend(), self.context.work_dir());
-        let snapshots = Arc::new(GitScenarioSnapshots::new(work_dir.clone()));
+        let includes_working_tree = matches!(request.target, DiffTarget::Base(_) | DiffTarget::WorkingTree);
+        let snapshots = GitScenarioSnapshots::new(work_dir.clone());
+        let snapshots = Arc::new(if includes_working_tree { snapshots.including_working_tree() } else { snapshots });
         let cache = ReviewCache::open(&db, NoCacheTrailer::is_in(&meta.commit_messages));
         let ids = Arc::new(LocalGit::new(root.clone(), request.target.clone())?);
         let mut agents = build_agents(
@@ -264,7 +267,15 @@ impl ReviewPipeline {
             DiffTarget::Commit(sha) | DiffTarget::Range { head: sha, .. } => {
                 Some(export_commit(root, sha, &work_dir).await?)
             }
-            _ => None,
+            DiffTarget::Base(_) | DiffTarget::WorkingTree => match export_working_tree(root, &work_dir).await {
+                Ok(snapshot) => Some(snapshot),
+                Err(e) => {
+                    eprintln!(
+                        "qgate: warning: cannot snapshot the working tree; generated tests and regression checks are skipped: {e:#}"
+                    );
+                    None
+                }
+            },
         };
         let checks_root = snapshot.as_ref().map_or_else(|| root.clone(), |s| s.path().to_path_buf());
 

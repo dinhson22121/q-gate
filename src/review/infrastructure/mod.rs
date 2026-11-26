@@ -9,3 +9,4 @@ pub mod local_git_ids;
 pub mod snapshot;
 pub mod tool_checks;
 pub mod unified_diff;
+pub mod working_tree_snapshot;

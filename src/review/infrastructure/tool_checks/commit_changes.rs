@@ -17,13 +17,30 @@ impl GitCommitChanges {
     }
 }
 
+impl GitCommitChanges {
+    async fn head(&self) -> Result<String, SourceError> {
+        self.git
+            .head_commit()
+            .await?
+            .ok_or_else(|| SourceError::InvalidInput("the repository has no commits yet".into()))
+    }
+}
+
 impl CommitChanges for GitCommitChanges {
     fn load(&self) -> BoxFuture<'_, Result<CommitChange, SourceError>> {
         Box::pin(async move {
             let (head_sha, base_sha) = match &self.target {
                 DiffTarget::Range { base, head } => (head.clone(), Some(base.clone())),
                 DiffTarget::Commit(sha) => (sha.clone(), self.git.parent_of(sha).await?),
-                DiffTarget::WorkingTree | DiffTarget::Base(_) => unreachable!("tool checks need a commit target"),
+                DiffTarget::Base(base) => {
+                    let head = self.head().await?;
+                    let base = self.git.merge_base(base, &head).await?;
+                    (head, base)
+                }
+                DiffTarget::WorkingTree => {
+                    let head = self.head().await?;
+                    (head.clone(), Some(head))
+                }
             };
             Ok(CommitChange { head_sha, base_sha, changes: self.git.load().await? })
         })
@@ -75,5 +92,36 @@ mod tests {
         let change = load(dir.path(), range).await;
         assert_eq!((change.head_sha, change.base_sha), (second, Some(first)));
         assert_eq!(change.changes.files.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn base_and_working_tree_targets_resolve_head_and_their_base() {
+        let dir = tempfile::tempdir().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("a.go"), "package a\n").unwrap();
+        git_in(dir.path(), &["add", "."]);
+        git_in(dir.path(), &["commit", "-q", "-m", "one"]);
+        let fork = git_in(dir.path(), &["rev-parse", "HEAD"]);
+        git_in(dir.path(), &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(dir.path().join("b.go"), "package b\n").unwrap();
+        git_in(dir.path(), &["add", "."]);
+        git_in(dir.path(), &["commit", "-q", "-m", "two"]);
+        let head = git_in(dir.path(), &["rev-parse", "HEAD"]);
+
+        let change = load(dir.path(), DiffTarget::Base("main".into())).await;
+        assert_eq!((change.head_sha.as_str(), change.base_sha.as_deref()), (head.as_str(), Some(fork.as_str())));
+
+        let change = load(dir.path(), DiffTarget::WorkingTree).await;
+        assert_eq!((change.head_sha.as_str(), change.base_sha.as_deref()), (head.as_str(), Some(head.as_str())));
+    }
+
+    #[tokio::test]
+    async fn a_repository_without_commits_has_no_head_to_check() {
+        let dir = tempfile::tempdir().unwrap();
+        git_in(dir.path(), &["init", "-q"]);
+
+        let result = GitCommitChanges::new(dir.path().to_path_buf(), DiffTarget::WorkingTree).unwrap().load().await;
+
+        assert!(matches!(result, Err(SourceError::InvalidInput(_))));
     }
 }

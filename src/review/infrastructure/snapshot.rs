@@ -6,6 +6,7 @@ use futures::future::BoxFuture;
 use tempfile::TempDir;
 
 use crate::review::infrastructure::local_git::{GIT_HARDENING_ARGS, GIT_HARDENING_ENV};
+use crate::review::infrastructure::working_tree_snapshot::export_working_tree;
 use crate::testing::application::ports::{ScenarioSnapshot, ScenarioSnapshots};
 
 const GIT: &str = "git";
@@ -101,18 +102,28 @@ pub async fn export_commit(repo: &Path, sha: &str, parent: &Path) -> Result<Snap
 
 pub struct GitScenarioSnapshots {
     parent: PathBuf,
+    include_working_tree: bool,
 }
 
 impl GitScenarioSnapshots {
     pub fn new(parent: PathBuf) -> Self {
-        Self { parent }
+        Self { parent, include_working_tree: false }
+    }
+
+    pub fn including_working_tree(self) -> Self {
+        Self { include_working_tree: true, ..self }
     }
 }
 
 impl ScenarioSnapshots for GitScenarioSnapshots {
     fn create<'a>(&'a self, repo_root: &'a Path, commit: &'a str) -> BoxFuture<'a, Result<ScenarioSnapshot, String>> {
         Box::pin(async move {
-            let snapshot = export_commit(repo_root, commit, &self.parent).await.map_err(|e| format!("{e:#}"))?;
+            let snapshot = if self.include_working_tree {
+                export_working_tree(repo_root, &self.parent).await
+            } else {
+                export_commit(repo_root, commit, &self.parent).await
+            };
+            let snapshot = snapshot.map_err(|e| format!("{e:#}"))?;
             Ok(ScenarioSnapshot::new(snapshot.path().to_path_buf(), snapshot))
         })
     }
@@ -155,7 +166,7 @@ fn checkout_into(repo: &Path, sha: &str, index: &Path, target: &Path) -> Result<
     ensure_success("git checkout-index", &git(&["checkout-index", "--all", "--force", &format!("--prefix={prefix}")])?)
 }
 
-fn neutralised_filters(repo: &Path) -> Result<Vec<String>> {
+pub(super) fn neutralised_filters(repo: &Path) -> Result<Vec<String>> {
     let output = Command::new(GIT)
         .args(GIT_HARDENING_ARGS)
         .args(["config", "--null", "--name-only", "--get-regexp", r"^filter\."])
