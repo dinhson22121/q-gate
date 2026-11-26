@@ -3,6 +3,7 @@ pub mod check_runner;
 pub mod claude;
 pub mod claude_preflight;
 pub mod commit_snapshots;
+pub mod feedback;
 pub mod guidelines;
 pub mod local_git;
 pub mod local_git_ids;

@@ -41,6 +41,7 @@ fn finding(file: &str, line: u32, severity: Severity, category: Category, title:
         source: FindingSource::Llm,
         reproduce: None,
         demoted: None,
+        feedback: None,
     }
 }
 

@@ -163,6 +163,7 @@ impl RawFinding {
             source: FindingSource::Llm,
             reproduce: self.reproduce.and_then(RawReproduce::into_reproduce),
             demoted: None,
+            feedback: None,
         }
     }
 }

@@ -373,3 +373,17 @@ fn finding_task_carries_reproduce_block_expected_and_demotion_note() {
     assert!(markdown.contains("Expected:\n\nan error"));
     assert!(markdown.contains("- Demoted: reported as critical without concrete reproduce steps"));
 }
+
+#[test]
+fn dismissed_non_security_findings_are_left_out_and_security_ones_become_warnings() {
+    use crate::review::application::FeedbackMark;
+    let mut report = failing_report();
+    report.findings[0].feedback = Some(FeedbackMark::Dismissed);
+    report.findings[1].feedback = Some(FeedbackMark::Dismissed);
+    let doc = HandoffDocument::build(&input(&report));
+    let markdown = render_markdown(&doc);
+    assert!(!markdown.contains("Magic number"));
+    assert!(doc.blocking.iter().all(|t| t.title != "SQL injection"));
+    let task = doc.warnings.iter().find(|t| t.title == "SQL injection").unwrap();
+    assert!(task.facts.iter().any(|f| f.label == "Dismissed" && f.value == "Dismissed by user"));
+}

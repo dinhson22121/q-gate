@@ -31,6 +31,7 @@ pub fn finding(severity: Severity, category: Category, title: &str) -> FindingVi
         source: None,
         reproduce: None,
         demoted: None,
+        dismissed: false,
     }
 }
 
@@ -145,6 +146,7 @@ fn live_finding(title: &str) -> Finding {
         source: FindingSource::Llm,
         reproduce: None,
         demoted: None,
+        feedback: None,
     }
 }
 

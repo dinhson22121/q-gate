@@ -161,6 +161,9 @@ fn render_finding(out: &mut String, finding: &Finding, blocking: bool, color: bo
     if let Some(demotion) = finding.demoted {
         let _ = writeln!(out, "      demoted: {}", demotion.describe());
     }
+    if finding.feedback.is_some() {
+        let _ = writeln!(out, "      dismissed: by user");
+    }
     if let Some(r) = &finding.reproduce {
         let _ = writeln!(out, "      reproduce: {} → expected {}, got {}", r.input, r.expected, r.actual);
         if let Some(command) = &r.command {
@@ -294,6 +297,7 @@ mod tests {
             source: FindingSource::Llm,
             reproduce: None,
             demoted: None,
+            feedback: None,
         }
     }
 
@@ -358,6 +362,19 @@ mod tests {
         assert!(text.contains("FAILED — 1 blocking finding(s); unmet criteria: AC-1; failed checks: unit"));
         assert!(text.contains("est. $0.09"));
         assert!(!text.contains('\u{1b}'), "no ANSI codes without color");
+    }
+
+    #[test]
+    fn terminal_output_marks_dismissed_findings() {
+        let mut report = report();
+        report.findings[0].feedback = Some(crate::review::application::FeedbackMark::Dismissed);
+        let view = TerminalView {
+            report: &report,
+            filter: DisplayFilter { min_severity: Severity::Minor, min_confidence: Confidence::Medium },
+            ticket_note: None,
+            color: false,
+        };
+        assert!(render_terminal(&view).contains("dismissed: by user"));
     }
 
     #[test]

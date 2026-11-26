@@ -53,6 +53,14 @@ steps is demoted to major and marked as such. A repository can turn the demotion
 require_reproduce_for_critical = false
 ```
 
+### Feedback
+
+A finding dismissed by a user never blocks the gate. A dismissed security finding stays in the handoff as a warning;
+any other dismissed finding is hidden from the handoff. Each kind of finding (category and source) has a precision
+score: it starts at 100%, every dismissal (✗) subtracts 10, every confirmation (✓) adds 10, and it never drops below
+10%. The score is active after 10 judgments. At 50% or below a kind is capped at major, at 20% or below at minor, and
+the report notes the cap. Security findings are never capped. Resetting a kind restores 100%.
+
 ## What is checked beyond the model review
 
 Two deterministic checks cover what SonarQube does not. They run in the runner container and fold into the review

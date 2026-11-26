@@ -1,6 +1,7 @@
 pub mod agent_ports;
 pub mod batching;
 pub mod caching_reviewer;
+pub mod feedback_identity;
 pub mod ports;
 pub mod preflight;
 pub mod redaction;
@@ -16,6 +17,7 @@ pub use crate::review::domain::agent_results::{
 };
 pub use crate::review::domain::callers::{CallerContext, CallerSite};
 pub use crate::review::domain::checks::{CheckOutcome, CheckResult, CheckSpec};
+pub use crate::review::domain::feedback::{FeedbackMark, FindingFeedback};
 pub use crate::review::domain::finding::{Category, Confidence, Finding, PreventionRule, Severity};
 pub use crate::review::domain::gate::GatePolicy;
 pub use crate::review::domain::report::{ReviewReport, SkipReason, TokenUsage};
@@ -24,6 +26,7 @@ pub use crate::review::domain::requirements::{
     AcceptanceCriterion, CriterionStatus, EvidenceRef, Requirements, RequirementsReport,
 };
 pub use caching_reviewer::CachingCodeReviewer;
+pub use feedback_identity::{FindingIdentity, finding_identity};
 pub use preflight::{AgentPlan, ModelPreflight, ProbeFailure, ReviewPreflight};
 pub use review_changes::{NoProgress, ReviewChanges, ReviewError, ReviewProgress, ReviewSettings};
 pub use run_agents::{AgentRun, AgentSuite};

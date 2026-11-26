@@ -39,6 +39,7 @@ pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
         source: FindingSource::StaticTool(found.tool.as_str().to_string()),
         reproduce: None,
         demoted: None,
+        feedback: None,
     }
 }
 
@@ -93,6 +94,7 @@ pub fn regression_to_finding(regression: &Regression, location: Option<(String, 
             &evidence.reproduce_command,
         ),
         demoted: None,
+        feedback: None,
     }
 }
 

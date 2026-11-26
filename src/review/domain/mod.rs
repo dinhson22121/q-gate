@@ -2,6 +2,7 @@ pub mod agent_results;
 pub mod callers;
 pub mod change_set;
 pub mod checks;
+pub mod feedback;
 pub mod finding;
 pub mod gate;
 pub mod language;

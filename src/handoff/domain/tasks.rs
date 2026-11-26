@@ -1,8 +1,9 @@
 use super::document::{CodeBlock, Fact, HandoffInput, Task, TaskKind};
 use super::text::language_of;
 use crate::review::application::{
-    CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, DesignMismatchKind, EvidenceRef, Finding, Reproduce,
-    RequirementsReport, RuleViolation, Severity, TestEvidence, TestResult, TestVerdict,
+    Category, CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, DesignMismatchKind, EvidenceRef,
+    FeedbackMark, Finding, Reproduce, RequirementsReport, RuleViolation, Severity, TestEvidence, TestResult,
+    TestVerdict,
 };
 
 const DO_NOT_EDIT_TEST: &str =
@@ -27,7 +28,12 @@ pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
         report.findings.iter().enumerate().map(|(i, f)| (report.gate.blocking.contains(&i), f)).collect();
     findings.sort_by(|(_, a), (_, b)| b.severity.cmp(&a.severity).then(a.file.cmp(&b.file)).then(a.line.cmp(&b.line)));
     for (is_blocking, finding) in findings {
-        if is_blocking {
+        let dismissed = finding.feedback == Some(FeedbackMark::Dismissed);
+        if dismissed {
+            if finding.category == Category::Security {
+                warnings.push(finding_task(finding));
+            }
+        } else if is_blocking {
             blocking.push(finding_task(finding));
         } else if finding.severity >= Severity::Minor {
             warnings.push(finding_task(finding));
@@ -167,6 +173,7 @@ fn finding_task(finding: &Finding) -> Task {
         ]
         .into_iter()
         .chain(finding.demoted.map(|d| fact("Demoted", d.describe())))
+        .chain((finding.feedback == Some(FeedbackMark::Dismissed)).then(|| fact("Dismissed", "Dismissed by user")))
         .chain(finding.prevention_rule.as_ref().map(|rule| match &rule.scope {
             Some(scope) => fact("Rule", format!("{} (files: {scope})", rule.text)),
             None => fact("Rule", rule.text.as_str()),

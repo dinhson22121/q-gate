@@ -11,6 +11,8 @@ use super::tickets::{TicketLoad, load_ticket_context};
 use crate::cache::application::NoCacheTrailer;
 use crate::conventions::application::{RulebookStore, repo_key};
 use crate::conventions::infrastructure::SqliteRulebookStore;
+use crate::feedback::application::FeedbackService;
+use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta};
 use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
@@ -28,6 +30,7 @@ use crate::review::infrastructure::check_runner::ProcessCheckRunner;
 use crate::review::infrastructure::claude::{ClaudeAuditor, ClaudeReviewer, prompt_fingerprint};
 use crate::review::infrastructure::claude_preflight::ClaudePreflight;
 use crate::review::infrastructure::commit_snapshots::GitCommitSnapshots;
+use crate::review::infrastructure::feedback::StoredFeedback;
 use crate::review::infrastructure::guidelines::load_guidelines;
 use crate::review::infrastructure::local_git::{DiffTarget, LocalGit};
 use crate::review::infrastructure::snapshot::{GitScenarioSnapshots, commit_messages, export_commit};
@@ -310,6 +313,13 @@ impl ReviewPipeline {
             use_case = use_case.with_auditor(Arc::new(auditor));
         }
         use_case = use_case.with_callers(Arc::new(CallgraphCallers::new(checks_root)));
+        match SqliteFeedbackStore::open(&db) {
+            Ok(store) => {
+                let service = Arc::new(FeedbackService::new(Arc::new(store)));
+                use_case = use_case.with_feedback(Arc::new(StoredFeedback::new(service, repo_key(root))));
+            }
+            Err(e) => eprintln!("qgate: warning: feedback not applied: {e}"),
+        }
         let commit = meta.commit.clone().unwrap_or_default();
         let agent_run = agents.as_ref().map(|a| AgentRun {
             suite: &a.suite,

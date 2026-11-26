@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub use super::feedback::FeedbackMark;
 pub use super::reproduce::{Demotion, Reproduce};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -157,6 +158,8 @@ pub struct Finding {
     pub reproduce: Option<Reproduce>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub demoted: Option<Demotion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<FeedbackMark>,
 }
 
 #[cfg(test)]
@@ -178,6 +181,7 @@ pub(crate) mod fixtures {
             source: FindingSource::Llm,
             reproduce: None,
             demoted: None,
+            feedback: None,
         }
     }
 }

@@ -258,3 +258,17 @@ async fn exports_a_run_as_markdown_or_404s() {
     assert_eq!(server.get("/api/runs/99999/export").await.status(), StatusCode::NOT_FOUND);
     assert_eq!(server.get("/api/runs/abc/export").await.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn index_injects_the_token_only_when_the_state_has_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository: Arc<dyn RunRepository> = Arc::new(SqliteRunRepository::open(dir.path().join("q.db")).unwrap());
+    let token = crate::web::ApiToken::generate().unwrap();
+    let app = router(DashboardState::new(repository.clone()).with_token(token.clone()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    let html = reqwest::get(format!("http://{addr}/")).await.unwrap().text().await.unwrap();
+    assert!(html.contains(&format!(r#"name="qgate-token" content="{}""#, token.expose())));
+    assert!(!html.contains("__QGATE_TOKEN__"));
+}

@@ -6,14 +6,15 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::batching::plan_batches;
 use super::ports::{
-    AssessmentOutput, AuditInput, CallerFinder, ChangeSource, CheckRunner, CodeReviewer, FindingAuditor,
-    RequirementsInput, ReviewInput, ReviewerError, ReviewerOutput, SourceError,
+    AssessmentOutput, AuditInput, CallerFinder, ChangeSource, CheckRunner, CodeReviewer, FeedbackPolicy,
+    FindingAuditor, RequirementsInput, ReviewInput, ReviewerError, ReviewerOutput, SourceError,
 };
 use super::run_agents::{AgentRun, run_agents};
 use crate::review::domain::agent_results::{TicketContext, verify_agent_report};
 use crate::review::domain::callers::{CallerContext, CallerSite};
 use crate::review::domain::change_set::{ChangeSet, ChangeStatus, FileChange};
 use crate::review::domain::checks::CheckSpec;
+use crate::review::domain::feedback::apply_feedback;
 use crate::review::domain::finding::Finding;
 use crate::review::domain::gate::{GateInput, GatePolicy};
 use crate::review::domain::report::{ReviewReport, SkipReason, SkippedFile, TokenUsage};
@@ -78,6 +79,7 @@ pub struct ReviewChanges<S, R, C> {
     ignore: GlobSet,
     auditor: Option<Arc<dyn FindingAuditor>>,
     callers: Option<Arc<dyn CallerFinder>>,
+    feedback: Option<Arc<dyn FeedbackPolicy>>,
 }
 
 #[derive(Default)]
@@ -134,7 +136,7 @@ where
 {
     pub fn new(source: S, reviewer: R, checks: C, settings: ReviewSettings) -> Result<Self, ReviewError> {
         let ignore = build_globset(&settings.ignore_patterns)?;
-        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None, callers: None })
+        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None, callers: None, feedback: None })
     }
 
     pub fn with_auditor(mut self, auditor: Arc<dyn FindingAuditor>) -> Self {
@@ -145,6 +147,12 @@ where
     #[must_use]
     pub fn with_callers(mut self, finder: Arc<dyn CallerFinder>) -> Self {
         self.callers = Some(finder);
+        self
+    }
+
+    #[must_use]
+    pub fn with_feedback(mut self, policy: Arc<dyn FeedbackPolicy>) -> Self {
+        self.feedback = Some(policy);
         self
     }
 
@@ -237,6 +245,10 @@ where
         let policy = self.effective_gate();
         if policy.require_reproduce_for_critical {
             verification.accepted = demote_unproven(verification.accepted);
+        }
+        if let Some(feedback) = &self.feedback {
+            let assessed = feedback.assess(&verification.accepted).await;
+            verification.accepted = apply_feedback(verification.accepted, &assessed);
         }
         let requirements_report = requirements.map(|r| verify_assessments(&change_set, r, assessment.assessments));
         let incomplete = skipped.iter().any(|s| matches!(s.reason, SkipReason::ReviewFailed(_)));
@@ -388,6 +400,7 @@ mod tests {
     use crate::review::application::ports::AuditOutput;
     use crate::review::domain::change_set::fixtures::{added, file};
     use crate::review::domain::checks::{CheckOutcome, CheckResult};
+    use crate::review::domain::feedback::{FeedbackMark, FindingFeedback};
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::finding::{Demotion, Reproduce, Severity};
     use crate::review::domain::requirements::{AcceptanceCriterion, EvidenceRef};
@@ -506,6 +519,37 @@ mod tests {
         let report = use_case(vec![go_file("a.go")], reviewer, lenient).execute(None, &NoProgress).await.unwrap();
         assert!(!report.gate.passed);
         assert_eq!(report.findings[0].demoted, None);
+    }
+
+    struct DismissFirst;
+
+    impl FeedbackPolicy for DismissFirst {
+        fn assess<'a>(&'a self, findings: &'a [Finding]) -> BoxFuture<'a, Vec<FindingFeedback>> {
+            let count = findings.len();
+            Box::pin(async move {
+                (0..count)
+                    .map(|i| FindingFeedback { dismissed: i == 0, cap: Some(Severity::Minor), score: Some(20) })
+                    .collect()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn feedback_policy_dismisses_and_caps_accepted_findings() {
+        let mut proven = finding("a.go", 1, Severity::Critical, "total := compute(1)");
+        proven.reproduce = Reproduce::new("compute(1)", "returns 1", "returns 0", "");
+        let other = finding("a.go", 2, Severity::Major, "total := compute(1)");
+        let reviewer = FakeReviewer::new(vec![Ok(output(vec![proven, other], 0.0))]);
+        let report = use_case(vec![go_file("a.go")], reviewer, sequential())
+            .with_feedback(Arc::new(DismissFirst))
+            .execute(None, &NoProgress)
+            .await
+            .unwrap();
+        assert!(report.gate.passed);
+        let dismissed = report.findings.iter().find(|f| f.feedback.is_some()).unwrap();
+        assert_eq!(dismissed.feedback, Some(FeedbackMark::Dismissed));
+        assert!(report.findings.iter().all(|f| f.severity == Severity::Minor));
+        assert!(report.findings.iter().all(|f| matches!(f.demoted, Some(Demotion::LowPrecision { score: 20 }))));
     }
 
     struct FakeCallers;

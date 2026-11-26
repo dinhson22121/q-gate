@@ -31,13 +31,18 @@ impl Reproduce {
 #[serde(rename_all = "snake_case")]
 pub enum Demotion {
     MissingReproduce,
+    LowPrecision { score: u8 },
 }
 
 impl Demotion {
-    pub fn describe(self) -> &'static str {
+    pub fn describe(self) -> String {
         match self {
             Self::MissingReproduce => {
                 "reported as critical without concrete reproduce steps (input, expected, actual), so it counts as major"
+                    .to_string()
+            }
+            Self::LowPrecision { score } => {
+                format!("this kind of finding was often dismissed (precision {score}%), so its severity is capped")
             }
         }
     }
@@ -124,5 +129,17 @@ mod tests {
     #[test]
     fn demotion_has_a_description() {
         assert!(Demotion::MissingReproduce.describe().contains("reproduce"));
+        assert!(Demotion::LowPrecision { score: 30 }.describe().contains("precision 30%"));
+    }
+
+    #[test]
+    fn demotion_serializes_with_stable_shapes() {
+        assert_eq!(serde_json::to_value(Demotion::MissingReproduce).unwrap(), "missing_reproduce");
+        assert_eq!(
+            serde_json::to_value(Demotion::LowPrecision { score: 40 }).unwrap(),
+            serde_json::json!({"low_precision": {"score": 40}})
+        );
+        let back: Demotion = serde_json::from_value(serde_json::json!("missing_reproduce")).unwrap();
+        assert_eq!(back, Demotion::MissingReproduce);
     }
 }

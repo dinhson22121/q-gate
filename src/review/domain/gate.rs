@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use super::agent_results::{AgentReport, DesignMismatchKind, TestVerdict};
 use super::checks::CheckResult;
+use super::feedback::FeedbackMark;
 use super::finding::{Category, Confidence, Finding, Severity};
 use super::requirements::RequirementsReport;
 
@@ -74,7 +75,8 @@ pub struct GateInput<'a> {
 
 impl GatePolicy {
     pub fn is_blocking(&self, finding: &Finding) -> bool {
-        finding.severity >= self.fail_on
+        finding.feedback != Some(FeedbackMark::Dismissed)
+            && finding.severity >= self.fail_on
             && finding.confidence >= self.min_confidence
             && self.categories.contains(&finding.category)
     }
@@ -186,6 +188,16 @@ mod tests {
         let decision = GatePolicy::default().decide(only(&[finding("a.go", 1, Severity::Critical, "x")]));
         assert!(!decision.passed);
         assert_eq!(decision.blocking, vec![0]);
+    }
+
+    #[test]
+    fn dismissed_finding_never_blocks_even_when_security() {
+        let mut dismissed = finding("a.go", 1, Severity::Critical, "x");
+        dismissed.category = Category::Security;
+        dismissed.feedback = Some(FeedbackMark::Dismissed);
+        let decision = GatePolicy::default().decide(only(&[dismissed]));
+        assert!(decision.passed);
+        assert!(decision.blocking.is_empty());
     }
 
     #[test]
