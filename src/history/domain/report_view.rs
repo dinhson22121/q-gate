@@ -61,6 +61,19 @@ pub struct FindingView {
     pub prevention_rule: Option<PreventionRuleView>,
     #[serde(default)]
     pub source: Option<FindingSourceView>,
+    #[serde(default)]
+    pub reproduce: Option<ReproduceView>,
+    #[serde(default)]
+    pub demoted: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReproduceView {
+    pub input: String,
+    pub expected: String,
+    pub actual: String,
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,4 +189,32 @@ pub struct UsageView {
     pub cache_read_tokens: u64,
     #[serde(default)]
     pub cache_write_tokens: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::review::domain::finding::fixtures::finding;
+    use crate::review::domain::finding::{Demotion, Reproduce};
+
+    #[test]
+    fn live_finding_with_reproduce_and_demotion_reads_into_the_view() {
+        let live = crate::review::application::Finding {
+            reproduce: Reproduce::new("f(0)", "0", "panic", "go test ./f"),
+            demoted: Some(Demotion::MissingReproduce),
+            ..finding("a.go", 1, Severity::Major, "x")
+        };
+        let view: FindingView = serde_json::from_value(serde_json::to_value(&live).unwrap()).unwrap();
+        let reproduce = view.reproduce.unwrap();
+        assert_eq!((reproduce.input.as_str(), reproduce.command.as_deref()), ("f(0)", Some("go test ./f")));
+        assert_eq!(view.demoted.as_deref(), Some("missing_reproduce"));
+    }
+
+    #[test]
+    fn findings_stored_before_reproduce_existed_still_read() {
+        let old = serde_json::json!({"file": "a.go", "line": 1, "severity": "critical", "category": "security",
+                                     "confidence": "high", "title": "t"});
+        let view: FindingView = serde_json::from_value(old).unwrap();
+        assert_eq!((view.reproduce, view.demoted), (None, None));
+    }
 }

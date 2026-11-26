@@ -6,9 +6,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::sandbox::application::ExecBackend;
-use application::{BaseRunStore, DetectRegressions};
+use application::{BaseRunStore, DetectRegressions, DetectSuiteRegressions};
 use domain::Regression;
-use infrastructure::{GoCli, locate_test, package_rel_dir};
+use infrastructure::{GoCli, all_suites, locate_test, package_rel_dir};
 
 pub fn build(backend: Arc<dyn ExecBackend>, base_store: Option<Arc<dyn BaseRunStore>>) -> DetectRegressions {
     let detect = DetectRegressions::new(Arc::new(GoCli::new(backend)));
@@ -18,7 +18,21 @@ pub fn build(backend: Arc<dyn ExecBackend>, base_store: Option<Arc<dyn BaseRunSt
     }
 }
 
+pub fn build_suites(
+    backend: Arc<dyn ExecBackend>,
+    base_store: Option<Arc<dyn BaseRunStore>>,
+) -> DetectSuiteRegressions {
+    let detect = DetectSuiteRegressions::new(all_suites(&backend));
+    match base_store {
+        Some(store) => detect.with_base_store(store),
+        None => detect,
+    }
+}
+
 pub fn locate_failure(snapshot: &Path, regression: &Regression) -> Option<(String, u32)> {
+    if regression.location.is_some() {
+        return regression.location.clone();
+    }
     locate_test(snapshot, &regression.package, &regression.test).or_else(|| {
         let dir = package_rel_dir(snapshot, &regression.package)?;
         Some((if dir.is_empty() { ".".to_string() } else { dir }, 1))

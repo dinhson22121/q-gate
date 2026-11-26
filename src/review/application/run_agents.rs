@@ -5,6 +5,7 @@ use futures::{StreamExt, stream};
 
 use super::agent_ports::{AgentInput, ArchitectureReviewer, DesignReviewer, TestAgent, TicketAnalyst};
 use crate::review::domain::agent_results::{AgentReport, TicketBrief, TicketContext};
+use crate::review::domain::callers::CallerSite;
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::requirements::Requirements;
 
@@ -32,7 +33,12 @@ pub struct AgentRun<'a> {
     pub snapshot_root: Option<&'a Path>,
 }
 
-pub async fn run_agents(run: &AgentRun<'_>, files: &[FileChange], requirements: Option<&Requirements>) -> AgentReport {
+pub async fn run_agents(
+    run: &AgentRun<'_>,
+    files: &[FileChange],
+    requirements: Option<&Requirements>,
+    callers: &[CallerSite],
+) -> AgentReport {
     let input = AgentInput {
         files,
         requirements,
@@ -40,6 +46,7 @@ pub async fn run_agents(run: &AgentRun<'_>, files: &[FileChange], requirements: 
         commit: run.commit,
         repo_root: run.repo_root,
         snapshot_root: run.snapshot_root,
+        callers,
     };
     let suite = run.suite;
     let mut notes = Vec::new();
@@ -232,7 +239,7 @@ mod tests {
 
     async fn run(suite: &AgentSuite, requirements: Option<&Requirements>) -> AgentReport {
         let run = AgentRun { suite, ticket: None, commit: "abc", repo_root: Path::new("/repo"), snapshot_root: None };
-        run_agents(&run, &[], requirements).await
+        run_agents(&run, &[], requirements, &[]).await
     }
 
     #[tokio::test]

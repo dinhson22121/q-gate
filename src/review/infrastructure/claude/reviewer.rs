@@ -23,7 +23,7 @@ impl ClaudeReviewer {
 impl CodeReviewer for ClaudeReviewer {
     async fn review(&self, input: ReviewInput<'_>) -> Result<ReviewerOutput, ReviewerError> {
         let system = format!("{REVIEW_SYSTEM_PROMPT}\n\n{}", guidelines_block(input.guidelines));
-        let user = review_user_message(input.files);
+        let user = review_user_message(input.files, input.callers);
         let answer =
             self.model.structured::<ReviewAnswer>(&system, &user, &review_schema()).await.map_err(reviewer_error)?;
         let (usage, cost_usd) = spent(&answer);
@@ -94,7 +94,7 @@ mod tests {
     async fn review_with(fake: &Arc<FakeModel>) -> Result<ReviewerOutput, ReviewerError> {
         let files = files();
         ClaudeReviewer::new(fake.clone())
-            .review(ReviewInput { files: &files, guidelines: "Prefer explicit errors." })
+            .review(ReviewInput { files: &files, guidelines: "Prefer explicit errors.", callers: &[] })
             .await
     }
 

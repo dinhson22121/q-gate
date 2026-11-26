@@ -20,12 +20,12 @@ fn failing_run_orders_blocking_then_warnings() {
         headings(&markdown),
         vec![
             "# qgate review: shop-api feature/SHOP-7-pay 3f9c2ab - FAILED",
-            "## Do this first (blocking)",
+            "## Critical: must fix (blocking)",
             "### 1. Required check \"unit\" failed",
             "### 2. SQL injection",
             "### 3. Acceptance criterion AC-2 is not met: Receipt | is emailed",
             "### 4. Design mismatch (copy) in Figma frame \"Checkout / Pay\"",
-            "## Should fix (warnings)",
+            "## Major: can defer (warnings)",
             "### W1. Magic number",
             "### W2. Generated test S2 fails: Total includes tax",
             "### W3. Generated test S1 was inconclusive",
@@ -222,11 +222,11 @@ The quality gate passed.
 - Commit: `3f9c2ab7d1e04c5b8a6f9e2d1c0b3a4f5e6d7c8b`
 - Reviewed at: 2026-11-20 14:30:05 UTC
 
-## Do this first (blocking)
+## Critical: must fix (blocking)
 
 Nothing blocking.
 
-## Should fix (warnings)
+## Major: can defer (warnings)
 
 No warnings.
 
@@ -240,7 +240,7 @@ No acceptance criteria were checked for this commit.
 
 ## For coding agents
 
-1. Fix the items under \"Do this first\" in order; each one is self-contained.
+1. Fix the items under \"Critical: must fix\" in order; each one is self-contained.
 2. Do not weaken, skip or delete the generated tests: they encode the acceptance criteria. They are not in your \
 working tree; to reproduce, save the test source at the path shown and run the reproduce command. Change the \
 production code, not the assertions.
@@ -357,4 +357,19 @@ fn findings_carry_their_rule_and_the_run_lists_rules_to_add() {
 
     doc.rules_to_add.clear();
     assert!(!render_markdown(&doc).contains("## Rules to add"), "nothing new, no section");
+}
+
+#[test]
+fn finding_task_carries_reproduce_block_expected_and_demotion_note() {
+    use crate::review::application::{Demotion, Reproduce};
+    let mut report = failing_report();
+    report.findings[0].reproduce = Reproduce::new("f(-1)", "an error", "returns -1", "go test -run TestF ./f");
+    report.findings[0].demoted = Some(Demotion::MissingReproduce);
+    let markdown = render_markdown(&HandoffDocument::build(&input(&report)));
+    assert!(
+        markdown
+            .contains("Input:    f(-1)\nExpected: an error\nActual:   returns -1\nRun:      go test -run TestF ./f")
+    );
+    assert!(markdown.contains("Expected:\n\nan error"));
+    assert!(markdown.contains("- Demoted: reported as critical without concrete reproduce steps"));
 }

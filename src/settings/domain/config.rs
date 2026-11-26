@@ -117,6 +117,7 @@ pub struct GateConfig {
     pub min_confidence: Confidence,
     pub fail_on_unmet_criteria: bool,
     pub fail_on_incomplete: bool,
+    pub require_reproduce_for_critical: bool,
 }
 
 impl Default for GateConfig {
@@ -128,6 +129,7 @@ impl Default for GateConfig {
             min_confidence: policy.min_confidence,
             fail_on_unmet_criteria: policy.fail_on_unmet_criteria,
             fail_on_incomplete: policy.fail_on_incomplete,
+            require_reproduce_for_critical: policy.require_reproduce_for_critical,
         }
     }
 }
@@ -272,6 +274,7 @@ impl Config {
             min_confidence: self.gate.min_confidence,
             fail_on_unmet_criteria: self.gate.fail_on_unmet_criteria,
             fail_on_incomplete: self.gate.fail_on_incomplete,
+            require_reproduce_for_critical: self.gate.require_reproduce_for_critical,
             ..GatePolicy::default()
         }
     }
@@ -317,6 +320,13 @@ mod tests {
         assert_eq!(config.review.guideline_files.len(), 4);
         assert!(config.watch.enabled && config.watch.review_on_push);
         assert_eq!(config.gate_policy(), GatePolicy::default());
+    }
+
+    #[test]
+    fn repository_can_turn_off_the_reproduce_requirement() {
+        assert!(GatePolicy::default().require_reproduce_for_critical);
+        let config: Config = toml::from_str("[gate]\nrequire_reproduce_for_critical = false\n").unwrap();
+        assert!(!config.gate_policy().require_reproduce_for_critical);
     }
 
     #[test]

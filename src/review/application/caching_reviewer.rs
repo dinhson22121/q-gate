@@ -8,7 +8,7 @@ use crate::review::domain::finding::Finding;
 use std::sync::Arc;
 
 const KIND: &str = "file_review";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 pub struct CachingCodeReviewer<R> {
     inner: R,
@@ -24,6 +24,12 @@ impl<R: CodeReviewer> CachingCodeReviewer<R> {
     fn batch_key(&self, input: &ReviewInput<'_>) -> ContentKey {
         let key = self.tags.apply(ContentKey::new(KIND, SCHEMA_VERSION));
         let key = key.with_input("guidelines", digest([input.guidelines]));
+        let callers: Vec<String> = input
+            .callers
+            .iter()
+            .map(|c| format!("{}|{}|{}|{}|{}", c.symbol, c.defined_in, c.file, c.line, c.snippet))
+            .collect();
+        let key = key.with_input("callers", digest(callers.iter().map(String::as_str)));
         key.with_inputs(input.files.iter().map(|f| (format!("file:{}", f.path), file_digest(f))))
     }
 }

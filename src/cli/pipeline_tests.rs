@@ -83,7 +83,9 @@ fn findings() -> Value {
          "title": "SQL injection", "explanation": "id is concatenated into SQL",
          "evidence": VULNERABLE_LINE.trim(), "suggestion": "use a placeholder",
          "prevention_rule": "Build SQL only with bound parameters, never by string concatenation.",
-         "rule_scope": "**/*.go"},
+         "rule_scope": "**/*.go",
+         "reproduce": {"input": "id = \"1 OR 1=1\"", "expected": "only the row with id 1",
+                       "actual": "every row of the table", "command": ""}},
         {"file": "main.go", "line": 4, "severity": "major", "category": "correctness", "confidence": "high",
          "title": "invented", "explanation": "not real", "evidence": "os.RemoveAll(path)", "suggestion": "",
          "prevention_rule": "Never delete paths taken from input.", "rule_scope": ""}
@@ -149,7 +151,11 @@ async fn commit_review_runs_checks_verifies_findings_and_records_history() {
     let run_id = outcome.run_id.expect("run recorded");
     let stored = GetRun::new(history).execute(run_id).unwrap().expect("run exists");
     assert_eq!(stored.commit.as_deref(), Some(sha.as_str()));
-    assert_eq!(stored.ticket_key.as_deref(), Some("SHOP-7"), "detected ticket key is recorded even without a ticket source");
+    assert_eq!(
+        stored.ticket_key.as_deref(),
+        Some("SHOP-7"),
+        "detected ticket key is recorded even without a ticket source"
+    );
     assert_eq!(stored.status, RunStatus::Failed);
     let leftovers = std::fs::read_dir(work.path().join("data/work")).map(|d| d.count()).unwrap_or(0);
     assert_eq!(leftovers, 0, "snapshot cleaned up");

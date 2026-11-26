@@ -138,6 +138,7 @@ async fn run(h: &Harness, files: &[FileChange], commit: &str) -> TestResult {
         commit,
         repo_root: Path::new("/repo"),
         snapshot_root: None,
+        callers: &[],
     };
     h.agent.run(&input, &scenario()).await
 }
@@ -158,6 +159,7 @@ async fn passed_result_is_reused_with_a_note_naming_the_original_commit() {
         commit: "aaa",
         repo_root: Path::new("/repo"),
         snapshot_root: None,
+        callers: &[],
     };
     first.agent.run(&input, &scenario()).await;
     let second = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), ids(), tags(), false, cache.clone());

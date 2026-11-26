@@ -39,6 +39,8 @@ fn finding(file: &str, line: u32, severity: Severity, category: Category, title:
         suggestion: Some(format!("Fix {title}.")),
         prevention_rule: None,
         source: FindingSource::Llm,
+        reproduce: None,
+        demoted: None,
     }
 }
 

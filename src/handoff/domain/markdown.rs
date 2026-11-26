@@ -11,8 +11,8 @@ const WARNING_PREFIX: &str = "W";
 pub fn render_markdown(doc: &HandoffDocument) -> String {
     let mut out = String::new();
     header(&mut out, doc);
-    tasks(&mut out, "Do this first (blocking)", BLOCKING_PREFIX, &doc.blocking, "Nothing blocking.");
-    tasks(&mut out, "Should fix (warnings)", WARNING_PREFIX, &doc.warnings, "No warnings.");
+    tasks(&mut out, "Critical: must fix (blocking)", BLOCKING_PREFIX, &doc.blocking, "Nothing blocking.");
+    tasks(&mut out, "Major: can defer (warnings)", WARNING_PREFIX, &doc.warnings, "No warnings.");
     criteria(&mut out, &doc.criteria);
     rules_to_add(&mut out, doc);
     context(&mut out, doc);
@@ -192,7 +192,7 @@ fn agent_instructions(out: &mut String, doc: &HandoffDocument) {
         None => "reference the ticket key in the branch name or commit message".to_string(),
     };
     out.push_str("## For coding agents\n\n");
-    out.push_str("1. Fix the items under \"Do this first\" in order; each one is self-contained.\n");
+    out.push_str("1. Fix the items under \"Critical: must fix\" in order; each one is self-contained.\n");
     out.push_str(
         "2. Do not weaken, skip or delete the generated tests: they encode the acceptance criteria. They are not \
          in your working tree; to reproduce, save the test source at the path shown and run the reproduce \

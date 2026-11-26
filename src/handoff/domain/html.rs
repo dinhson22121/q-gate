@@ -215,12 +215,28 @@ fn finding_card(out: &mut String, f: &Finding, is_blocking: bool) {
     if is_blocking {
         tags.push_str(&tag("failed", "blocking"));
     }
+    if f.demoted.is_some() {
+        tags.push_str(&tag("unclear", "demoted"));
+    }
     let _ = writeln!(out, "<div class=\"{class}\"><h3>{tags}{}</h3>", escape(&f.title));
     let _ = writeln!(out, "<p class=\"loc\">{}</p>", escape(&location(&f.file, f.line)));
     if !f.evidence.trim().is_empty() {
         out.push_str(&pre(&f.evidence));
     }
     out.push_str(&labelled("Explanation", &f.explanation));
+    if let Some(demotion) = f.demoted {
+        out.push_str(&labelled("Demoted", demotion.describe()));
+    }
+    if let Some(reproduce) = &f.reproduce {
+        out.push_str("<div class=\"rule\"><span class=\"label\">Reproduce</span>\n");
+        out.push_str(&labelled("Input", &reproduce.input));
+        out.push_str(&labelled("Expected", &reproduce.expected));
+        out.push_str(&labelled("Actual", &reproduce.actual));
+        if let Some(command) = &reproduce.command {
+            out.push_str(&pre(command));
+        }
+        out.push_str("</div>\n");
+    }
     if let Some(suggestion) = f.suggestion.as_deref().filter(|s| !s.trim().is_empty()) {
         out.push_str(&labelled("Suggestion", suggestion));
     }
@@ -395,6 +411,20 @@ mod tests {
     fn render(report: &ReviewReport) -> String {
         let input = HandoffInput { meta: meta(), report, rules: BlockingRules::default() };
         render_html(&HandoffDocument::build(&input), &input)
+    }
+
+    #[test]
+    fn finding_card_shows_reproduce_and_demotion_escaped() {
+        use crate::review::application::{Demotion, Reproduce};
+        let mut report = failing_report();
+        report.findings[0].reproduce = Reproduce::new("name=<script>", "rejected", "stored as-is", "go test ./x");
+        report.findings[0].demoted = Some(Demotion::MissingReproduce);
+        let html = render(&report);
+        assert!(html.contains("<span class=\"label\">Input:</span> name=&lt;script&gt;"));
+        assert!(html.contains("<span class=\"label\">Actual:</span> stored as-is"));
+        assert!(html.contains("<pre>go test ./x</pre>"));
+        assert!(html.contains("tag unclear\">demoted"));
+        assert!(!html.contains("<script>"));
     }
 
     fn position(html: &str, needle: &str) -> usize {

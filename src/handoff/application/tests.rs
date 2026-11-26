@@ -226,7 +226,7 @@ fn end_to_end_with_the_filesystem_sink() {
     let outcome = ExportReview::new(sink.clone(), &OutputConfig::default()).unwrap().execute(&input);
     assert!(outcome.is_ok(), "{:?}", outcome.errors);
     let latest = std::fs::read_to_string(dir.path().join("reviews").join(DIR).join("latest.md")).unwrap();
-    assert!(latest.contains("## Do this first (blocking)"));
+    assert!(latest.contains("## Critical: must fix (blocking)"));
     let rules = std::fs::read_to_string(dir.path().join("reviews").join(RULES_MD)).unwrap();
     assert!(rules.contains("**[critical] Build SQL with bound parameters only.**"), "{rules}");
     assert!(dir.path().join("reviews").join(RULES_STATE).is_file());

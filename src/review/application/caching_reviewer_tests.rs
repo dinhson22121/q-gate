@@ -51,7 +51,7 @@ fn files(content: &str) -> Vec<FileChange> {
 }
 
 async fn review(r: &CachingCodeReviewer<CountingReviewer>, files: &[FileChange], guidelines: &str) -> ReviewerOutput {
-    r.review(ReviewInput { files, guidelines }).await.unwrap()
+    r.review(ReviewInput { files, guidelines, callers: &[] }).await.unwrap()
 }
 
 fn calls(r: &CachingCodeReviewer<CountingReviewer>) -> u32 {
@@ -106,7 +106,7 @@ async fn a_different_file_set_in_the_batch_is_a_miss() {
 async fn errors_are_not_cached_and_no_cache_bypasses() {
     let cache: Arc<MemoryCache> = Arc::default();
     let failing = reviewer(&cache, tags(), false, true);
-    assert!(failing.review(ReviewInput { files: &files("x"), guidelines: "" }).await.is_err());
+    assert!(failing.review(ReviewInput { files: &files("x"), guidelines: "", callers: &[] }).await.is_err());
     assert!(cache.map.lock().unwrap().is_empty());
 
     let bypass = reviewer(&cache, tags(), true, false);
@@ -125,4 +125,24 @@ async fn requirements_assessment_always_reaches_the_inner_reviewer() {
         r.assess_requirements(RequirementsInput { files: &[], requirements: &requirements }).await.unwrap();
     }
     assert_eq!(*r.inner.assessments.lock().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn different_callers_miss_the_cache_and_same_callers_hit_it() {
+    use crate::review::domain::callers::CallerSite;
+    let cache = Arc::new(MemoryCache::default());
+    let r = reviewer(&cache, tags(), false, false);
+    let site = |line: u32| CallerSite {
+        symbol: "Total".into(),
+        defined_in: "a.go".into(),
+        file: "api.go".into(),
+        line,
+        snippet: "Total()".into(),
+    };
+    let files = files("x := 1");
+    r.review(ReviewInput { files: &files, guidelines: "", callers: &[site(1)] }).await.unwrap();
+    r.review(ReviewInput { files: &files, guidelines: "", callers: &[site(1)] }).await.unwrap();
+    assert_eq!(calls(&r), 1);
+    r.review(ReviewInput { files: &files, guidelines: "", callers: &[site(2)] }).await.unwrap();
+    assert_eq!(calls(&r), 2);
 }

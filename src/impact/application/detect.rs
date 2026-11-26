@@ -9,7 +9,7 @@ use crate::impact::domain::{
 };
 
 pub const DEFAULT_MAX_PACKAGES: usize = 50;
-const EVIDENCE_TAIL_BYTES: usize = 4000;
+pub(super) const EVIDENCE_TAIL_BYTES: usize = 4000;
 
 pub struct DetectRequest {
     pub base_sha: String,
@@ -189,7 +189,7 @@ fn regression(key: &TestKey, rerun: &TestRun) -> Regression {
     Regression::new(&key.package, &key.test, tail(output, EVIDENCE_TAIL_BYTES))
 }
 
-fn tail(text: &str, max_bytes: usize) -> String {
+pub(super) fn tail(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();
     }
@@ -200,7 +200,7 @@ fn tail(text: &str, max_bytes: usize) -> String {
     format!("...{}", &text[start..])
 }
 
-fn names(keys: &[TestKey]) -> String {
+pub(super) fn names(keys: &[TestKey]) -> String {
     let mut shown: Vec<String> = keys.iter().take(10).map(|k| format!("{}.{}", k.package, k.test)).collect();
     if keys.len() > shown.len() {
         shown.push(format!("... +{} more", keys.len() - shown.len()));

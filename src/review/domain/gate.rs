@@ -18,6 +18,7 @@ pub struct GatePolicy {
     pub min_edge_pass_pct: u32,
     pub fail_on_rule_violation: bool,
     pub fail_on_design: Vec<DesignMismatchKind>,
+    pub require_reproduce_for_critical: bool,
 }
 
 impl Default for GatePolicy {
@@ -40,6 +41,7 @@ impl Default for GatePolicy {
             min_edge_pass_pct: 80,
             fail_on_rule_violation: false,
             fail_on_design: Vec::new(),
+            require_reproduce_for_critical: true,
         }
     }
 }

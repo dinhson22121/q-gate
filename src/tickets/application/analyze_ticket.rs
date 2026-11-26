@@ -5,14 +5,14 @@ use futures::future::BoxFuture;
 use serde_json::json;
 
 use crate::review::application::agent_ports::{AgentError, AgentInput, TicketAnalyst};
-use crate::review::application::{AcceptanceCriterion, TestScenario, TicketBrief};
+use crate::review::application::{AcceptanceCriterion, CallerSite, TestScenario, TicketBrief};
 use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange};
 use crate::tickets::domain::sha256_hex;
 
 use super::ports::{BriefCache, BriefGenerator, BriefRequest};
 
 pub const MAX_CHANGE_VIEW_CHARS: usize = 60_000;
-const BRIEF_FORMAT_VERSION: &str = "ticket-brief-v1";
+const BRIEF_FORMAT_VERSION: &str = "ticket-brief-v2";
 const SCENARIO_ID_PREFIX: &str = "S";
 
 pub struct AnalyzeTicket {
@@ -38,6 +38,7 @@ impl AnalyzeTicket {
             description,
             design_links,
             change_view: render_change_view(input.files, MAX_CHANGE_VIEW_CHARS),
+            callers: render_callers(input.callers),
             max_scenarios: self.max_scenarios,
         };
         let hash = brief_hash(&request, input.files);
@@ -72,6 +73,7 @@ fn brief_hash(request: &BriefRequest, files: &[FileChange]) -> String {
         "design_links": request.design_links,
         "paths": paths,
         "diff": diff_hash,
+        "callers": request.callers,
         "max_scenarios": request.max_scenarios,
     });
     sha256_hex(material.to_string().as_bytes())
@@ -85,23 +87,27 @@ pub fn validate_brief(raw: TicketBrief, criteria: &[AcceptanceCriterion], max_sc
         .into_iter()
         .filter_map(|scenario| {
             let ids = dedup_trimmed(scenario.criterion_ids);
-            let is_valid = !ids.is_empty()
-                && ids.iter().all(|id| known.contains(id.as_str()))
+            let is_valid = ids.iter().all(|id| known.contains(id.as_str()))
                 && !scenario.title.trim().is_empty()
                 && !scenario.then.trim().is_empty();
             is_valid.then_some(TestScenario { criterion_ids: ids, ..scenario })
         })
         .collect();
     let dropped = proposed - valid.len();
-    let scenarios = valid
+    let (must_pass, edge): (Vec<TestScenario>, Vec<TestScenario>) =
+        valid.into_iter().partition(|s| !s.criterion_ids.is_empty());
+    let scenarios = must_pass
         .into_iter()
+        .chain(edge)
         .take(max_scenarios)
         .enumerate()
         .map(|(index, scenario)| TestScenario { id: format!("{SCENARIO_ID_PREFIX}{}", index + 1), ..scenario })
         .collect();
     let mut context = raw.context.trim().to_string();
     if dropped > 0 {
-        let note = format!("(qgate dropped {dropped} proposed scenario(s) citing unknown or no acceptance criteria.)");
+        let note = format!(
+            "(qgate dropped {dropped} proposed scenario(s) citing unknown acceptance criteria or missing a title or outcome.)"
+        );
         context = if context.is_empty() { note } else { format!("{context} {note}") };
     }
     TicketBrief { scenarios, implicit_requirements: dedup_trimmed(raw.implicit_requirements), context }
@@ -115,6 +121,13 @@ fn dedup_trimmed(items: Vec<String>) -> Vec<String> {
         }
     }
     unique
+}
+
+pub fn render_callers(callers: &[CallerSite]) -> String {
+    callers
+        .iter()
+        .map(|c| format!("- {}:{} calls {} (defined in {}): {}\n", c.file, c.line, c.symbol, c.defined_in, c.snippet))
+        .collect()
 }
 
 pub fn render_change_view(files: &[FileChange], max_chars: usize) -> String {

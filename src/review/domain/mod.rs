@@ -1,9 +1,11 @@
 pub mod agent_results;
+pub mod callers;
 pub mod change_set;
 pub mod checks;
 pub mod finding;
 pub mod gate;
 pub mod language;
 pub mod report;
+pub mod reproduce;
 pub mod requirements;
 pub mod verification;

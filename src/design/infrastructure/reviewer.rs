@@ -115,6 +115,7 @@ mod tests {
             commit: "abc",
             repo_root: Path::new("/nonexistent"),
             snapshot_root: None,
+            callers: &[],
         };
         reviewer().review(&input, None).await
     }

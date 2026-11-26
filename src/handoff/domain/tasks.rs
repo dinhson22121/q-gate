@@ -1,7 +1,7 @@
 use super::document::{CodeBlock, Fact, HandoffInput, Task, TaskKind};
 use super::text::language_of;
 use crate::review::application::{
-    CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, DesignMismatchKind, EvidenceRef, Finding,
+    CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, DesignMismatchKind, EvidenceRef, Finding, Reproduce,
     RequirementsReport, RuleViolation, Severity, TestEvidence, TestResult, TestVerdict,
 };
 
@@ -166,15 +166,27 @@ fn finding_task(finding: &Finding) -> Task {
             fact("Source", source),
         ]
         .into_iter()
+        .chain(finding.demoted.map(|d| fact("Demoted", d.describe())))
         .chain(finding.prevention_rule.as_ref().map(|rule| match &rule.scope {
             Some(scope) => fact("Rule", format!("{} (files: {scope})", rule.text)),
             None => fact("Rule", rule.text.as_str()),
         }))
         .collect(),
-        code: vec![code("Evidence", language_of(&finding.file), &finding.evidence)],
-        expected: None,
+        code: std::iter::once(code("Evidence", language_of(&finding.file), &finding.evidence))
+            .chain(finding.reproduce.as_ref().map(reproduce_block))
+            .collect(),
+        expected: finding.reproduce.as_ref().map(|r| r.expected.clone()),
         fix: finding.suggestion.as_deref().and_then(non_empty),
     }
+}
+
+fn reproduce_block(reproduce: &Reproduce) -> CodeBlock {
+    let mut text =
+        format!("Input:    {}\nExpected: {}\nActual:   {}", reproduce.input, reproduce.expected, reproduce.actual);
+    if let Some(command) = &reproduce.command {
+        text.push_str(&format!("\nRun:      {command}"));
+    }
+    code("Reproduce", "text", &text)
 }
 
 fn test_task(test: &TestResult, kind: TaskKind) -> Task {

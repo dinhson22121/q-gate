@@ -1,9 +1,12 @@
 use crate::impact::application::Regression;
 use crate::quality::{QualityCategory, QualityFinding, Verdict};
-use crate::review::domain::finding::{Category, Confidence, Finding, FindingSource, PreventionRule, Severity};
+use crate::review::domain::finding::{
+    Category, Confidence, Finding, FindingSource, PreventionRule, Reproduce, Severity,
+};
 
 const REGRESSION_TOOL: &str = "regression";
 const FIRST_LINE: u32 = 1;
+const REPRODUCE_OUTPUT_LINES: usize = 15;
 
 pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
     let (severity, confidence) = match found.gate_verdict() {
@@ -34,12 +37,35 @@ pub fn quality_finding_to_finding(found: &QualityFinding) -> Finding {
             found.prevention_rule.scope.as_deref().unwrap_or_default(),
         ),
         source: FindingSource::StaticTool(found.tool.as_str().to_string()),
+        reproduce: None,
+        demoted: None,
     }
 }
 
 pub fn regression_to_finding(regression: &Regression, location: Option<(String, u32)>) -> Finding {
     let (file, line) = location.unwrap_or_else(|| (regression.package.clone(), FIRST_LINE));
-    let subject = if regression.test.is_empty() { "package tests".to_string() } else { regression.test.clone() };
+    let (title, explanation) = if regression.test.is_empty() {
+        (
+            format!("Regression: the {} tests fail after this change", regression.package),
+            format!(
+                "The {} tests passed on the base commit and fail on this one (confirmed by a re-run).",
+                regression.package
+            ),
+        )
+    } else {
+        (
+            format!("Regression: {} fails after this change", regression.test),
+            format!(
+                "{} in {} passed on the base commit and fails on this one (confirmed by a re-run).",
+                regression.test, regression.package
+            ),
+        )
+    };
+    let trigger = if regression.test.is_empty() {
+        format!("run the {} tests", regression.package)
+    } else {
+        format!("run {} from {}", regression.test, regression.package)
+    };
     let evidence = &regression.evidence;
     Finding {
         file,
@@ -47,11 +73,8 @@ pub fn regression_to_finding(regression: &Regression, location: Option<(String, 
         severity: Severity::Critical,
         category: Category::Correctness,
         confidence: Confidence::High,
-        title: format!("Regression: {subject} fails after this change"),
-        explanation: format!(
-            "{subject} in {} passed on the base commit and fails on this one (confirmed by a re-run).",
-            regression.package
-        ),
+        title,
+        explanation,
         evidence: format!(
             "{}\npassed on base; reproduce: {}",
             evidence.head_output_tail.trim_end(),
@@ -63,7 +86,19 @@ pub fn regression_to_finding(regression: &Regression, location: Option<(String, 
         )),
         prevention_rule: PreventionRule::new(&regression.prevention_rule, ""),
         source: FindingSource::StaticTool(REGRESSION_TOOL.to_string()),
+        reproduce: Reproduce::new(
+            &trigger,
+            "passes, as it does on the base commit",
+            &format!("fails:\n{}", last_lines(&evidence.head_output_tail, REPRODUCE_OUTPUT_LINES)),
+            &evidence.reproduce_command,
+        ),
+        demoted: None,
     }
+}
+
+fn last_lines(text: &str, count: usize) -> String {
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    lines[lines.len().saturating_sub(count)..].join("\n")
 }
 
 #[cfg(test)]
@@ -168,8 +203,19 @@ mod tests {
     }
 
     #[test]
+    fn regression_carries_structured_reproduce_with_the_tail_of_the_output() {
+        let output = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let finding = regression_to_finding(&Regression::new("shop/cart", "TestTotal", output), None);
+        let reproduce = finding.reproduce.expect("a regression is proven by its test run");
+        assert_eq!(reproduce.command.as_deref(), Some("go test -count=1 -run '^TestTotal$' shop/cart"));
+        assert!(reproduce.expected.contains("base commit"));
+        assert!(reproduce.actual.ends_with("line 20") && !reproduce.actual.contains("line 5\n"));
+        assert_eq!(last_lines("a\nb\nc\n", 2), "b\nc");
+    }
+
+    #[test]
     fn package_level_regression_names_the_package_tests() {
         let finding = regression_to_finding(&Regression::new("shop/cart", "", String::new()), None);
-        assert!(finding.title.contains("package tests"));
+        assert_eq!(finding.title, "Regression: the shop/cart tests fail after this change");
     }
 }

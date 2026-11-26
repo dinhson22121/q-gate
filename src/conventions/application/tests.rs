@@ -240,7 +240,15 @@ fn change() -> FileChange {
 }
 
 fn input<'a>(files: &'a [FileChange], root: &'a Path) -> AgentInput<'a> {
-    AgentInput { files, requirements: None, ticket: None, commit: "abc", repo_root: root, snapshot_root: None }
+    AgentInput {
+        files,
+        requirements: None,
+        ticket: None,
+        commit: "abc",
+        repo_root: root,
+        snapshot_root: None,
+        callers: &[],
+    }
 }
 
 fn violation(rule_id: &str, evidence: &str) -> ViolationDraft {

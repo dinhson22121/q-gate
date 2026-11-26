@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub use super::reproduce::{Demotion, Reproduce};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -151,6 +153,10 @@ pub struct Finding {
     pub suggestion: Option<String>,
     pub prevention_rule: Option<PreventionRule>,
     pub source: FindingSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reproduce: Option<Reproduce>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demoted: Option<Demotion>,
 }
 
 #[cfg(test)]
@@ -170,6 +176,8 @@ pub(crate) mod fixtures {
             suggestion: None,
             prevention_rule: None,
             source: FindingSource::Llm,
+            reproduce: None,
+            demoted: None,
         }
     }
 }

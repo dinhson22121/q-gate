@@ -158,6 +158,15 @@ fn render_finding(out: &mut String, finding: &Finding, blocking: bool, color: bo
     for line in finding.evidence.lines() {
         let _ = writeln!(out, "      │ {line}");
     }
+    if let Some(demotion) = finding.demoted {
+        let _ = writeln!(out, "      demoted: {}", demotion.describe());
+    }
+    if let Some(r) = &finding.reproduce {
+        let _ = writeln!(out, "      reproduce: {} → expected {}, got {}", r.input, r.expected, r.actual);
+        if let Some(command) = &r.command {
+            let _ = writeln!(out, "      run: {command}");
+        }
+    }
     if let Some(suggestion) = &finding.suggestion {
         let _ = writeln!(out, "      fix: {suggestion}");
     }
@@ -283,6 +292,8 @@ mod tests {
             suggestion: Some("use placeholders".into()),
             prevention_rule: None,
             source: FindingSource::Llm,
+            reproduce: None,
+            demoted: None,
         }
     }
 
@@ -347,6 +358,24 @@ mod tests {
         assert!(text.contains("FAILED — 1 blocking finding(s); unmet criteria: AC-1; failed checks: unit"));
         assert!(text.contains("est. $0.09"));
         assert!(!text.contains('\u{1b}'), "no ANSI codes without color");
+    }
+
+    #[test]
+    fn terminal_output_shows_reproduce_and_demotion() {
+        let mut report = report();
+        report.findings[0].reproduce =
+            crate::review::application::Reproduce::new("id=1 OR 1=1", "one row", "all rows", "curl /u?id=1");
+        report.findings[0].demoted = Some(crate::review::application::Demotion::MissingReproduce);
+        let view = TerminalView {
+            report: &report,
+            filter: DisplayFilter { min_severity: Severity::Minor, min_confidence: Confidence::Medium },
+            ticket_note: None,
+            color: false,
+        };
+        let text = render_terminal(&view);
+        assert!(text.contains("reproduce: id=1 OR 1=1 → expected one row, got all rows"));
+        assert!(text.contains("run: curl /u?id=1"));
+        assert!(text.contains("demoted: reported as critical without concrete reproduce steps"));
     }
 
     #[test]

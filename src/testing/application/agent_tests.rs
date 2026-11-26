@@ -63,6 +63,7 @@ fn input<'a>(files: &'a [FileChange], requirements: &'a Requirements, snapshot: 
         commit: COMMIT,
         repo_root: Path::new("/repos/shop"),
         snapshot_root: snapshot,
+        callers: &[],
     }
 }
 

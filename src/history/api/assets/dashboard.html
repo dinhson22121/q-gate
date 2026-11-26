@@ -452,6 +452,7 @@ p { margin: 4px 0; }
     const agents = report.agents;
     const reasons = [];
     const add = (kind, group, ...content) => reasons.push({ kind, group, content });
+    const failedTest = (id) => !!(agents && agents.tests.some((t) => t.scenario_id === id && t.verdict === "failed_assertion"));
     for (const index of gate.blocking) {
       const f = report.findings[index];
       if (f) add("hard", "finding", "Blocking finding: ", chip(f.severity, SEVERITY_CLASS[f.severity]), " ", f.title,
@@ -473,6 +474,7 @@ p { margin: 4px 0; }
       const sc = scenarios.get(id);
       add("advisory", "tests", "Edge-case test not passing (advisory, coverage above threshold) ",
         el("strong", {}, id), sc ? ": " + sc.title : "");
+      reasons[reasons.length - 1].failed = failedTest(id);
     }
     for (const id of gate.rule_violations) {
       const v = agents && agents.violations.find((x) => x.rule_id === id);
@@ -526,7 +528,7 @@ p { margin: 4px 0; }
     const policyGroups = new Set(reasons.filter((r) => r.kind === "policy").map((r) => r.group));
     const soleCause = !reasons.some((r) => r.kind === "hard") && policyGroups.size === 1;
     const label = (r) => {
-      if (r.kind === "advisory") return chip("advisory", "warn");
+      if (r.kind === "advisory") return [chip("advisory", "warn"), r.failed ? chip("fail", "bad") : null];
       if (gate.passed) return chip("warning", "warn");
       if (r.kind === "hard" || soleCause) return chip("blocking", "bad");
       return chip("blocking or warning (per policy)", "warn");
@@ -706,6 +708,7 @@ p { margin: 4px 0; }
         scenario.criterion_ids.map((id) => chip(id, "info")),
         failedInGate ? chip("listed by gate", "bad") : null,
         advisory ? chip("advisory (edge)", "warn") : null,
+        advisory && result && result.verdict === "failed_assertion" ? chip("fail", "bad") : null,
         result && result.language ? el("span", { class: "muted" }, result.language) : null),
       el("dl", { class: "gwt" }, el("dt", {}, "Given"), el("dd", {}, scenario.given),
         el("dt", {}, "When"), el("dd", {}, scenario.when), el("dt", {}, "Then"), el("dd", {}, scenario.then)),
@@ -816,13 +819,24 @@ p { margin: 4px 0; }
         : empty("No checks configured."));
   }
 
+  function reproduceBlock(r) {
+    return el("details", { open: true }, el("summary", {}, "Reproduce"),
+      el("p", {}, el("strong", {}, "Input: "), r.input),
+      el("p", {}, el("strong", {}, "Expected: "), r.expected),
+      el("p", {}, el("strong", {}, "Actual: "), r.actual),
+      r.command ? codeBlock(r.command) : null);
+  }
+
   function findingCard(f) {
     return el("div", { class: "card" },
       el("div", { class: "card-head" }, chip(f.severity, SEVERITY_CLASS[f.severity]), chip(f.category.replace("_", " "), "neutral"),
-        el("span", { class: "muted" }, "confidence " + f.confidence), el("span", { class: "mono muted" }, "line " + f.line)),
+        el("span", { class: "muted" }, "confidence " + f.confidence), el("span", { class: "mono muted" }, "line " + f.line),
+        f.demoted ? chip("demoted", "warn") : null),
       el("p", { class: "card-title" }, f.title),
       f.explanation ? el("p", {}, f.explanation) : null,
+      f.demoted ? el("p", { class: "muted" }, "Reported as critical without concrete reproduce steps, so it counts as major.") : null,
       f.evidence ? codeBlock(f.evidence) : null,
+      f.reproduce ? reproduceBlock(f.reproduce) : null,
       f.suggestion ? el("p", {}, el("strong", {}, "Suggestion: "), f.suggestion) : null,
       f.prevention_rule ? el("p", {}, el("strong", {}, "Rule for coding agents: "), f.prevention_rule.text,
         f.prevention_rule.scope ? el("span", { class: "mono muted" }, " (" + f.prevention_rule.scope + ")") : null) : null);

@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use crate::review::domain::agent_results::{
     DesignMismatch, RuleAssessment, RuleViolation, TestResult, TestScenario, TicketBrief, TicketContext,
 };
+use crate::review::domain::callers::CallerSite;
 use crate::review::domain::change_set::FileChange;
 use crate::review::domain::requirements::Requirements;
 
@@ -15,6 +16,7 @@ pub struct AgentInput<'a> {
     pub commit: &'a str,
     pub repo_root: &'a Path,
     pub snapshot_root: Option<&'a Path>,
+    pub callers: &'a [CallerSite],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

@@ -56,6 +56,7 @@ pub struct BriefRequest {
     pub description: String,
     pub design_links: Vec<String>,
     pub change_view: String,
+    pub callers: String,
     pub max_scenarios: usize,
 }
 

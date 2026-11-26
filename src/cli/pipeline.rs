@@ -23,6 +23,7 @@ use crate::review::application::{
     AgentPlan, AgentRun, CachingCodeReviewer, Requirements, ReviewChanges, ReviewPreflight, ReviewProgress,
     ReviewReport, ReviewSettings, RunSupplementaryChecks, SupplementarySettings, TicketContext,
 };
+use crate::review::infrastructure::callers::CallgraphCallers;
 use crate::review::infrastructure::check_runner::ProcessCheckRunner;
 use crate::review::infrastructure::claude::{ClaudeAuditor, ClaudeReviewer, prompt_fingerprint};
 use crate::review::infrastructure::claude_preflight::ClaudePreflight;
@@ -290,13 +291,14 @@ impl ReviewPipeline {
         let mut use_case = ReviewChanges::new(
             ids.as_ref().clone(),
             reviewer,
-            ProcessCheckRunner::new(checks_root, exec.clone()),
+            ProcessCheckRunner::new(checks_root.clone(), exec.clone()),
             settings,
         )?;
         if config.llm.audit_findings {
             let auditor = ClaudeAuditor::new(self.context.structured_model(review_model, review_effort)?);
             use_case = use_case.with_auditor(Arc::new(auditor));
         }
+        use_case = use_case.with_callers(Arc::new(CallgraphCallers::new(checks_root)));
         let commit = meta.commit.clone().unwrap_or_default();
         let agent_run = agents.as_ref().map(|a| AgentRun {
             suite: &a.suite,
@@ -336,7 +338,6 @@ impl ReviewPipeline {
             Arc::new(quality),
             Arc::new(RegressionTools::new(exec.clone(), cache.base_runs())),
             SupplementarySettings {
-                languages,
                 quality_enabled: server.quality.enabled,
                 regression_enabled: server.regression.enabled,
             },

@@ -29,6 +29,8 @@ pub fn finding(severity: Severity, category: Category, title: &str) -> FindingVi
         suggestion: None,
         prevention_rule: None,
         source: None,
+        reproduce: None,
+        demoted: None,
     }
 }
 
@@ -141,6 +143,8 @@ fn live_finding(title: &str) -> Finding {
         suggestion: Some("bind parameters".into()),
         prevention_rule: Some(PreventionRule { text: "Bind <b>parameters</b>".into(), scope: Some("**/*.rs".into()) }),
         source: FindingSource::Llm,
+        reproduce: None,
+        demoted: None,
     }
 }
 

@@ -82,8 +82,7 @@ a:hover { text-decoration: underline; }
 .theme-toggle:hover { background: var(--main); box-shadow: var(--shadow-sm); }
 .theme-toggle svg { width: 18px; height: 18px; flex: 0 0 auto; }
 .content { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.page-head { background: var(--sub); border-radius: 16px; box-shadow: var(--shadow-soft); padding: 20px 22px; position: sticky; top: 12px; z-index: 9; transition: transform .25s ease, opacity .25s ease; }
-.page-head.qg-hidden { transform: translateY(-160%); opacity: 0; pointer-events: none; }
+.page-head { background: var(--sub); border-radius: 16px; box-shadow: var(--shadow-soft); padding: 20px 22px; position: sticky; top: 12px; z-index: 9; }
 .page-head h1 { font-size: 22px; line-height: 1.2; margin: 0; font-weight: 700; }
 .page-head .sub { color: rgba(var(--ink), .5); font-size: 14px; font-weight: 300; margin: 4px 0 0; }
 @media (max-width: 860px) {
@@ -170,8 +169,7 @@ table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.savebar { position: fixed; left: 12px; right: 12px; bottom: 12px; background: var(--sub); border: 0; border-radius: 16px; box-shadow: var(--shadow-lg); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: flex-end; z-index: 10; transition: transform .25s ease, opacity .25s ease; }
-.savebar.qg-hidden { transform: translateY(160%); opacity: 0; pointer-events: none; }
+.savebar { position: fixed; left: 12px; right: 12px; bottom: 12px; background: var(--sub); border: 0; border-radius: 16px; box-shadow: var(--shadow-lg); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: flex-end; z-index: 10; }
 .savebar .status { flex: 1 1 200px; color: var(--muted); }
 @media (min-width: 861px) { .savebar { left: calc(var(--sidebar) + 24px); } }
 p { margin: 4px 0; }
@@ -218,33 +216,13 @@ p { margin: 4px 0; }
 </div>
 </div>
 <script>
-(function () {
-  var bars = [document.querySelector(".savebar"), document.querySelector(".page-head")].filter(Boolean);
-  if (!bars.length) return;
-  var last = window.scrollY || 0;
-  var ticking = false;
-  function update() {
-    var y = window.scrollY || 0;
-    var hide = y > last && y > 80;
-    for (var i = 0; i < bars.length; i++) bars[i].classList.toggle("qg-hidden", hide);
-    last = y <= 0 ? 0 : y;
-    ticking = false;
-  }
-  window.addEventListener("scroll", function () {
-    if (!ticking) {
-      window.requestAnimationFrame(update);
-      ticking = true;
-    }
-  }, { passive: true });
-})();
-</script>
-<script>
 "use strict";
 (() => {
   const TOKEN = document.querySelector('meta[name="qgate-token"]').content;
   const RELOAD_HINT = "qgate restarted or the page is stale: reload the page (your unsaved edits will be lost).";
   const HEADERS = { "Content-Type": "application/json", "X-Qgate-Request": "settings", "X-Qgate-Token": TOKEN, Accept: "application/json" };
   const EFFORTS = ["low", "medium", "high", "xhigh", "max"].map((v) => [v, v]);
+  const MODELS = [["claude-opus-5-5", "Opus 5.5"], ["claude-sonnet-5-5", "Sonnet 5.5"], ["claude-haiku-5-5", "Haiku 5.5"], ["claude-fable-5-2", "Fable 5.2"]];
   const ACTIONS = [["warn", "Warn (show on dashboard, gate unaffected)"], ["block", "Block (fail the gate)"]];
   const SOURCE_LABEL = { env: "environment variable", env_file: "secret file", store: "credential store", missing: "" };
   const state = { view: null, chips: {} };
@@ -325,7 +303,7 @@ p { margin: 4px 0; }
     ] },
     { id: "agents", title: "Agents", blocks: [
       f("agents.enabled", "Run the multi-agent ticket review", "bool"),
-      f("agents.model", "Model", "text"),
+      f("agents.model", "Model", "select", { options: MODELS }),
       f("agents.effort", "Effort", "select", { options: EFFORTS }),
       f("agents.max_parallel", "Agents running in parallel (1-8)", "int"),
       sub("Ticket analyst"),
@@ -454,7 +432,9 @@ p { margin: 4px 0; }
       case "text":
         return fieldShell(def, el("input", Object.assign({ type: "text", value: value, autocomplete: "off", spellcheck: "false" }, common)), {});
       case "select": {
-        const select = el("select", common, def.options.map(([v, l]) => el("option", { value: v }, l)));
+        const known = def.options.some(([v]) => v === value);
+        const options = known || !value ? def.options : [[value, value + " (current)"], ...def.options];
+        const select = el("select", common, options.map(([v, l]) => el("option", { value: v }, l)));
         select.value = value;
         return fieldShell(def, select, {});
       }
@@ -788,6 +768,7 @@ p { margin: 4px 0; }
       case "set": return Array.from(document.querySelectorAll('input[data-set="' + def.path + '"]'))
         .filter((box) => box.checked && box.value).map((box) => box.value);
       case "text": return node.value.trim();
+      case "select": return node.value;
       default: return getPath(config, def.path);
     }
   }

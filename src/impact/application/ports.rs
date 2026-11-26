@@ -2,14 +2,16 @@ use std::path::Path;
 
 use futures::future::BoxFuture;
 
-use crate::impact::domain::{GoPackage, TestRun};
+use crate::impact::domain::{GoPackage, TestKey, TestRun};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImpactError {
-    #[error("go toolchain unavailable: {0}")]
+    #[error("toolchain unavailable: {0}")]
     ToolchainUnavailable(String),
     #[error("{0}")]
     Failed(String),
+    #[error("the test run produced no results: {0}")]
+    NoResults(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,4 +47,16 @@ impl BaseRunKey {
 pub trait BaseRunStore: Send + Sync {
     fn get(&self, key: &BaseRunKey) -> Option<TestRun>;
     fn put(&self, key: &BaseRunKey, run: &TestRun);
+}
+
+pub trait TestSuite: Send + Sync {
+    fn name(&self) -> &'static str;
+
+    fn detect(&self, root: &Path) -> bool;
+
+    fn run<'a>(&'a self, root: &'a Path, only: &'a [TestKey]) -> BoxFuture<'a, Result<TestRun, ImpactError>>;
+
+    fn reproduce_command(&self, root: &Path, key: &TestKey) -> String;
+
+    fn locate(&self, root: &Path, key: &TestKey) -> Option<(String, u32)>;
 }

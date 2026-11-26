@@ -7,11 +7,9 @@ use super::supplementary_ports::{
 };
 use crate::review::domain::agent_results::AgentReport;
 use crate::review::domain::gate::{GateDecision, GateInput, GatePolicy};
-use crate::review::domain::language::Language;
 use crate::review::domain::report::ReviewReport;
 
 pub struct SupplementarySettings {
-    pub languages: Vec<Language>,
     pub quality_enabled: bool,
     pub regression_enabled: bool,
 }
@@ -57,10 +55,9 @@ impl RunSupplementaryChecks {
                 };
             }
         };
-        let go_selected = self.settings.languages.contains(&Language::Go);
         let regression_on = self.settings.regression_enabled;
         let mut notes = Vec::new();
-        let base_snapshot = match (&change.base_sha, regression_on && go_selected) {
+        let base_snapshot = match (&change.base_sha, regression_on) {
             (Some(base), true) => self
                 .snapshots
                 .export(base)
@@ -82,7 +79,7 @@ impl RunSupplementaryChecks {
         }
         if run_regression {
             let base = base_snapshot.as_ref().map(|s| s.path());
-            merge(&mut outcome, self.regression_outcome(head_snapshot, base, &change, go_selected).await);
+            merge(&mut outcome, self.regression_outcome(head_snapshot, base, &change).await);
         }
         notes.extend(outcome.notes);
         outcome.notes = notes;
@@ -94,12 +91,8 @@ impl RunSupplementaryChecks {
         head_snapshot: &Path,
         base_snapshot: Option<&Path>,
         change: &CommitChange,
-        go_selected: bool,
     ) -> ToolOutcome {
         let skipped = |note: &str| ToolOutcome { findings: Vec::new(), notes: vec![note.to_string()] };
-        if !go_selected {
-            return skipped("regression check skipped: Go is not among the selected languages");
-        }
         let (Some(base_sha), Some(base_snapshot)) = (change.base_sha.as_deref(), base_snapshot) else {
             return skipped("regression check skipped: there is no base commit to compare with");
         };
@@ -210,7 +203,6 @@ mod tests {
     fn use_case(
         change: Result<CommitChange, SourceError>,
         export_ok: bool,
-        languages: Vec<Language>,
         (quality_enabled, regression_enabled): (bool, bool),
     ) -> RunSupplementaryChecks {
         RunSupplementaryChecks::new(
@@ -218,31 +210,31 @@ mod tests {
             Arc::new(FakeSnapshots(export_ok)),
             Arc::new(Canned(vec!["q-note".into()], vec![])),
             Arc::new(Canned(vec!["r-note".into()], vec![])),
-            SupplementarySettings { languages, quality_enabled, regression_enabled },
+            SupplementarySettings { quality_enabled, regression_enabled },
         )
     }
 
     #[tokio::test]
-    async fn both_checks_run_with_a_base_and_go_and_their_notes_are_combined() {
-        let checks = use_case(Ok(change(Some("b"))), true, vec![Language::Go], (true, true));
+    async fn both_checks_run_with_a_base_and_their_notes_are_combined() {
+        let checks = use_case(Ok(change(Some("b"))), true, (true, true));
         let outcome = checks.run(Path::new("/head")).await;
         assert_eq!(outcome.notes, vec!["q-note", "r-note"]);
     }
 
     #[tokio::test]
-    async fn regression_is_skipped_without_a_base_or_without_go_and_quality_can_be_disabled() {
-        let outcome = use_case(Ok(change(None)), true, vec![Language::Go], (true, true)).run(Path::new("/h")).await;
+    async fn regression_is_skipped_without_a_base_and_quality_can_be_disabled() {
+        let outcome = use_case(Ok(change(None)), true, (true, true)).run(Path::new("/h")).await;
         assert!(outcome.notes.iter().any(|n| n.contains("no base commit")), "{:?}", outcome.notes);
-        let java_only = use_case(Ok(change(None)), true, vec![Language::Java], (false, true));
-        let outcome = java_only.run(Path::new("/h")).await;
-        assert_eq!(outcome.notes, vec!["regression check skipped: Go is not among the selected languages"]);
-        let off = use_case(Ok(change(None)), true, vec![Language::Go], (false, false));
+        let regression_only = use_case(Ok(change(Some("b"))), true, (false, true));
+        let outcome = regression_only.run(Path::new("/h")).await;
+        assert_eq!(outcome.notes, vec!["r-note"], "regression runs for any language; suites self-detect");
+        let off = use_case(Ok(change(None)), true, (false, false));
         assert_eq!(off.run(Path::new("/h")).await, ToolOutcome::default());
     }
 
     #[tokio::test]
     async fn an_unexportable_base_is_noted_and_skips_regression_only() {
-        let checks = use_case(Ok(change(Some("b"))), false, vec![Language::Go], (true, true));
+        let checks = use_case(Ok(change(Some("b"))), false, (true, true));
         let outcome = checks.run(Path::new("/h")).await;
         assert_eq!(outcome.notes.len(), 2, "{:?}", outcome.notes);
         assert!(outcome.notes[0].contains("cannot export the base commit: boom"));
@@ -251,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unloadable_change_skips_everything_with_a_note() {
-        let checks = use_case(Err(SourceError::Git("x".into())), true, vec![Language::Go], (true, true));
+        let checks = use_case(Err(SourceError::Git("x".into())), true, (true, true));
         let outcome = checks.run(Path::new("/h")).await;
         assert_eq!(outcome.notes, vec!["quality/regression checks skipped: git failed: x"]);
         assert!(outcome.findings.is_empty());

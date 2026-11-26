@@ -40,6 +40,19 @@ ref shows `update by push` or `forced-update`; `fetch` and `pull` are ignored. T
   2nd and later pushes of a branch reuse everything that did not change. A `qgate: no-cache` commit trailer
   bypasses the cache.
 
+## Critical vs major
+
+The report splits work into **Critical: must fix (blocking)** and **Major: can defer (warnings)**. Code, not the
+model, decides the tier: confirmed regressions, failed must-pass tests, unmet acceptance criteria, blocking
+deterministic checks (secrets, high CVEs, approved architecture rules) and model findings that are critical **with
+concrete reproduce steps** (input, expected, actual) block. A model finding that claims critical without reproduce
+steps is demoted to major and marked as such. A repository can turn the demotion off in `.qgate.toml`:
+
+```toml
+[gate]
+require_reproduce_for_critical = false
+```
+
 ## What is checked beyond the model review
 
 Two deterministic checks cover what SonarQube does not. They run in the runner container and fold into the review
@@ -48,8 +61,18 @@ findings and the gate; findings carry prevention rules into `qgate-rules.md` (se
 - **Quality gate (Go/Java), graded on NEW code only:** dependency CVEs (`govulncheck`, `osv-scanner`), secret leaks
   (`gitleaks`) and architecture import boundaries (`depguard`, generated from approved Rulebook rules). It
   deliberately does **not** duplicate SonarQube: no coverage, complexity, duplication, code smells or generic SAST.
-- **Regression:** finds the Go packages impacted by the diff and re-runs their existing tests on base and on head. A
-  test that passed on base and fails on head (reconfirmed) is a regression.
+- **Regression:** re-runs the repository's existing tests on base and on head. A test that passed on base and fails on
+  head (reconfirmed by a re-run, so flaky tests are only noted) is a regression; a suite that ran on base but produces
+  no results on head (build broken) is one too. Go runs only the packages impacted by the diff; the other suites are
+  detected from the repository root and run in full: Maven/Gradle (Java, Kotlin), pytest, jest, vitest and Cargo.
+  Dependencies are installed from the lockfile first (`npm ci`/`pnpm`, `uv sync`, or a venv from
+  `requirements*.txt`). A suite whose toolchain is not installed (`QGATE_TOOLCHAINS`) is reported as not checked,
+  never as passed.
+- **Callers of changed code:** functions whose body the diff touches are found with tree-sitter (Go, Java, Kotlin,
+  Python, JavaScript, TypeScript, Rust), and their call sites elsewhere in the repository are looked up by name. The
+  model reviewer gets them as possible callers to check for broken contracts, and the ticket analyst adds impact
+  scenarios for them (graded in the edge-case group). Matching is by name, not by type, so very common names are
+  skipped with a note.
 
 ## Quickstart (Docker)
 

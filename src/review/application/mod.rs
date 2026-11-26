@@ -14,10 +14,12 @@ pub use crate::review::domain::agent_results::{
     AgentReport, DesignMismatch, DesignMismatchKind, RuleAssessment, RuleComplianceStatus, RuleViolation, TestEvidence,
     TestResult, TestScenario, TestVerdict, TicketBrief, TicketContext,
 };
+pub use crate::review::domain::callers::{CallerContext, CallerSite};
 pub use crate::review::domain::checks::{CheckOutcome, CheckResult, CheckSpec};
 pub use crate::review::domain::finding::{Category, Confidence, Finding, PreventionRule, Severity};
 pub use crate::review::domain::gate::GatePolicy;
 pub use crate::review::domain::report::{ReviewReport, SkipReason, TokenUsage};
+pub use crate::review::domain::reproduce::{Demotion, Reproduce};
 pub use crate::review::domain::requirements::{
     AcceptanceCriterion, CriterionStatus, EvidenceRef, Requirements, RequirementsReport,
 };

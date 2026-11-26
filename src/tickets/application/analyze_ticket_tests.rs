@@ -109,8 +109,15 @@ async fn analyze(
     requirements: Option<&Requirements>,
     ticket: Option<&TicketContext>,
 ) -> Result<TicketBrief, AgentError> {
-    let input =
-        AgentInput { files, requirements, ticket, commit: "abc", repo_root: Path::new("/repo"), snapshot_root: None };
+    let input = AgentInput {
+        files,
+        requirements,
+        ticket,
+        commit: "abc",
+        repo_root: Path::new("/repo"),
+        snapshot_root: None,
+        callers: &[],
+    };
     analyst.analyze(&input).await
 }
 
@@ -118,15 +125,19 @@ async fn analyze(
 fn validation_drops_unknown_ids_caps_and_renumbers() {
     let brief = validate_brief(raw_brief(), &criteria(), 8);
     let ids: Vec<_> = brief.scenarios.iter().map(|s| (s.id.as_str(), s.criterion_ids.clone())).collect();
-    assert_eq!(ids, vec![("S1", vec!["SHOP-7/AC-1".to_string()]), ("S2", vec!["SHOP-7/AC-2".to_string()])]);
+    assert_eq!(
+        ids,
+        vec![("S1", vec!["SHOP-7/AC-1".to_string()]), ("S2", vec!["SHOP-7/AC-2".to_string()]), ("S3", vec![]),],
+        "edge-case scenarios without criteria are kept, after the must-pass ones"
+    );
     assert_eq!(brief.implicit_requirements, vec!["audit"]);
     assert_eq!(
         brief.context,
-        "Cart totals. (qgate dropped 2 proposed scenario(s) citing unknown or no acceptance criteria.)"
+        "Cart totals. (qgate dropped 1 proposed scenario(s) citing unknown acceptance criteria or missing a title or outcome.)"
     );
 
-    let capped = validate_brief(raw_brief(), &criteria(), 1);
-    assert_eq!(capped.scenarios.len(), 1);
+    let capped = validate_brief(raw_brief(), &criteria(), 2);
+    assert!(capped.scenarios.iter().all(|s| !s.criterion_ids.is_empty()), "the cap keeps must-pass scenarios first");
 
     let mut empty_then = raw_brief();
     empty_then.scenarios = vec![TestScenario { then: " ".into(), ..scenario("a", &["SHOP-7/AC-1"]) }];
@@ -148,7 +159,7 @@ async fn generates_once_then_serves_from_cache() {
     let second = analyze(&analyst, &files(), Some(&requirements), Some(&ticket)).await.unwrap();
 
     assert_eq!(first, second);
-    assert_eq!(first.scenarios.len(), 2);
+    assert_eq!(first.scenarios.len(), 3);
     assert_eq!(generator.calls(), 1);
     let request = generator.requests.lock().unwrap()[0].clone();
     assert_eq!(request.criteria, criteria());
@@ -216,4 +227,36 @@ fn change_view_is_capped_with_a_note() {
     let capped = render_change_view(&big, 150);
     assert!(capped.len() < 250);
     assert!(capped.ends_with("[change truncated in b.go; 1 more file(s) omitted]\n"), "{capped}");
+}
+
+#[tokio::test]
+async fn callers_reach_the_request_and_change_the_cache_key() {
+    use crate::review::application::CallerSite;
+    let generator = FakeGenerator::new(Ok(raw_brief()));
+    let analyst = AnalyzeTicket::new(generator.clone(), Arc::new(MemoryBriefs::default()), 8);
+    let requirements = requirements();
+    let files = files();
+    let site = CallerSite {
+        symbol: "Total".into(),
+        defined_in: "pay.go".into(),
+        file: "api/checkout.go".into(),
+        line: 14,
+        snippet: "sum := Total()".into(),
+    };
+    let run = |callers: &'static [CallerSite]| AgentInput {
+        files: &files,
+        requirements: Some(&requirements),
+        ticket: None,
+        commit: "abc",
+        repo_root: Path::new("/repo"),
+        snapshot_root: None,
+        callers,
+    };
+    let callers: &'static [CallerSite] = Box::leak(vec![site].into_boxed_slice());
+    analyst.analyze(&run(&[])).await.unwrap();
+    analyst.analyze(&run(callers)).await.unwrap();
+    analyst.analyze(&run(callers)).await.unwrap();
+    assert_eq!(generator.calls(), 2, "new callers regenerate the brief; the same callers hit the cache");
+    let request = generator.requests.lock().unwrap()[1].clone();
+    assert_eq!(request.callers, "- api/checkout.go:14 calls Total (defined in pay.go): sum := Total()\n");
 }

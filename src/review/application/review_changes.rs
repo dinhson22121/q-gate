@@ -6,16 +6,18 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::batching::plan_batches;
 use super::ports::{
-    AssessmentOutput, AuditInput, ChangeSource, CheckRunner, CodeReviewer, FindingAuditor, RequirementsInput,
-    ReviewInput, ReviewerError, ReviewerOutput, SourceError,
+    AssessmentOutput, AuditInput, CallerFinder, ChangeSource, CheckRunner, CodeReviewer, FindingAuditor,
+    RequirementsInput, ReviewInput, ReviewerError, ReviewerOutput, SourceError,
 };
 use super::run_agents::{AgentRun, run_agents};
 use crate::review::domain::agent_results::{TicketContext, verify_agent_report};
+use crate::review::domain::callers::{CallerContext, CallerSite};
 use crate::review::domain::change_set::{ChangeSet, ChangeStatus, FileChange};
 use crate::review::domain::checks::CheckSpec;
 use crate::review::domain::finding::Finding;
 use crate::review::domain::gate::{GateInput, GatePolicy};
 use crate::review::domain::report::{ReviewReport, SkipReason, SkippedFile, TokenUsage};
+use crate::review::domain::reproduce::demote_unproven;
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, Requirements, verify_assessments};
 use crate::review::domain::verification::{Verification, apply_audit, verify_findings};
 
@@ -75,6 +77,7 @@ pub struct ReviewChanges<S, R, C> {
     settings: ReviewSettings,
     ignore: GlobSet,
     auditor: Option<Arc<dyn FindingAuditor>>,
+    callers: Option<Arc<dyn CallerFinder>>,
 }
 
 #[derive(Default)]
@@ -131,11 +134,17 @@ where
 {
     pub fn new(source: S, reviewer: R, checks: C, settings: ReviewSettings) -> Result<Self, ReviewError> {
         let ignore = build_globset(&settings.ignore_patterns)?;
-        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None })
+        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None, callers: None })
     }
 
     pub fn with_auditor(mut self, auditor: Arc<dyn FindingAuditor>) -> Self {
         self.auditor = Some(auditor);
+        self
+    }
+
+    #[must_use]
+    pub fn with_callers(mut self, finder: Arc<dyn CallerFinder>) -> Self {
+        self.callers = Some(finder);
         self
     }
 
@@ -188,15 +197,25 @@ where
         }
         let batches = plan_batches(&reviewable, self.settings.max_batch_weight, self.settings.max_files_per_batch);
         progress.started(reviewable.len(), batches.len());
+        let callers = match &self.callers {
+            Some(finder) => finder.find(&reviewable).await,
+            None => CallerContext::default(),
+        };
+        let batch_callers: Vec<Vec<CallerSite>> = batches
+            .iter()
+            .map(|range| callers.for_files(reviewable[range.clone()].iter().map(|f| f.path.as_str())))
+            .collect();
 
-        let review = stream::iter(batches)
-            .map(|range| self.review_batch(&reviewable[range]))
+        let review = stream::iter(batches.into_iter().enumerate())
+            .map(|(index, range)| self.review_batch(&reviewable[range], &batch_callers[index]))
             .buffer_unordered(self.settings.concurrency.max(1))
             .fold(BatchOutcome::default(), |acc, next| async move { acc.merge(next) });
         let assessment = self.assess(&reviewable, requirements.as_ref());
         let agent_work = async {
             match &agents {
-                Some(run) if !run.suite.is_empty() => Some(run_agents(run, &reviewable, requirements.as_ref()).await),
+                Some(run) if !run.suite.is_empty() => {
+                    Some(run_agents(run, &reviewable, requirements.as_ref(), &callers.sites).await)
+                }
                 _ => None,
             }
         };
@@ -214,11 +233,19 @@ where
 
         let change_set = ChangeSet { files: reviewable };
         let verification = verify_findings(&change_set, outcome.findings);
-        let (verification, audit) = self.audit(&change_set, verification).await;
+        let (mut verification, audit) = self.audit(&change_set, verification).await;
+        let policy = self.effective_gate();
+        if policy.require_reproduce_for_critical {
+            verification.accepted = demote_unproven(verification.accepted);
+        }
         let requirements_report = requirements.map(|r| verify_assessments(&change_set, r, assessment.assessments));
         let incomplete = skipped.iter().any(|s| matches!(s.reason, SkipReason::ReviewFailed(_)));
-        let agent_report = agent_report.map(|report| verify_agent_report(&change_set, report));
-        let gate = self.effective_gate().decide(GateInput {
+        let agent_report = agent_report.map(|report| {
+            let mut report = verify_agent_report(&change_set, report);
+            report.notes.extend(callers.notes.iter().cloned());
+            report
+        });
+        let gate = policy.decide(GateInput {
             findings: &verification.accepted,
             requirements: requirements_report.as_ref(),
             checks: &check_results,
@@ -324,14 +351,14 @@ where
         }
     }
 
-    fn review_batch<'a>(&'a self, files: &'a [FileChange]) -> BoxFuture<'a, BatchOutcome> {
+    fn review_batch<'a>(&'a self, files: &'a [FileChange], callers: &'a [CallerSite]) -> BoxFuture<'a, BatchOutcome> {
         Box::pin(async move {
-            let input = ReviewInput { files, guidelines: &self.settings.guidelines };
+            let input = ReviewInput { files, guidelines: &self.settings.guidelines, callers };
             match self.reviewer.review(input).await {
                 Ok(output) => BatchOutcome::success(output),
                 Err(ReviewerError::Truncated) if files.len() > 1 => {
                     let (left, right) = files.split_at(files.len() / 2);
-                    let (a, b) = futures::join!(self.review_batch(left), self.review_batch(right));
+                    let (a, b) = futures::join!(self.review_batch(left, callers), self.review_batch(right, callers));
                     a.merge(b)
                 }
                 Err(error) if error.is_fatal() => BatchOutcome { fatal: Some(error), ..BatchOutcome::default() },
@@ -361,8 +388,8 @@ mod tests {
     use crate::review::application::ports::AuditOutput;
     use crate::review::domain::change_set::fixtures::{added, file};
     use crate::review::domain::checks::{CheckOutcome, CheckResult};
-    use crate::review::domain::finding::Severity;
     use crate::review::domain::finding::fixtures::finding;
+    use crate::review::domain::finding::{Demotion, Reproduce, Severity};
     use crate::review::domain::requirements::{AcceptanceCriterion, EvidenceRef};
     use crate::review::domain::verification::{AuditVerdict, FindingAudit, RejectReason};
 
@@ -377,19 +404,26 @@ mod tests {
     struct FakeReviewer {
         script: Mutex<Vec<Result<ReviewerOutput, ReviewerError>>>,
         calls: Mutex<Vec<usize>>,
+        callers_seen: Mutex<Vec<Vec<String>>>,
         assessment_error: Mutex<Option<ReviewerError>>,
     }
 
     impl FakeReviewer {
         fn new(mut script: Vec<Result<ReviewerOutput, ReviewerError>>) -> Self {
             script.reverse();
-            Self { script: Mutex::new(script), calls: Mutex::new(Vec::new()), assessment_error: Mutex::new(None) }
+            Self {
+                script: Mutex::new(script),
+                calls: Mutex::new(Vec::new()),
+                callers_seen: Mutex::new(Vec::new()),
+                assessment_error: Mutex::new(None),
+            }
         }
     }
 
     impl CodeReviewer for FakeReviewer {
         async fn review(&self, input: ReviewInput<'_>) -> Result<ReviewerOutput, ReviewerError> {
             self.calls.lock().unwrap().push(input.files.len());
+            self.callers_seen.lock().unwrap().push(input.callers.iter().map(|c| c.file.clone()).collect());
             self.script.lock().unwrap().pop().unwrap_or_else(|| Ok(ReviewerOutput::default()))
         }
 
@@ -452,11 +486,64 @@ mod tests {
         ReviewSettings { concurrency: 1, ..ReviewSettings::default() }
     }
 
+    fn proven(mut critical: Finding) -> Finding {
+        critical.reproduce = Reproduce::new("compute(1)", "returns 1", "returns 0", "");
+        critical
+    }
+
+    #[tokio::test]
+    async fn critical_without_reproduce_is_demoted_and_does_not_block_unless_policy_disables_it() {
+        let critical = || finding("a.go", 1, Severity::Critical, "total := compute(1)");
+        let reviewer = FakeReviewer::new(vec![Ok(output(vec![critical()], 0.0))]);
+        let report = use_case(vec![go_file("a.go")], reviewer, sequential()).execute(None, &NoProgress).await.unwrap();
+        assert!(report.gate.passed);
+        assert_eq!(report.findings[0].severity, Severity::Major);
+        assert_eq!(report.findings[0].demoted, Some(Demotion::MissingReproduce));
+
+        let mut lenient = sequential();
+        lenient.gate.require_reproduce_for_critical = false;
+        let reviewer = FakeReviewer::new(vec![Ok(output(vec![critical()], 0.0))]);
+        let report = use_case(vec![go_file("a.go")], reviewer, lenient).execute(None, &NoProgress).await.unwrap();
+        assert!(!report.gate.passed);
+        assert_eq!(report.findings[0].demoted, None);
+    }
+
+    struct FakeCallers;
+
+    impl CallerFinder for FakeCallers {
+        fn find<'a>(&'a self, files: &'a [FileChange]) -> BoxFuture<'a, CallerContext> {
+            let site = |defined_in: &str, file: &str| CallerSite {
+                symbol: "f".into(),
+                defined_in: defined_in.into(),
+                file: file.into(),
+                line: 1,
+                snippet: "f()".into(),
+            };
+            let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+            Box::pin(async move {
+                assert_eq!(paths, ["a.go", "b.go"]);
+                CallerContext { sites: vec![site("a.go", "api.go"), site("b.go", "job.go")], notes: vec!["n".into()] }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn each_batch_gets_only_the_callers_of_its_own_files() {
+        let reviewer = FakeReviewer::new(vec![]);
+        let settings = ReviewSettings { max_files_per_batch: 1, ..sequential() };
+        let use_case =
+            use_case(vec![go_file("a.go"), go_file("b.go")], reviewer, settings).with_callers(Arc::new(FakeCallers));
+        use_case.execute(None, &NoProgress).await.unwrap();
+        let mut seen = use_case.reviewer.callers_seen.lock().unwrap().clone();
+        seen.sort();
+        assert_eq!(seen, vec![vec!["api.go".to_string()], vec!["job.go".to_string()]]);
+    }
+
     #[tokio::test]
     async fn verified_critical_finding_fails_gate() {
         let reviewer = FakeReviewer::new(vec![Ok(output(
             vec![
-                finding("a.go", 1, Severity::Critical, "total := compute(1)"),
+                proven(finding("a.go", 1, Severity::Critical, "total := compute(1)")),
                 finding("a.go", 1, Severity::Major, "invented()"),
             ],
             0.05,

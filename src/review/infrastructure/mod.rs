@@ -1,3 +1,4 @@
+pub mod callers;
 pub mod check_runner;
 pub mod claude;
 pub mod claude_preflight;

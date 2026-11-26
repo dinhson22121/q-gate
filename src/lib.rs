@@ -1,5 +1,6 @@
 pub mod access;
 pub mod cache;
+pub mod callgraph;
 pub mod cli;
 pub mod conventions;
 pub mod design;

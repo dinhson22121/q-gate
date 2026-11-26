@@ -1,7 +1,9 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::review::domain::finding::{Category, Confidence, Finding, FindingSource, PreventionRule, Severity};
+use crate::review::domain::finding::{
+    Category, Confidence, Finding, FindingSource, PreventionRule, Reproduce, Severity,
+};
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, EvidenceRef};
 use crate::review::domain::verification::{AuditVerdict, FindingAudit};
 
@@ -21,8 +23,21 @@ pub fn review_schema() -> Value {
              codebase (not this line); empty string when there is none."
         ),
         "rule_scope": string("Glob of the files the rule applies to, e.g. **/*.go; empty string for all files."),
+        "reproduce": reproduce_schema(),
     }));
     strict_object(json!({ "findings": array(finding) }))
+}
+
+fn reproduce_schema() -> Value {
+    strict_object(json!({
+        "input": string(
+            "Concrete trigger: the call, request, data or sequence of steps that makes the defect happen. \
+             Required for critical; empty string otherwise if you have none."
+        ),
+        "expected": string("What correct code returns or does for that input."),
+        "actual": string("What this code returns or does for that input, traced from the quoted code."),
+        "command": string("Shell command or test invocation that demonstrates it; empty string when there is none."),
+    }))
 }
 
 pub fn assessment_schema() -> Value {
@@ -106,6 +121,24 @@ struct RawFinding {
     prevention_rule: String,
     #[serde(default)]
     rule_scope: String,
+    #[serde(default)]
+    reproduce: Option<RawReproduce>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReproduce {
+    input: String,
+    expected: String,
+    actual: String,
+    #[serde(default)]
+    command: String,
+}
+
+impl RawReproduce {
+    fn into_reproduce(self) -> Option<Reproduce> {
+        Reproduce::new(&self.input, &self.expected, &self.actual, &self.command)
+    }
 }
 
 impl ReviewAnswer {
@@ -128,6 +161,8 @@ impl RawFinding {
             suggestion: non_empty(self.suggestion),
             prevention_rule: PreventionRule::new(&self.prevention_rule, &self.rule_scope),
             source: FindingSource::Llm,
+            reproduce: self.reproduce.and_then(RawReproduce::into_reproduce),
+            demoted: None,
         }
     }
 }
@@ -297,6 +332,27 @@ mod tests {
         let props = &schema["properties"]["findings"]["items"]["properties"];
         assert_eq!(props["prevention_rule"]["type"], "string");
         assert_eq!(props["rule_scope"]["type"], "string");
+    }
+
+    #[test]
+    fn reproduce_is_parsed_and_invalid_reproduce_maps_to_none() {
+        let raw = |reproduce: Value| {
+            let answer: ReviewAnswer = serde_json::from_value(json!({"findings": [{
+                "file": "a.go", "line": 3, "severity": "critical", "category": "correctness", "confidence": "high",
+                "title": "t", "explanation": "e", "evidence": "x", "suggestion": "", "reproduce": reproduce
+            }]}))
+            .unwrap();
+            answer.into_findings().remove(0).reproduce
+        };
+        let parsed =
+            raw(json!({"input": "f(-1)", "expected": "error", "actual": "returns -1", "command": ""})).unwrap();
+        assert_eq!((parsed.input.as_str(), parsed.command), ("f(-1)", None));
+        assert_eq!(raw(json!({"input": "", "expected": "", "actual": "", "command": ""})), None);
+        assert_eq!(raw(json!({"input": "f", "expected": "0", "actual": "0", "command": ""})), None);
+        assert_eq!(raw(Value::Null), None);
+        let schema = review_schema();
+        let props = &schema["properties"]["findings"]["items"]["properties"]["reproduce"]["properties"];
+        assert_eq!(props.as_object().unwrap().len(), 4);
     }
 
     #[test]

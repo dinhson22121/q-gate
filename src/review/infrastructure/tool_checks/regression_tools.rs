@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 
 use super::finding_mapper::regression_to_finding;
-use crate::impact::application::{BaseRunStore, DEFAULT_MAX_PACKAGES, DetectRequest};
+use crate::impact::application::{BaseRunStore, DEFAULT_MAX_PACKAGES, DetectRequest, RegressionReport};
 use crate::review::application::{RegressionChecks, RegressionRequest, ToolOutcome};
 use crate::sandbox::application::ExecBackend;
 
@@ -29,7 +29,11 @@ impl RegressionChecks for RegressionTools {
                 changed_files: request.changes.files.iter().map(|f| f.path.clone()).collect(),
                 max_packages: DEFAULT_MAX_PACKAGES,
             };
-            let report = crate::impact::build(self.exec.clone(), self.base_runs.clone()).execute(&detect_request).await;
+            let go = crate::impact::build(self.exec.clone(), self.base_runs.clone());
+            let suites = crate::impact::build_suites(self.exec.clone(), self.base_runs.clone());
+            let (go_report, suite_report) =
+                futures::join!(go.execute(&detect_request), suites.execute(&detect_request));
+            let report = combine(go_report, suite_report);
             let findings = report
                 .regressions
                 .iter()
@@ -37,6 +41,22 @@ impl RegressionChecks for RegressionTools {
                 .collect();
             ToolOutcome { findings, notes: report.notes }
         })
+    }
+}
+
+fn combine(go: RegressionReport, suites: Option<RegressionReport>) -> RegressionReport {
+    let go_skipped = go.skipped_reason.is_some();
+    match suites {
+        None if go_skipped => RegressionReport::skipped(
+            "no supported test suite found (Go modules, Maven, Gradle, pytest, jest, vitest or Cargo)",
+        ),
+        None => go,
+        Some(suites) if go_skipped => suites,
+        Some(suites) => {
+            let mut report = go;
+            report.merge(suites);
+            report
+        }
     }
 }
 
@@ -61,6 +81,21 @@ mod tests {
         let tools = RegressionTools::new(Arc::new(RecordingBackend::answering(ExecResult::default())), None);
         let outcome = tools.run(&request).await;
         assert!(outcome.findings.is_empty());
-        assert!(outcome.notes.iter().any(|n| n.contains("not a Go module")), "{:?}", outcome.notes);
+        assert!(outcome.notes.iter().any(|n| n.contains("no supported test suite found")), "{:?}", outcome.notes);
+    }
+
+    #[test]
+    fn go_and_suite_reports_combine_without_hiding_either() {
+        use crate::impact::application::Regression;
+        let go_skip = || RegressionReport::skipped("not a Go module");
+        let mut maven = RegressionReport { packages_tested: vec!["maven".into()], ..RegressionReport::default() };
+        maven.regressions.push(Regression::new("C", "t", String::new()));
+        assert_eq!(combine(go_skip(), Some(maven.clone())), maven, "a skipped Go check adds no noise");
+        assert!(combine(go_skip(), None).skipped_reason.unwrap().contains("no supported test suite"));
+        let go = RegressionReport { packages_tested: vec!["m/api".into()], ..RegressionReport::default() };
+        assert_eq!(combine(go.clone(), None), go);
+        let both = combine(go, Some(maven));
+        assert_eq!(both.packages_tested, vec!["m/api", "maven"]);
+        assert_eq!(both.regressions.len(), 1);
     }
 }

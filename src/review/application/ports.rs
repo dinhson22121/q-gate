@@ -2,6 +2,7 @@ use std::future::Future;
 
 use futures::future::BoxFuture;
 
+use crate::review::domain::callers::{CallerContext, CallerSite};
 use crate::review::domain::change_set::{ChangeSet, FileChange};
 use crate::review::domain::checks::{CheckResult, CheckSpec};
 use crate::review::domain::finding::Finding;
@@ -26,6 +27,11 @@ pub trait ChangeSource {
 pub struct ReviewInput<'a> {
     pub files: &'a [FileChange],
     pub guidelines: &'a str,
+    pub callers: &'a [CallerSite],
+}
+
+pub trait CallerFinder: Send + Sync {
+    fn find<'a>(&'a self, files: &'a [FileChange]) -> BoxFuture<'a, CallerContext>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
