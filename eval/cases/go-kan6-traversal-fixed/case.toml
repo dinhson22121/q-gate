@@ -1,0 +1,34 @@
+id = "go-kan6-traversal-fixed"
+description = "KAN-6 confines /file reads to the data directory; the fixed read must not be flagged."
+language = "go"
+
+[ticket]
+key = "KAN-6"
+title = "Confine /file reads to the data directory"
+
+[[ac]]
+text = "AC-1: `/file` only serves files located inside `/var/data`; the path is confined via `os.OpenRoot` (or `filepath.IsLocal` / Clean + prefix check), never by plain string concatenation."
+expect = "met"
+
+[[ac]]
+text = "AC-2: A request whose `f` contains traversal sequences or an absolute path (e.g. `../../etc/passwd`, `..%2F..%2Fetc%2Fpasswd`, `/etc/passwd`, `subdir/../../x`) is rejected with HTTP 400 and no file content is returned."
+expect = "met"
+
+[[ac]]
+text = "AC-3: A missing or empty `f` is rejected with HTTP 400."
+expect = "met"
+
+[[ac]]
+text = "AC-4: A file that does not exist under `/var/data` returns HTTP 404; other read errors return HTTP 500. Errors are never ignored and never leak the filesystem path in the response body."
+expect = "met"
+
+[[ac]]
+text = "AC-5: A valid file name inside `/var/data` (e.g. `report.txt`) is still served with HTTP 200 and its content."
+expect = "met"
+
+[[forbidden]]
+file = "main.go"
+line = 148
+line_tolerance = 8
+category = "security"
+min_severity = "major"

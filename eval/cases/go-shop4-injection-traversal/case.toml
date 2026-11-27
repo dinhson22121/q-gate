@@ -1,0 +1,17 @@
+id = "go-shop4-injection-traversal"
+description = "SHOP-4 introduces a SQL injection in /user and a path traversal in /file."
+language = "go"
+
+[[expected]]
+file = "main.go"
+line = 12
+line_tolerance = 3
+category = "security"
+min_severity = "major"
+
+[[expected]]
+file = "main.go"
+line = 24
+line_tolerance = 3
+category = "security"
+min_severity = "major"

@@ -1,0 +1,32 @@
+id = "go-kan7-items"
+description = "KAN-7 adds POST /items with name and price validation."
+language = "go"
+
+[ticket]
+key = "KAN-7"
+title = "Add POST /items endpoint"
+description = "Shop admins need to add a new item to the catalog through the API. The endpoint is POST /items and accepts a JSON body with name and price. When the item is valid it is saved and the API returns 201 with the created item including its generated id. A request with an empty name or a price that is zero or negative is rejected with 400 and an error message. Methods other than POST are not allowed (405)."
+
+[[ac]]
+text = "POST /items with a JSON body containing a valid name and price -> the item is saved to the catalog"
+expect = "met"
+
+[[ac]]
+text = "POST /items with a valid item -> the API returns 201 with the created item, including its generated id"
+expect = "met"
+
+[[ac]]
+text = "POST /items with an empty name -> the request is rejected with 400 and an error message"
+expect = "met"
+
+[[ac]]
+text = "POST /items with a price of zero -> the request is rejected with 400 and an error message"
+expect = "met"
+
+[[ac]]
+text = "POST /items with a negative price -> the request is rejected with 400 and an error message"
+expect = "met"
+
+[[ac]]
+text = "Request to /items with a method other than POST -> 405 (Method Not Allowed)"
+expect = "met"

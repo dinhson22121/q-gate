@@ -7,12 +7,15 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use super::agents::{redteam_service, rulebook_service};
+use super::eval::runner::ContextProvenance;
 use super::login::{dashboard_secret, login_url};
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest, load_review_config};
 use super::policy::policy_service;
 use crate::access::api::{AccessState, protect};
 use crate::cli::pipeline::HISTORY_DB_FILE;
 use crate::conventions::{RulebookApiState, router as rulebook_router};
+use crate::eval::infrastructure::SqliteEvalStore;
+use crate::eval::{EvalApiState, router as eval_router};
 use crate::feedback::application::{CriterionVerifications, FeedbackService};
 use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::feedback::{FeedbackApiState, router as feedback_router};
@@ -75,6 +78,7 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     let state = DashboardState::with_allowed_hosts(history.clone(), server.dashboard.allowed_hosts.clone())
         .with_token(token.clone());
     let feedback_store = Arc::new(SqliteFeedbackStore::open(context.paths.data_dir.join(HISTORY_DB_FILE))?);
+    let eval_store = Arc::new(SqliteEvalStore::open(context.paths.data_dir.join(HISTORY_DB_FILE))?);
     let feedback = Arc::new(FeedbackService::new(feedback_store.clone()));
     let criteria = Arc::new(CriterionVerifications::new(feedback_store));
     let settings_page = settings_router(SettingsApiState::new(
@@ -95,6 +99,7 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     ))
     .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
     .merge(feedback_router(FeedbackApiState::new(feedback, criteria, history.clone(), hosts.clone(), token.clone())))
+    .merge(eval_router(EvalApiState::new(eval_store, Arc::new(ContextProvenance::new(context.clone())))))
     .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
     let dashboard_shutdown = stopped(stop_rx.clone());

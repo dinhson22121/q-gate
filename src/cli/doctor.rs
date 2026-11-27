@@ -1,9 +1,12 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
+use super::fingerprint::current_provenance;
 use super::pipeline::AppContext;
 use super::serve::repo_source;
 use super::{EXIT_ERROR, EXIT_OK};
+use crate::history::application::RunProvenance;
+use crate::settings::infrastructure::load_config;
 use crate::watch::application::ports::RepoSource;
 
 const TOOLCHAINS: &[(&str, &str)] = &[
@@ -36,6 +39,7 @@ pub async fn doctor(context: &AppContext) -> ExitCode {
         Line { level: Level::Ok, text: format!("data dir {}", context.paths.data_dir.display()) },
     ];
     lines.push(claude_line(context).await);
+    lines.extend(provenance_lines(context).await);
     if context.server().jira.enabled {
         lines.push(Line { level: Level::Ok, text: "jira provider: Atlassian Remote MCP (OAuth)".into() });
     }
@@ -57,6 +61,20 @@ pub async fn doctor(context: &AppContext) -> ExitCode {
     print_lines(&lines);
     let failed = lines.iter().any(|l| l.level == Level::Fail);
     ExitCode::from(if failed { EXIT_ERROR } else { EXIT_OK })
+}
+
+async fn provenance_lines(context: &AppContext) -> Vec<Line> {
+    let bin = context.cli_config("", "").claude_bin;
+    let config = std::env::current_dir().ok().and_then(|dir| load_config(&dir).ok()).unwrap_or_default();
+    provenance_lines_for(&current_provenance(&config.llm.model, &bin).await)
+}
+
+fn provenance_lines_for(provenance: &RunProvenance) -> Vec<Line> {
+    vec![
+        Line { level: Level::Ok, text: format!("model {}", provenance.model) },
+        Line { level: Level::Ok, text: format!("claude CLI version {}", provenance.claude_cli_version) },
+        Line { level: Level::Ok, text: format!("prompt hash {}", provenance.prompt_hash) },
+    ]
 }
 
 async fn claude_line(context: &AppContext) -> Line {
@@ -106,6 +124,17 @@ fn print_lines(lines: &[Line]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_lines_show_model_cli_version_and_prompt_hash() {
+        let provenance = RunProvenance {
+            model: "claude-opus-5-5".into(),
+            claude_cli_version: "2.1.0".into(),
+            prompt_hash: "ff".into(),
+        };
+        let texts: Vec<String> = provenance_lines_for(&provenance).into_iter().map(|l| l.text).collect();
+        assert_eq!(texts, ["model claude-opus-5-5", "claude CLI version 2.1.0", "prompt hash ff"]);
+    }
 
     #[tokio::test]
     async fn claude_probe_fails_for_a_missing_binary_and_passes_for_a_working_one() {

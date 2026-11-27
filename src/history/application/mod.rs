@@ -2,8 +2,8 @@ pub mod ports;
 pub mod use_cases;
 
 pub use crate::history::domain::{
-    FindingView, PeriodStats, RecurringIssue, ReportView, ReviewRun, RunListItem, RunStatus, StoredRun, TicketProgress,
-    Trigger,
+    FindingSourceView, FindingView, PeriodStats, RecurringIssue, ReportView, ReviewRun, RunListItem, RunProvenance,
+    RunStatus, StoredRun, TicketProgress, Trigger,
 };
 pub use ports::{HistoryError, RunFilter, RunRepository};
 pub use use_cases::{

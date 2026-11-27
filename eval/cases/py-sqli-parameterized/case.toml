@@ -1,0 +1,10 @@
+id = "py-sqli-parameterized"
+description = "The same lookup with a bound parameter must not be flagged."
+language = "python"
+
+[[forbidden]]
+file = "app/db.py"
+line = 10
+line_tolerance = 3
+category = "security"
+min_severity = "major"

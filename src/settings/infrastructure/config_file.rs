@@ -173,8 +173,9 @@ mod tests {
 
     #[test]
     fn parse_config_reports_origin_and_accepts_repo_keys() {
-        let config = parse_config("[llm]\nmodel = \"m\"\n[jira]\nenabled = true\n", "abc:.qgate.toml").unwrap();
-        assert_eq!(config.llm.model, "m");
+        let config =
+            parse_config("[llm]\nmodel = \"claude-m-1\"\n[jira]\nenabled = true\n", "abc:.qgate.toml").unwrap();
+        assert_eq!(config.llm.model, "claude-m-1");
         assert_eq!(config.jira.enabled, Some(true));
         let err = parse_config("not toml [", "abc:.qgate.toml").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }) && err.to_string().contains("abc:.qgate.toml"));

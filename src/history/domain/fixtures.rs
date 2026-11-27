@@ -137,6 +137,7 @@ pub fn stored(
         error: None,
         report,
         report_md: None,
+        provenance: None,
     }
 }
 
@@ -226,5 +227,6 @@ pub fn live_run(repo: &str, created_at: DateTime<Utc>) -> ReviewRun {
         error: None,
         report: Some(report),
         report_md: None,
+        provenance: None,
     }
 }

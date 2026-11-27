@@ -99,6 +99,10 @@ fn neutralize_tags(text: &str) -> String {
     out
 }
 
+pub fn prompt_material() -> Vec<String> {
+    vec![SYSTEM_PROMPT.to_string(), brief_schema(&[]).to_string()]
+}
+
 fn brief_schema(criterion_ids: &[&str]) -> Value {
     let id_schema = if criterion_ids.is_empty() {
         json!({"type": "string"})

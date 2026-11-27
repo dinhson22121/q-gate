@@ -67,6 +67,10 @@ fn neutralize(text: &str) -> String {
     out
 }
 
+pub fn prompt_material() -> Vec<String> {
+    vec![SYSTEM_PROMPT.to_string(), schema().to_string()]
+}
+
 fn schema() -> Value {
     json!({
         "type": "object",

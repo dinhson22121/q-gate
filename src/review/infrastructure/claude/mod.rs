@@ -5,5 +5,5 @@ mod reviewer;
 mod schema;
 
 pub use auditor::ClaudeAuditor;
-pub use prompt::prompt_fingerprint;
+pub use prompt::{prompt_fingerprint, prompt_material};
 pub use reviewer::ClaudeReviewer;

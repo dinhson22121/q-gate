@@ -295,7 +295,8 @@ async fn live_scoped_read_reaches_the_shared_dir_but_not_files_outside_it() {
     std::fs::write(share.path().join("inside.txt"), "INSIDE-7f3a").unwrap();
     std::fs::write(outside.path().join("secret.txt"), "OUTSIDE-9c1e").unwrap();
     let client =
-        CliClient::new(CliConfig { effort: "low".into(), model: "haiku".into(), ..CliConfig::default() }).unwrap();
+        CliClient::new(CliConfig { effort: "low".into(), model: "claude-haiku-5-5".into(), ..CliConfig::default() })
+            .unwrap();
     let schema = json!({"type":"object","properties":{"inside":{"type":"string"},"outside":{"type":"string"}},"required":["inside","outside"]});
     let prompt = format!(
         "Use the Read tool on {} and on {}. Return their contents in fields inside and outside; use the text UNREADABLE for a file you could not read.",

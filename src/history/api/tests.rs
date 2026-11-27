@@ -116,6 +116,28 @@ async fn run_detail_returns_full_report_or_404() {
 }
 
 #[tokio::test]
+async fn runs_expose_provenance_or_null_for_old_runs() {
+    let server = TestServer::start(None).await;
+    let (_, old) = server.json(&format!("/api/runs/{}", server.run_id)).await;
+    assert!(old["provenance"].is_null());
+    let provenance = crate::history::domain::RunProvenance {
+        model: "claude-opus-5-5".into(),
+        claude_cli_version: "2.1.0".into(),
+        prompt_hash: "ab".repeat(32),
+    };
+    let run = ReviewRun { provenance: Some(provenance), ..live_run("api", chrono::Utc::now()) };
+    let id = RecordRun::new(server.repository.clone()).execute(&run).unwrap();
+    let (_, detail) = server.json(&format!("/api/runs/{id}")).await;
+    assert_eq!(detail["provenance"]["model"], "claude-opus-5-5");
+    assert_eq!(detail["provenance"]["claude_cli_version"], "2.1.0");
+    let (_, list) = server.json("/api/runs").await;
+    let items = list["items"].as_array().unwrap();
+    let listed = items.iter().find(|i| i["id"] == id).unwrap();
+    assert_eq!(listed["provenance"]["prompt_hash"].as_str().unwrap().len(), 64);
+    assert!(items.iter().find(|i| i["id"] == server.run_id).unwrap()["provenance"].is_null());
+}
+
+#[tokio::test]
 async fn recurring_endpoint_returns_a_list() {
     let server = TestServer::start(None).await;
     let (status, body) = server.json("/api/recurring").await;

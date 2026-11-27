@@ -1,0 +1,10 @@
+id = "ts-command-injection"
+description = "User input is interpolated into a shell command passed to child_process.exec."
+language = "typescript"
+
+[[expected]]
+file = "src/image.ts"
+line = 8
+line_tolerance = 3
+category = "security"
+min_severity = "major"

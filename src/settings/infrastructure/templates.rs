@@ -2,7 +2,7 @@ pub const CONFIG_TEMPLATE: &str = r#"# qgate repository configuration.
 # Every section and key is optional; the values below are the defaults.
 
 [llm]
-# Model used for reviews.
+# Model used for reviews. Must be a full, pinned model id; aliases (opus, sonnet, haiku, default, best), -latest and [1m] are rejected.
 model = "claude-opus-5-5"
 # Reasoning effort: low | medium | high | xhigh | max
 effort = "high"

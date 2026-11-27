@@ -1,0 +1,27 @@
+id = "go-kan4-login"
+description = "KAN-4 adds login and logout with salted hashes and random session ids."
+language = "go"
+
+[ticket]
+key = "KAN-4"
+title = "Add user login and logout endpoints"
+
+[[ac]]
+text = "AC-1: `POST /login` with a correct email and password returns HTTP 200 and sets a `session` cookie containing an opaque, unguessable session id."
+expect = "met"
+
+[[ac]]
+text = "AC-2: `POST /login` with a wrong password or unknown email returns HTTP 401, sets no session cookie, and the response body does not reveal which of the two was wrong."
+expect = "met"
+
+[[ac]]
+text = "AC-3: `POST /logout` invalidates the current session server-side and clears the `session` cookie, returning HTTP 200."
+expect = "met"
+
+[[ac]]
+text = "AC-4: Passwords are never stored or compared in plaintext; comparison uses a hash with a per-user salt and a constant-time check."
+expect = "met"
+
+[[ac]]
+text = "AC-5: Session ids are generated from a cryptographically secure random source (at least 128 bits of entropy)."
+expect = "met"
