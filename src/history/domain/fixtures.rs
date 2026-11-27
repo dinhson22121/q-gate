@@ -92,7 +92,7 @@ pub fn with_criteria(requirements_key: &str, criteria: &[(&str, CriterionStatus)
             url: None,
             criteria: criteria
                 .iter()
-                .map(|(id, _)| CriterionView { id: (*id).into(), text: format!("text of {id}") })
+                .map(|(id, _)| CriterionView { id: (*id).into(), text: format!("text of {id}"), inferred: false })
                 .collect(),
         },
         assessments: criteria
@@ -164,7 +164,7 @@ pub fn review_report() -> ReviewReport {
                 key: "QG-7".into(),
                 title: "Login".into(),
                 url: Some("https://jira.example/browse/QG-7".into()),
-                criteria: vec![AcceptanceCriterion { id: "AC1".into(), text: "Users can log in".into() }],
+                criteria: vec![AcceptanceCriterion::new("AC1", "Users can log in")],
             },
             assessments: vec![CriterionAssessment {
                 criterion_id: "AC1".into(),

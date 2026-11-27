@@ -7,13 +7,14 @@ use futures::future::BoxFuture;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::review::application::TicketBrief;
-use crate::tickets::application::{BriefCache, CacheError, CachedTicket, TicketCache};
+use crate::tickets::application::{BriefCache, CacheError, CachedTicket, CriteriaCache, TicketCache};
 use crate::tickets::domain::TicketKey;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const BRIEF_RETENTION_DAYS: i64 = 30;
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE ticket_cache (
         key          TEXT    NOT NULL PRIMARY KEY,
         jira_updated TEXT,
@@ -26,7 +27,16 @@ const MIGRATIONS: &[&str] = &["
         created_at INTEGER NOT NULL
     );
     CREATE INDEX idx_brief_cache_created_at ON brief_cache (created_at);
-"];
+",
+    "
+    CREATE TABLE inferred_criteria_cache (
+        hash          TEXT    NOT NULL PRIMARY KEY,
+        criteria_json TEXT    NOT NULL,
+        created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX idx_inferred_criteria_created_at ON inferred_criteria_cache (created_at);
+",
+];
 
 #[derive(Clone)]
 pub struct SqliteTicketCache {
@@ -50,6 +60,7 @@ impl SqliteTicketCache {
         migrate(&mut conn)?;
         let cutoff = (Utc::now() - chrono::Duration::days(BRIEF_RETENTION_DAYS)).timestamp_millis();
         conn.execute("DELETE FROM brief_cache WHERE created_at < ?1", [cutoff]).map_err(storage)?;
+        conn.execute("DELETE FROM inferred_criteria_cache WHERE created_at < ?1", [cutoff]).map_err(storage)?;
         Ok(Self { conn: Arc::new(Mutex::new(conn)) })
     }
 
@@ -127,6 +138,32 @@ impl TicketCache for SqliteTicketCache {
     }
 }
 
+impl CriteriaCache for SqliteTicketCache {
+    fn get_criteria<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, Result<Option<Vec<String>>, CacheError>> {
+        let hash = hash.to_string();
+        Box::pin(self.with_conn(move |conn| {
+            let json: Option<String> = conn
+                .query_row("SELECT criteria_json FROM inferred_criteria_cache WHERE hash = ?1", [&hash], |r| r.get(0))
+                .optional()
+                .map_err(storage)?;
+            Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
+        }))
+    }
+
+    fn put_criteria<'a>(&'a self, hash: &'a str, criteria: &'a [String]) -> BoxFuture<'a, Result<(), CacheError>> {
+        let hash = hash.to_string();
+        let json = serde_json::to_string(criteria).map_err(storage);
+        Box::pin(self.with_conn(move |conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO inferred_criteria_cache (hash, criteria_json, created_at) VALUES (?1, ?2, ?3)",
+                params![hash, json?, Utc::now().timestamp_millis()],
+            )
+            .map_err(storage)?;
+            Ok(())
+        }))
+    }
+}
+
 impl BriefCache for SqliteTicketCache {
     fn get_brief<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, Result<Option<TicketBrief>, CacheError>> {
         let hash = hash.to_string();
@@ -183,6 +220,29 @@ mod tests {
         cache.put_ticket(&entry("v2", 5)).await.unwrap();
 
         assert_eq!(cache.get_ticket(&key).await.unwrap(), Some(entry("v2", 5)));
+    }
+
+    #[tokio::test]
+    async fn stores_inferred_criteria_and_treats_unreadable_rows_as_misses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qgate.db");
+        let criteria = vec!["a -> b".to_string(), "c -> d".to_string()];
+        {
+            let cache = SqliteTicketCache::open(&path).unwrap();
+            assert_eq!(cache.get_criteria("h").await.unwrap(), None);
+            cache.put_criteria("h", &criteria).await.unwrap();
+            cache.put_criteria("empty", &[]).await.unwrap();
+            cache
+                .conn
+                .lock()
+                .unwrap()
+                .execute("INSERT INTO inferred_criteria_cache VALUES ('bad', '{', ?1)", [Utc::now().timestamp_millis()])
+                .unwrap();
+        }
+        let reopened = SqliteTicketCache::open(&path).unwrap();
+        assert_eq!(reopened.get_criteria("h").await.unwrap(), Some(criteria));
+        assert_eq!(reopened.get_criteria("empty").await.unwrap(), Some(vec![]));
+        assert_eq!(reopened.get_criteria("bad").await.unwrap(), None);
     }
 
     #[tokio::test]

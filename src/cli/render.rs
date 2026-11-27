@@ -64,7 +64,8 @@ fn render_requirements(out: &mut String, requirements: Option<&RequirementsRepor
             CriterionStatus::NotMet => ("✘ not met ", Tone::Bad),
             CriterionStatus::Unclear => ("? unclear ", Tone::Warn),
         };
-        let _ = writeln!(out, "  {} {} {}", paint(symbol, tone, view.color), criterion.id, criterion.text);
+        let advisory = if criterion.inferred { " (inferred, advisory)" } else { "" };
+        let _ = writeln!(out, "  {} {} {}{advisory}", paint(symbol, tone, view.color), criterion.id, criterion.text);
         let _ = writeln!(out, "      {}", assessment.explanation);
         for evidence in &assessment.evidence {
             let _ = writeln!(out, "      {}:{}  {}", evidence.file, evidence.line, evidence.quote.trim());
@@ -312,7 +313,7 @@ mod tests {
                     key: "SHOP-7".into(),
                     title: "Export".into(),
                     url: None,
-                    criteria: vec![AcceptanceCriterion { id: "AC-1".into(), text: "Export CSV".into() }],
+                    criteria: vec![AcceptanceCriterion::new("AC-1", "Export CSV")],
                 },
                 assessments: vec![CriterionAssessment {
                     criterion_id: "AC-1".into(),
@@ -362,6 +363,20 @@ mod tests {
         assert!(text.contains("FAILED — 1 blocking finding(s); unmet criteria: AC-1; failed checks: unit"));
         assert!(text.contains("est. $0.09"));
         assert!(!text.contains('\u{1b}'), "no ANSI codes without color");
+    }
+
+    #[test]
+    fn terminal_output_labels_inferred_criteria_as_advisory() {
+        let mut report = report();
+        report.requirements.as_mut().unwrap().requirements.criteria[0] =
+            AcceptanceCriterion::inferred("AC-1", "Export CSV");
+        let view = TerminalView {
+            report: &report,
+            filter: DisplayFilter { min_severity: Severity::Minor, min_confidence: Confidence::Medium },
+            ticket_note: None,
+            color: false,
+        };
+        assert!(render_terminal(&view).contains("AC-1 Export CSV (inferred, advisory)"));
     }
 
     #[test]

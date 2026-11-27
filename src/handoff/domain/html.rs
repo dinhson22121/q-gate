@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::document::{HandoffDocument, HandoffInput};
+use super::document::{CriterionRow, HandoffDocument, HandoffInput};
 use crate::review::application::{
     AgentReport, CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, EvidenceRef, Finding, ReviewReport,
     RuleViolation, Severity, TestResult, TestVerdict,
@@ -138,6 +138,10 @@ fn ticket_html(ticket: &super::document::TicketInfo) -> String {
     }
 }
 
+fn label_text(row: &CriterionRow) -> String {
+    if row.inferred { format!("{} (inferred, advisory)", row.text) } else { row.text.clone() }
+}
+
 fn criteria(out: &mut String, doc: &HandoffDocument, report: &ReviewReport) {
     out.push_str("<section id=\"criteria\"><h2>Acceptance criteria</h2>\n");
     if doc.criteria.is_empty() {
@@ -153,7 +157,8 @@ fn criteria(out: &mut String, doc: &HandoffDocument, report: &ReviewReport) {
             CriterionStatus::NotMet => ("notmet", "Not met"),
             CriterionStatus::Unclear => ("unclear", "Unclear"),
         };
-        let heading = format!("{} <strong>{}</strong> {}", tag(class, label), escape(&row.id), escape(&row.text));
+        let heading =
+            format!("{} <strong>{}</strong> {}", tag(class, label), escape(&row.id), escape(&label_text(row)));
         let _ = writeln!(out, "<div class=\"card\"><h3>{heading}</h3>");
         if !row.explanation.trim().is_empty() {
             let _ = writeln!(out, "<p>{}</p>", escape(&row.explanation));

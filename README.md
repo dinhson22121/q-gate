@@ -227,6 +227,14 @@ the `[jira]` section of its `.qgate.toml`; the connection (`base_url`, `email`, 
 server-only (see "Security notes"). To use an MCP server instead of the REST API, choose provider "MCP" on the
 Settings page; the default command (`uvx mcp-atlassian`) needs the `python` toolchain.
 
+Acceptance criteria come from the acceptance-criteria field when set (every item), otherwise from the description:
+the items under an "Acceptance Criteria" / "AC" / "Definition of Done" heading, else Gherkin scenarios, else items
+written as `condition -> expected result` (`->`, `=>`, `→`). A plain `login:` line inside the list groups the items
+below it ("login: …") instead of ending the section; headings such as `Notes:` or `Out of scope:` still end it.
+When nothing is found and the ticket analyst may read the description, the model infers up to 8 criteria from it
+(cached per description). Inferred criteria are labelled "inferred · advisory": they are reviewed and get tests, but
+neither an unmet inferred criterion nor a failing test bound only to inferred criteria blocks the gate.
+
 ## Figma
 
 qgate can compare a change with the Figma frames linked from the ticket. Links are read from the ticket's

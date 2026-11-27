@@ -88,7 +88,7 @@ impl GatePolicy {
             .requirements
             .map(|r| {
                 let ids = if self.require_all_criteria_met { r.unsatisfied() } else { r.unmet() };
-                ids.into_iter().map(str::to_string).collect()
+                ids.into_iter().filter(|id| !r.is_inferred(id)).map(str::to_string).collect()
             })
             .unwrap_or_default();
         let failed_checks: Vec<String> =
@@ -98,7 +98,7 @@ impl GatePolicy {
         let (rule_violations, design_mismatches) =
             input.agents.map_or_else(Default::default, |a| self.agent_violations(a));
         let (tests_block, failed_tests, advisory_tests) =
-            input.agents.map_or((false, Vec::new(), Vec::new()), |a| self.test_gate(a));
+            input.agents.map_or((false, Vec::new(), Vec::new()), |a| self.test_gate(a, input.requirements));
         let agents_ok = !tests_block
             && (!self.fail_on_rule_violation || rule_violations.is_empty())
             && design_mismatches.is_empty();
@@ -115,7 +115,11 @@ impl GatePolicy {
         }
     }
 
-    fn test_gate(&self, agents: &AgentReport) -> (bool, Vec<String>, Vec<String>) {
+    fn test_gate(
+        &self,
+        agents: &AgentReport,
+        requirements: Option<&RequirementsReport>,
+    ) -> (bool, Vec<String>, Vec<String>) {
         let failed: Vec<String> = agents
             .tests
             .iter()
@@ -125,15 +129,24 @@ impl GatePolicy {
         let Some(brief) = &agents.brief else {
             return (self.fail_on_test_failure && !failed.is_empty(), failed, Vec::new());
         };
-        let must_pass =
-            |id: &str| brief.scenarios.iter().find(|s| s.id == id).is_some_and(|s| !s.criterion_ids.is_empty());
+        let inferred = |id: &String| requirements.is_some_and(|r| r.is_inferred(id));
+        let scenario = |id: &str| brief.scenarios.iter().find(|s| s.id == id);
+        let must_pass = |id: &str| scenario(id).is_some_and(|s| !s.criterion_ids.is_empty());
+        let advisory_only = |id: &str| {
+            scenario(id).is_some_and(|s| !s.criterion_ids.is_empty() && s.criterion_ids.iter().all(inferred))
+        };
         let mut must_failed = false;
         let mut unverified = Vec::new();
+        let mut inferred_unpassed = Vec::new();
         let mut edge_total = 0u32;
         let mut edge_pass = 0u32;
         let mut edge_unpassed = Vec::new();
         for test in &agents.tests {
-            if must_pass(&test.scenario_id) {
+            if advisory_only(&test.scenario_id) {
+                if test.verdict != TestVerdict::Passed {
+                    inferred_unpassed.push(test.scenario_id.clone());
+                }
+            } else if must_pass(&test.scenario_id) {
                 match test.verdict {
                     TestVerdict::Passed => {}
                     TestVerdict::FailedAssertion => must_failed = true,
@@ -153,6 +166,7 @@ impl GatePolicy {
         let edge_blocks = !edge_ok || (self.fail_on_test_failure && !edge_unpassed.is_empty());
         let block = (self.require_must_pass_tests && must_failed) || edge_blocks || must_unverified_blocks;
         let mut advisory = unverified;
+        advisory.extend(inferred_unpassed);
         if !edge_blocks {
             advisory.extend(edge_unpassed);
         }
@@ -290,6 +304,96 @@ mod tests {
         let lenient = input(&GatePolicy { require_all_criteria_met: false, ..GatePolicy::default() });
         assert!(lenient.passed, "with the relaxed policy only not_met blocks");
         assert!(lenient.unmet_criteria.is_empty());
+    }
+
+    fn inferred_report(status: crate::review::domain::requirements::CriterionStatus) -> RequirementsReport {
+        use crate::review::domain::requirements::*;
+        RequirementsReport {
+            requirements: Requirements {
+                key: "K-1".into(),
+                title: "t".into(),
+                url: None,
+                criteria: vec![AcceptanceCriterion::inferred("K-1/AC-I1", "wrong password -> Invalid credential")],
+            },
+            assessments: vec![CriterionAssessment {
+                criterion_id: "K-1/AC-I1".into(),
+                status,
+                explanation: String::new(),
+                evidence: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn an_unmet_inferred_criterion_never_blocks() {
+        use crate::review::domain::requirements::CriterionStatus;
+        for status in [CriterionStatus::NotMet, CriterionStatus::Unclear] {
+            let report = inferred_report(status);
+
+            let decision = GatePolicy::default().decide(GateInput {
+                findings: &[],
+                requirements: Some(&report),
+                checks: &[],
+                incomplete: false,
+                agents: None,
+            });
+
+            assert!(decision.passed, "{status:?}");
+            assert!(decision.unmet_criteria.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_failing_test_bound_only_to_inferred_criteria_is_advisory() {
+        use crate::review::domain::agent_results::*;
+        use crate::review::domain::requirements::CriterionStatus;
+        let report = inferred_report(CriterionStatus::Met);
+        let scenario = |id: &str, acs: &[&str]| TestScenario {
+            id: id.into(),
+            criterion_ids: acs.iter().map(|a| (*a).to_string()).collect(),
+            title: id.into(),
+            given: String::new(),
+            when: String::new(),
+            then: "x".into(),
+        };
+        let result = |id: &str| TestResult {
+            scenario_id: id.into(),
+            language: "go".into(),
+            verdict: TestVerdict::FailedAssertion,
+            evidence: None,
+            note: String::new(),
+        };
+        let agents = AgentReport {
+            brief: Some(TicketBrief { scenarios: vec![scenario("S1", &["K-1/AC-I1"])], ..TicketBrief::default() }),
+            tests: vec![result("S1")],
+            ..AgentReport::default()
+        };
+
+        let decision = GatePolicy::default().decide(GateInput {
+            findings: &[],
+            requirements: Some(&report),
+            checks: &[],
+            incomplete: false,
+            agents: Some(&agents),
+        });
+
+        assert!(decision.passed);
+        assert_eq!(decision.advisory_tests, vec!["S1"]);
+        let mixed = AgentReport {
+            brief: Some(TicketBrief {
+                scenarios: vec![scenario("S1", &["K-1/AC-I1", "K-1/AC-1"])],
+                ..TicketBrief::default()
+            }),
+            ..agents
+        };
+        let blocked = GatePolicy::default().decide(GateInput {
+            findings: &[],
+            requirements: Some(&report),
+            checks: &[],
+            incomplete: false,
+            agents: Some(&mixed),
+        });
+        assert!(!blocked.passed, "a scenario that also covers a written criterion stays must-pass");
     }
 
     #[test]

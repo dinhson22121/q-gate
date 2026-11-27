@@ -31,7 +31,8 @@ use crate::testing::application::metered_loop::MeteredToolLoop;
 use crate::testing::application::ports::ScenarioSnapshots;
 use crate::testing::infrastructure::CliToolLoop;
 use crate::testing::{ClaudeTestAgent, TestAgentSettings, TestLanguage};
-use crate::tickets::infrastructure::{ClaudeTicketAnalyst, SqliteTicketCache};
+use crate::tickets::application::InferCriteria;
+use crate::tickets::infrastructure::{ClaudeCriteriaInferrer, ClaudeTicketAnalyst, SqliteTicketCache};
 
 const TEST_AGENT_MAX_TURNS: u32 = 30;
 const TEST_AGENT_MODEL_TIME: Duration = Duration::from_secs(600);
@@ -39,6 +40,7 @@ const REDTEAM_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Agents {
     pub suite: AgentSuite,
+    pub criteria: Option<Arc<InferCriteria>>,
     pub meter: UsageMeter,
     pub notes: Vec<String>,
 }
@@ -59,6 +61,7 @@ pub fn build_agents(
     let meter = UsageMeter::default();
     let model: Arc<dyn StructuredModel> = Arc::new(MeteredModel::new(model, meter.clone()));
     let mut notes = Vec::new();
+    let mut criteria = None;
     let mut suite = AgentSuite {
         max_parallel: config.max_parallel,
         max_scenarios: config.tests.max_scenarios as usize,
@@ -67,11 +70,15 @@ pub fn build_agents(
     if config.ticket_analyst.enabled {
         match SqliteTicketCache::open(db) {
             Ok(cache) => {
-                suite.analyst = Some(Arc::new(ClaudeTicketAnalyst::new(
-                    model.clone(),
-                    Arc::new(cache),
-                    config.tests.max_scenarios as usize,
-                )));
+                let cache = Arc::new(cache);
+                if config.ticket_analyst.use_description {
+                    criteria = Some(Arc::new(InferCriteria::new(
+                        Arc::new(ClaudeCriteriaInferrer::new(model.clone())),
+                        cache.clone(),
+                    )));
+                }
+                suite.analyst =
+                    Some(Arc::new(ClaudeTicketAnalyst::new(model.clone(), cache, config.tests.max_scenarios as usize)));
             }
             Err(e) => notes.push(format!("ticket analyst disabled: {e}")),
         }
@@ -110,7 +117,7 @@ pub fn build_agents(
             Err(e) => notes.push(format!("design review disabled: {e:#}")),
         }
     }
-    Ok(Some(Agents { suite, meter, notes }))
+    Ok(Some(Agents { suite, criteria, meter, notes }))
 }
 
 pub fn rulebook_service(context: Arc<AppContext>) -> Result<Arc<RulebookService>> {

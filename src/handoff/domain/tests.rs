@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::fixtures::*;
 use super::*;
-use crate::review::application::ReviewReport;
+use crate::review::application::{AcceptanceCriterion, ReviewReport};
 
 fn input(report: &ReviewReport) -> HandoffInput<'_> {
     HandoffInput { meta: meta(), report, rules: BlockingRules::default() }
@@ -386,4 +386,17 @@ fn dismissed_non_security_findings_are_left_out_and_security_ones_become_warning
     assert!(doc.blocking.iter().all(|t| t.title != "SQL injection"));
     let task = doc.warnings.iter().find(|t| t.title == "SQL injection").unwrap();
     assert!(task.facts.iter().any(|f| f.label == "Dismissed" && f.value == "Dismissed by user"));
+}
+
+#[test]
+fn inferred_criterion_is_labelled_and_never_a_blocking_task() {
+    let mut report = failing_report();
+    let requirements = report.requirements.as_mut().unwrap();
+    requirements.requirements.criteria[1] = AcceptanceCriterion::inferred("AC-2", "Receipt is emailed");
+    let document = HandoffDocument::build(&input(&report));
+    let markdown = render_markdown(&document);
+    assert!(markdown.contains("| AC-2 | Receipt is emailed (inferred, advisory) | NOT MET | - |"), "{markdown}");
+    assert!(!document.blocking.iter().any(|t| t.kind == TaskKind::UnmetCriterion));
+    let warning = document.warnings.iter().find(|t| t.kind == TaskKind::UnmetCriterion).expect("advisory warning");
+    assert!(warning.facts.iter().any(|f| f.label == "Advisory"));
 }

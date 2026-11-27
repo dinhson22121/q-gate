@@ -36,7 +36,7 @@ fn requirements() -> Requirements {
         key: "SHOP-7".into(),
         title: "calculator".into(),
         url: None,
-        criteria: vec![AcceptanceCriterion { id: "AC-1".into(), text: "Add returns the sum of both numbers".into() }],
+        criteria: vec![AcceptanceCriterion::new("AC-1", "Add returns the sum of both numbers")],
     }
 }
 

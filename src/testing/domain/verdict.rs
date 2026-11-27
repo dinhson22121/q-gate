@@ -290,10 +290,7 @@ mod tests {
             key: "SHOP-7".into(),
             title: "t".into(),
             url: None,
-            criteria: vec![
-                AcceptanceCriterion { id: "AC-1".into(), text: "one".into() },
-                AcceptanceCriterion { id: "AC-2".into(), text: "two".into() },
-            ],
+            criteria: vec![AcceptanceCriterion::new("AC-1", "one"), AcceptanceCriterion::new("AC-2", "two")],
         };
         let ids = ["SHOP-7/AC-2".to_string(), "AC-1".to_string(), "OTHER/AC-1".to_string()];
         assert_eq!(criterion_texts(Some(&requirements), &ids), ["two", "one"]);

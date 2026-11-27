@@ -234,7 +234,7 @@ mod tests {
             key: "ABC-1".into(),
             title: "Export \"CSV\"".into(),
             url: None,
-            criteria: vec![AcceptanceCriterion { id: "AC-1".into(), text: "User can export".into() }],
+            criteria: vec![AcceptanceCriterion::new("AC-1", "User can export")],
         }
     }
 

@@ -63,3 +63,12 @@ pub struct BriefRequest {
 pub trait BriefGenerator: Send + Sync {
     fn generate<'a>(&'a self, request: &'a BriefRequest) -> BoxFuture<'a, Result<TicketBrief, AgentError>>;
 }
+
+pub trait CriteriaInferrer: Send + Sync {
+    fn infer<'a>(&'a self, title: &'a str, description: &'a str) -> BoxFuture<'a, Result<Vec<String>, AgentError>>;
+}
+
+pub trait CriteriaCache: Send + Sync {
+    fn get_criteria<'a>(&'a self, hash: &'a str) -> BoxFuture<'a, Result<Option<Vec<String>>, CacheError>>;
+    fn put_criteria<'a>(&'a self, hash: &'a str, criteria: &'a [String]) -> BoxFuture<'a, Result<(), CacheError>>;
+}

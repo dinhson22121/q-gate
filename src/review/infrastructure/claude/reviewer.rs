@@ -87,7 +87,7 @@ mod tests {
             key: "SHOP-1".into(),
             title: "t".into(),
             url: None,
-            criteria: vec![AcceptanceCriterion { id: "SHOP-1/AC-1".into(), text: "evaluates input".into() }],
+            criteria: vec![AcceptanceCriterion::new("SHOP-1/AC-1", "evaluates input")],
         }
     }
 

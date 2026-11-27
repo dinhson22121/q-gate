@@ -7,6 +7,18 @@ use super::verification::evidence_exists;
 pub struct AcceptanceCriterion {
     pub id: String,
     pub text: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub inferred: bool,
+}
+
+impl AcceptanceCriterion {
+    pub fn new(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self { id: id.into(), text: text.into(), inferred: false }
+    }
+
+    pub fn inferred(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self { inferred: true, ..Self::new(id, text) }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -71,6 +83,10 @@ impl RequirementsReport {
         self.assessments.iter().filter(|a| a.status != CriterionStatus::Met).map(|a| a.criterion_id.as_str()).collect()
     }
 
+    pub fn is_inferred(&self, criterion_id: &str) -> bool {
+        self.requirements.criteria.iter().any(|c| c.id == criterion_id && c.inferred)
+    }
+
     pub fn met_count(&self) -> usize {
         self.assessments.iter().filter(|a| a.status == CriterionStatus::Met).count()
     }
@@ -128,9 +144,9 @@ mod tests {
             title: "Export".into(),
             url: None,
             criteria: vec![
-                AcceptanceCriterion { id: "AC-1".into(), text: "User can export CSV".into() },
-                AcceptanceCriterion { id: "AC-2".into(), text: "Export is audited".into() },
-                AcceptanceCriterion { id: "AC-3".into(), text: "Works offline".into() },
+                AcceptanceCriterion::new("AC-1", "User can export CSV"),
+                AcceptanceCriterion::new("AC-2", "Export is audited"),
+                AcceptanceCriterion::new("AC-3", "Works offline"),
             ],
         }
     }
