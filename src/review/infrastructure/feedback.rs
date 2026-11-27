@@ -57,6 +57,7 @@ fn to_feedback(assessment: Assessment) -> FindingFeedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::feedback::application::Scope;
     use crate::feedback::infrastructure::SqliteFeedbackStore;
     use crate::review::domain::finding::fixtures::finding;
 
@@ -70,10 +71,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = service(&dir);
         let dismissed = finding("a.go", 1, Severity::Critical, "x := 1");
-        service.record("repo", &facts_of(&dismissed), Verdict::Dismissed).unwrap();
+        service.record("repo", &facts_of(&dismissed), Verdict::Dismissed, Scope::Repo).unwrap();
         for i in 0..9 {
             let other = finding("b.go", i, Severity::Major, &format!("y{i}"));
-            service.record("repo", &facts_of(&other), Verdict::Dismissed).unwrap();
+            service.record("repo", &facts_of(&other), Verdict::Dismissed, Scope::Repo).unwrap();
         }
         let fresh = finding("c.go", 3, Severity::Critical, "z");
         let policy = StoredFeedback::new(service, "repo".into());
@@ -91,7 +92,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = service(&dir);
         let f = finding("a.go", 1, Severity::Critical, "x := 1");
-        service.record("repo", &facts_of(&f), Verdict::Dismissed).unwrap();
+        service.record("repo", &facts_of(&f), Verdict::Dismissed, Scope::Repo).unwrap();
 
         let feedback = StoredFeedback::new(service, "other".into()).assess(&[f]).await;
 

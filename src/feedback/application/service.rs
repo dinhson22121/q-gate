@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use super::ports::{FeedbackError, FeedbackStore};
 use crate::feedback::domain::fingerprint::{fingerprint, is_fingerprint};
-use crate::feedback::domain::model::{Assessment, FindingFacts, Judgment, KindScore, Verdict, kind_of};
+use crate::feedback::domain::model::{Assessment, FindingFacts, Judgment, KindScore, Scope, Verdict, kind_of};
 use crate::feedback::domain::scoring::score_kinds;
+
+pub type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
 pub struct FeedbackService {
     store: Arc<dyn FeedbackStore>,
+    clock: Clock,
 }
 
 fn require(name: &str, value: &str) -> Result<(), FeedbackError> {
@@ -19,15 +24,29 @@ fn require(name: &str, value: &str) -> Result<(), FeedbackError> {
 
 impl FeedbackService {
     pub fn new(store: Arc<dyn FeedbackStore>) -> Self {
-        Self { store }
+        Self { store, clock: Arc::new(Utc::now) }
     }
 
-    pub fn record(&self, repo: &str, facts: &FindingFacts, verdict: Verdict) -> Result<String, FeedbackError> {
+    pub fn with_clock(self, clock: Clock) -> Self {
+        Self { clock, ..self }
+    }
+
+    pub fn now(&self) -> DateTime<Utc> {
+        (self.clock)()
+    }
+
+    pub fn record(
+        &self,
+        repo: &str,
+        facts: &FindingFacts,
+        verdict: Verdict,
+        scope: Scope,
+    ) -> Result<String, FeedbackError> {
         require("repo", repo)?;
         require("source", &facts.source)?;
         require("category", &facts.category)?;
         let print = fingerprint(facts);
-        self.store.put(repo, &print, &kind_of(facts), verdict)?;
+        self.store.put(repo, &print, &kind_of(facts), verdict, scope, self.now())?;
         Ok(print)
     }
 
@@ -45,8 +64,13 @@ impl FeedbackService {
             return Ok(Vec::new());
         }
         let prints: Vec<String> = findings.iter().map(fingerprint).collect();
-        let verdicts: HashMap<String, Verdict> =
-            self.store.find(repo, &prints)?.into_iter().map(|j| (j.fingerprint, j.verdict)).collect();
+        let now = self.now();
+        let verdicts: HashMap<String, Verdict> = self
+            .store
+            .find(repo, &prints)?
+            .into_iter()
+            .filter_map(|j| j.effective_verdict(now).map(|verdict| (j.fingerprint, verdict)))
+            .collect();
         let scores: HashMap<String, KindScore> = self.scores(repo)?.into_iter().map(|s| (s.kind.clone(), s)).collect();
         Ok(findings
             .iter()

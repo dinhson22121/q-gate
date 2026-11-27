@@ -2,11 +2,11 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::feedback::application::{FeedbackError, FeedbackStore};
-use crate::feedback::domain::model::{Judgment, Verdict};
+use crate::feedback::domain::model::{Judgment, Scope, Verdict};
 use crate::feedback::domain::scoring::KindEvent;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -14,7 +14,8 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const NEXT_SEQ: &str = "SELECT COALESCE(MAX(seq), 0) + 1 FROM
     (SELECT seq FROM feedback_judgments UNION ALL SELECT seq FROM feedback_resets)";
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE feedback_judgments (
         repo        TEXT    NOT NULL,
         fingerprint TEXT    NOT NULL,
@@ -31,7 +32,16 @@ const MIGRATIONS: &[&str] = &["
         seq  INTEGER NOT NULL,
         PRIMARY KEY (repo, kind)
     );
-"];
+",
+    "
+    ALTER TABLE feedback_judgments ADD COLUMN scope TEXT NOT NULL DEFAULT 'repo';
+    CREATE INDEX feedback_judgments_global ON feedback_judgments (fingerprint) WHERE scope = 'global';
+",
+];
+
+const FIND_EFFECTIVE: &str = "SELECT verdict, scope, recorded_at, repo FROM feedback_judgments
+    WHERE fingerprint = ?2 AND (repo = ?1 OR scope = 'global')
+    ORDER BY repo = ?1 DESC, seq DESC LIMIT 1";
 
 fn storage(err: impl std::fmt::Display) -> FeedbackError {
     FeedbackError::Storage(err.to_string())
@@ -88,17 +98,36 @@ fn parse_verdict(value: &str) -> Result<Verdict, FeedbackError> {
     Verdict::parse(value).ok_or_else(|| FeedbackError::Storage(format!("unknown verdict '{value}'")))
 }
 
+fn parse_scope(value: &str) -> Result<Scope, FeedbackError> {
+    Scope::parse(value).ok_or_else(|| FeedbackError::Storage(format!("unknown scope '{value}'")))
+}
+
+fn parse_time(value: &str) -> Result<DateTime<Utc>, FeedbackError> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|t| t.with_timezone(&Utc))
+        .map_err(|e| FeedbackError::Storage(format!("invalid recorded_at '{value}': {e}")))
+}
+
 impl FeedbackStore for SqliteFeedbackStore {
-    fn put(&self, repo: &str, fingerprint: &str, kind: &str, verdict: Verdict) -> Result<(), FeedbackError> {
+    fn put(
+        &self,
+        repo: &str,
+        fingerprint: &str,
+        kind: &str,
+        verdict: Verdict,
+        scope: Scope,
+        recorded_at: DateTime<Utc>,
+    ) -> Result<(), FeedbackError> {
         let mut conn = self.lock()?;
         let tx = conn.transaction().map_err(storage)?;
         let seq: i64 = tx.query_row(NEXT_SEQ, [], |r| r.get(0)).map_err(storage)?;
         tx.execute(
-            "INSERT INTO feedback_judgments (repo, fingerprint, kind, verdict, seq, recorded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO feedback_judgments (repo, fingerprint, kind, verdict, seq, recorded_at, scope)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(repo, fingerprint) DO UPDATE SET kind = excluded.kind, verdict = excluded.verdict,
-                                                         seq = excluded.seq, recorded_at = excluded.recorded_at",
-            params![repo, fingerprint, kind, verdict.as_str(), seq, Utc::now().to_rfc3339()],
+                                                         seq = excluded.seq, recorded_at = excluded.recorded_at,
+                                                         scope = excluded.scope",
+            params![repo, fingerprint, kind, verdict.as_str(), seq, recorded_at.to_rfc3339(), scope.as_str()],
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)
@@ -107,22 +136,31 @@ impl FeedbackStore for SqliteFeedbackStore {
     fn delete(&self, repo: &str, fingerprint: &str) -> Result<bool, FeedbackError> {
         let conn = self.lock()?;
         let removed = conn
-            .execute("DELETE FROM feedback_judgments WHERE repo = ?1 AND fingerprint = ?2", params![repo, fingerprint])
+            .execute(
+                "DELETE FROM feedback_judgments WHERE fingerprint = ?2 AND (repo = ?1 OR scope = 'global')",
+                params![repo, fingerprint],
+            )
             .map_err(storage)?;
         Ok(removed > 0)
     }
 
     fn find(&self, repo: &str, fingerprints: &[String]) -> Result<Vec<Judgment>, FeedbackError> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare("SELECT verdict FROM feedback_judgments WHERE repo = ?1 AND fingerprint = ?2")
-            .map_err(storage)?;
+        let mut stmt = conn.prepare(FIND_EFFECTIVE).map_err(storage)?;
         let mut found = Vec::new();
         for fingerprint in fingerprints {
-            let verdict: Option<String> =
-                stmt.query_row(params![repo, fingerprint], |r| r.get(0)).optional().map_err(storage)?;
-            if let Some(verdict) = verdict {
-                found.push(Judgment { fingerprint: fingerprint.clone(), verdict: parse_verdict(&verdict)? });
+            let row: Option<(String, String, String, String)> = stmt
+                .query_row(params![repo, fingerprint], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .optional()
+                .map_err(storage)?;
+            if let Some((verdict, scope, recorded_at, owner)) = row {
+                found.push(Judgment {
+                    repo: owner,
+                    fingerprint: fingerprint.clone(),
+                    verdict: parse_verdict(&verdict)?,
+                    scope: parse_scope(&scope)?,
+                    recorded_at: parse_time(&recorded_at)?,
+                });
             }
         }
         Ok(found)

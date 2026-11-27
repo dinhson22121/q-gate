@@ -7,11 +7,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::FeedbackApiState;
-use crate::feedback::application::{FeedbackError, FindingFacts, Verdict, fingerprint, kind_of};
+use crate::feedback::application::{
+    DISMISSAL_TTL_DAYS, FeedbackError, FindingFacts, Judgment, Scope, Verdict, fingerprint, kind_of,
+};
 use crate::history::application::{FindingView, GetRun, HistoryError, StoredRun};
 
-const RECORD_HINT: &str =
-    "body must be {\"run_id\": number, \"index\": number, \"verdict\": \"accepted\" | \"dismissed\"}";
+const RECORD_HINT: &str = "body must be {\"run_id\": number, \"index\": number, \"verdict\": \"accepted\" | \"dismissed\", \"scope\"?: \"repo\" | \"global\"}";
 const TARGET_HINT: &str = "body must be {\"run_id\": number, \"index\": number}";
 const RESET_HINT: &str = "body must be {\"run_id\": number, \"kind\": string}";
 const MAX_KIND_CHARS: usize = 200;
@@ -124,20 +125,33 @@ pub(super) async fn run_feedback(State(state): State<FeedbackApiState>, Path(id)
     let repo = run.repo_path.clone();
     let service = state.service.clone();
     let lookup = fingerprints.clone();
-    let (judgments, scores) = {
+    let (judgments, scores, now) = {
         let repo = repo.clone();
-        blocking(move || Ok::<_, FeedbackError>((service.judgments(&repo, &lookup)?, service.scores(&repo)?))).await?
+        blocking(move || {
+            Ok::<_, FeedbackError>((service.judgments(&repo, &lookup)?, service.scores(&repo)?, service.now()))
+        })
+        .await?
     };
     let items: Vec<Value> = facts
         .iter()
         .zip(&fingerprints)
         .enumerate()
         .map(|(index, (fact, fingerprint))| {
-            let verdict = judgments.iter().find(|j| &j.fingerprint == fingerprint).map(|j| j.verdict.as_str());
-            json!({ "index": index, "fingerprint": fingerprint, "kind": kind_of(fact), "verdict": verdict })
+            let judgment = judgments.iter().find(|j| &j.fingerprint == fingerprint);
+            json!({
+                "index": index,
+                "fingerprint": fingerprint,
+                "kind": kind_of(fact),
+                "verdict": judgment.and_then(|j| j.effective_verdict(now)).map(Verdict::as_str),
+                "scope": judgment.map(|j| j.scope.as_str()),
+                "expires_at": judgment.and_then(Judgment::expires_at).map(|at| at.to_rfc3339()),
+                "expired": judgment.is_some_and(|j| j.is_expired(now)),
+                "inherited": judgment.is_some_and(|j| j.repo != repo),
+            })
         })
         .collect();
-    Ok(Json(json!({ "repo": repo, "items": items, "scores": scores })).into_response())
+    Ok(Json(json!({ "repo": repo, "dismissal_ttl_days": DISMISSAL_TTL_DAYS, "items": items, "scores": scores }))
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -146,16 +160,23 @@ struct RecordBody {
     run_id: i64,
     index: usize,
     verdict: String,
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 pub(super) async fn record(State(state): State<FeedbackApiState>, body: Bytes) -> ApiResult {
     let parsed: RecordBody = parse(&body, RECORD_HINT)?;
     let verdict = Verdict::parse(&parsed.verdict).ok_or_else(|| ApiError::bad_request(RECORD_HINT))?;
+    let scope = match parsed.scope.as_deref() {
+        None => Scope::default(),
+        Some(value) => Scope::parse(value).ok_or_else(|| ApiError::bad_request(RECORD_HINT))?,
+    };
     let run = load_run(&state, parsed.run_id).await?;
     let facts = facts_at(&run, parsed.index)?;
     let service = state.service.clone();
-    let fingerprint = blocking(move || service.record(&run.repo_path, &facts, verdict)).await?;
-    Ok(Json(json!({ "fingerprint": fingerprint, "verdict": verdict.as_str() })).into_response())
+    let fingerprint = blocking(move || service.record(&run.repo_path, &facts, verdict, scope)).await?;
+    Ok(Json(json!({ "fingerprint": fingerprint, "verdict": verdict.as_str(), "scope": scope.as_str() }))
+        .into_response())
 }
 
 #[derive(Deserialize)]

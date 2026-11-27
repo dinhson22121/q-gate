@@ -892,11 +892,32 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
       }
     };
     const verdictButton = (label, verdict) =>
-      el("button", { type: "button", class: "small ghost", disabled: item.verdict === verdict, onclick: act("/api/feedback", { verdict }) }, label);
+      el("button", { type: "button", class: "small ghost", disabled: item.verdict === verdict, onclick: act("/api/feedback", { verdict, scope: "repo" }) }, label);
+    const isGlobal = item.scope === "global";
+    const switchScope = () => {
+      if (!isGlobal && !confirm("This judgment will apply to the same file and code in every repository. Continue?")) return null;
+      return { verdict: item.verdict, scope: isGlobal ? "repo" : "global" };
+    };
+    const scopeButton = item.verdict && item.scope && !item.inherited
+      ? el("button", { type: "button", class: "small ghost", onclick: (event) => {
+          const body = switchScope();
+          if (body) act("/api/feedback", body)(event);
+        } }, isGlobal ? "This repo only" : "Apply to all repos")
+      : null;
+    const dateOf = (value) => String(value).slice(0, 10);
+    const stateChips = [];
+    if (item.verdict) {
+      stateChips.push(chip(item.verdict, item.verdict === "accepted" ? "ok" : "neutral"));
+      if (item.scope) stateChips.push(chip(item.inherited ? "all repos · set in another repo" : isGlobal ? "all repos" : "this repo", "neutral"));
+      if (item.verdict === "dismissed" && item.expires_at) stateChips.push(chip("until " + dateOf(item.expires_at), "neutral"));
+    } else if (item.expired) {
+      stateChips.push(chip("dismissal expired" + (item.expires_at ? " " + dateOf(item.expires_at) : ""), "warn"));
+    }
     return el("div", { class: "fb" },
-      item.verdict ? chip(item.verdict, item.verdict === "accepted" ? "ok" : "neutral") : null,
+      stateChips,
       verdictButton("✓ Correct", "accepted"), verdictButton("✗ Dismiss", "dismissed"),
-      item.verdict ? el("button", { type: "button", class: "small ghost", onclick: act("/api/feedback/undo", {}) }, "Undo") : null,
+      scopeButton,
+      item.verdict || item.expired ? el("button", { type: "button", class: "small ghost", onclick: act("/api/feedback/undo", {}) }, "Undo") : null,
       note);
   }
 

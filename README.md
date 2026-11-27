@@ -61,6 +61,11 @@ score: it starts at 100%, every dismissal (✗) subtracts 10, every confirmation
 10%. The score is active after 10 judgments. At 50% or below a kind is capped at major, at 20% or below at minor, and
 the report notes the cap. Security findings are never capped. Resetting a kind restores 100%.
 
+A dismissal lasts 90 days; after that the finding counts again until it is dismissed anew (a confirmation never
+expires, and expired dismissals still count towards the score). A judgment applies to its repository by default;
+"Apply to all repos" makes it apply to the same file and code in every repository, unless a repository has judged that
+finding itself. Undo removes the judgment wherever it applies. Scores stay per repository.
+
 ## What is checked beyond the model review
 
 Two deterministic checks cover what SonarQube does not. They run in the runner container and fold into the review
