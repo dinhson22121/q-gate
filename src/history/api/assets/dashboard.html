@@ -218,6 +218,7 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     <div class="tile"><div class="label">Runs (7d)</div><div class="value" id="t-runs">–</div></div>
     <div class="tile"><div class="label">Findings (7d)</div><div class="value" id="t-findings">–</div></div>
     <div class="tile"><div class="label">Est. cost (7d)</div><div class="value" id="t-cost">–</div></div>
+    <div class="tile"><div class="label">Runs with unverified work (7d)</div><div class="value" id="t-unver">–</div><div class="label" id="t-unver-reasons"></div></div>
   </div>
   <form class="filters" id="filters" role="search">
     <label>Repository<select id="f-repo"><option value="">All repositories</option></select></label>
@@ -271,7 +272,10 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
   const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,11}$/;
   const TOKEN = (document.querySelector('meta[name="qgate-token"]') || {}).content || "";
   const FEEDBACK_MIN_JUDGMENTS = 10;
-  const state = { offset: 0, total: 0, selected: null, run: null, feedback: null, nodes: {} };
+  const HUMAN_LABEL = { verified_met: "human-verified", not_applicable: "not applicable" };
+  const SAVED_NOTE = "saved — applies from the next scan";
+  const REMOVED_NOTE = "removed — applies from the next scan";
+  const state = { offset: 0, total: 0, selected: null, run: null, feedback: null, marks: [], criterionNotes: {}, nodes: {} };
   const $ = (id) => document.getElementById(id);
 
   function el(tag, attrs, ...children) {
@@ -297,6 +301,7 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
   const shortSha = (sha) => (sha ? sha.slice(0, 8) : "–");
   const fmtTime = (iso) => new Date(iso).toLocaleString();
   const fmtCost = (usd) => "$" + Number(usd || 0).toFixed(usd >= 1 ? 2 : 3);
+  const reasonLabel = (reason) => String(reason).replace(/_/g, " ");
   const fmtPct = (rate) => (rate === null || rate === undefined ? "–" : Math.round(rate * 100) + "%");
   const sumSeverity = (counts) => SEVERITIES.reduce((n, s) => n + (counts[s] || 0), 0);
 
@@ -313,9 +318,12 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     return body;
   }
 
-  async function postJson(path, body) {
+  const postJson = (path, body) => sendJson("POST", path, body);
+  const deleteJson = (path, body) => sendJson("DELETE", path, body);
+
+  async function sendJson(method, path, body) {
     const response = await fetch(path, {
-      method: "POST",
+      method,
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-Qgate-Request": "feedback", "X-Qgate-Token": TOKEN, Accept: "application/json" },
       body: JSON.stringify(body),
@@ -338,6 +346,11 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     $("t-runs").textContent = String(week.runs);
     $("t-findings").textContent = String(sumSeverity(week.findings_by_severity));
     $("t-cost").textContent = fmtCost(week.estimated_cost_usd);
+    const unverifiable = week.unverifiable || { total: 0, by_reason: {}, run_rate: null };
+    $("t-unver").textContent = fmtPct(unverifiable.run_rate);
+    const reasons = Object.entries(unverifiable.by_reason || {}).filter(([, n]) => n > 0)
+      .map(([reason, n]) => n + " " + reasonLabel(reason));
+    $("t-unver-reasons").textContent = reasons.length ? reasons.join(" · ") : unverifiable.total + " item(s)";
     const select = $("f-repo");
     const current = select.value;
     replace(select, el("option", { value: "" }, "All repositories"),
@@ -394,6 +407,8 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
       const key = encodeURIComponent(id);
       const [run, feedback] = await Promise.all([getJson("/api/runs/" + key), getJson("/api/feedback/runs/" + key).catch(() => null)]);
       state.feedback = feedback;
+      state.criterionNotes = {};
+      state.marks = await loadMarks(run);
       renderDetail(run);
       showError("");
     } catch (err) {
@@ -448,9 +463,10 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     }
     nodes.push(el("div", { class: "detail-actions" },
       el("button", { type: "button", class: "btn-link", title: "Download the review as Markdown", onclick: () => exportRun(run.id) }, "⬇ Export .md")));
-    nodes.push(overviewChart(report), verdictSection(report), ticketSection(report), criteriaSection(report.requirements),
+    nodes.push(overviewChart(report), verdictSection(report), unverifiableSection(report, run), ticketSection(report),
+      criteriaSection(report.requirements, run),
       testsSection(report), checksSection(report.checks), findingsSection(report.findings, run.id),
-      precisionSection(run.id), architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents),
+      precisionSection(run.id), architectureSection(report, run.repo_name), designSection(report), agentNotesSection(report.agents, report.notes),
       skippedSection(report.skipped), rejectedSection(report.rejected), usageSection(report));
     replace($("detail"), nodes);
   }
@@ -512,6 +528,12 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
       add("advisory", "tests", "Edge-case test not passing (advisory, coverage above threshold) ",
         el("strong", {}, id), sc ? ": " + sc.title : "");
       reasons[reasons.length - 1].failed = failedTest(id);
+    }
+    if (gate.passed) {
+      for (const id of gate.unverified_criteria || []) {
+        add("advisory", "unverified", "Criterion not verified (advisory, did not block the gate) ", el("strong", {}, id),
+          criterionText(report.requirements, id) ? ": " + criterionText(report.requirements, id) : "");
+      }
     }
     for (const id of gate.rule_violations) {
       const v = agents && agents.violations.find((x) => x.rule_id === id);
@@ -656,18 +678,84 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     return section;
   }
 
-  function assessmentItem(requirements, a) {
+  async function loadMarks(run) {
+    if (!run.repo_path) return [];
+    try {
+      const data = await getJson("/api/feedback/criteria?repo=" + encodeURIComponent(run.repo_path));
+      return data.items || [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  const markOf = (id, text) => state.marks.find((m) => m.criterion_id === id && m.criterion_text === text) || null;
+
+  function rerenderCriterionSections() {
+    const run = state.run;
+    if (!run || !run.report) return;
+    const { criteria, unverifiable } = state.nodes;
+    if (criteria) criteria.replaceWith(criteriaSection(run.report.requirements, run));
+    if (unverifiable) unverifiable.replaceWith(unverifiableSection(run.report, run));
+  }
+
+  function criterionControls(run, id, text, human) {
+    const mark = markOf(id, text);
+    const status = el("span", { class: "muted", role: "status" }, state.criterionNotes[id] || "");
+    const failure = el("span", { class: "fb-error", role: "alert", hidden: true });
+    const base = { repo: run.repo_path, criterion_id: id, criterion_text: text };
+    const act = (note, call) => async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      failure.hidden = true;
+      try {
+        await call();
+        state.marks = await loadMarks(run);
+        state.criterionNotes[id] = note;
+        rerenderCriterionSections();
+      } catch (err) {
+        failure.textContent = err.message;
+        failure.hidden = false;
+        button.disabled = false;
+      }
+    };
+    const verdict = (label, value) =>
+      el("button", { type: "button", class: "small ghost", onclick: act(SAVED_NOTE, () => postJson("/api/feedback/criteria", { ...base, verdict: value })) }, label);
+    const clarify = (event) => {
+      const note = (prompt("What should the reviewer know about this criterion?") || "").trim();
+      if (note) act(SAVED_NOTE, () => postJson("/api/feedback/criteria", { ...base, verdict: "clarified", note }))(event);
+    };
+    const undo = el("button", { type: "button", class: "small ghost", onclick: act(REMOVED_NOTE, () => deleteJson("/api/feedback/criteria", base)) }, "Undo");
+    const chips = [];
+    if (mark) chips.push(chip("marked: " + (HUMAN_LABEL[mark.verdict] || mark.verdict) + " · next scan", "info"));
+    const actions = human || mark
+      ? [undo]
+      : [verdict("Verified manually", "verified_met"), verdict("Not applicable", "not_applicable"),
+         el("button", { type: "button", class: "small ghost", onclick: clarify }, "Clarify…")];
+    return el("div", { class: "fb" }, chips, actions, status, failure);
+  }
+
+  function humanChip(a) {
+    return a.human ? chip(HUMAN_LABEL[a.human] || a.human, a.human === "verified_met" ? "ok" : "neutral") : null;
+  }
+
+  function assessmentItem(requirements, a, run) {
+    const text = criterionText(requirements, a.criterion_id);
+    const controls = run && (a.human || state.criterionNotes[a.criterion_id] || markOf(a.criterion_id, text))
+      ? criterionControls(run, a.criterion_id, text, !!a.human) : null;
     return el("li", { class: "ac-card" },
       el("div", { class: "card-head" }, chip(CRITERION_LABEL[a.status] || a.status, CRITERION_CLASS[a.status]),
-        el("strong", {}, a.criterion_id), criterionText(requirements, a.criterion_id),
+        humanChip(a), a.retried ? chip("retried", "neutral") : null,
+        el("strong", {}, a.criterion_id), text,
         inferredChip(requirements, a.criterion_id)),
       a.explanation ? el("p", {}, a.explanation) : null,
       a.evidence.map((e) => el("div", {}, el("span", { class: "mono muted" }, e.file + ":" + e.line),
-        e.quote ? codeBlock(e.quote) : null)));
+        e.quote ? codeBlock(e.quote) : null)),
+      controls);
   }
 
-  function criteriaSection(requirements) {
+  function criteriaSection(requirements, run) {
     const section = el("section", { "aria-label": "Acceptance criteria" }, el("h3", {}, "Acceptance criteria"));
+    state.nodes.criteria = section;
     if (!requirements) {
       section.append(empty("No ticket linked to this run."));
       return section;
@@ -688,8 +776,33 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     for (const [key, items] of byTicket) {
       section.append(el("div", { class: "file-group" },
         byTicket.size > 1 ? el("h4", {}, key) : null,
-        el("ul", { class: "plain" }, items.map((a) => assessmentItem(requirements, a)))));
+        el("ul", { class: "plain" }, items.map((a) => assessmentItem(requirements, a, run)))));
     }
+    return section;
+  }
+
+  function unverifiableCard(item, report, run) {
+    const isCriterion = item.subject === "criterion";
+    const text = isCriterion ? criterionText(report.requirements, item.id) : "";
+    return el("li", { class: "card" },
+      el("div", { class: "card-head" }, chip(item.subject, "neutral"), el("strong", {}, item.id),
+        chip(reasonLabel(item.reason), "warn"), item.retried ? chip("retried", "neutral") : null),
+      text ? el("p", { class: "muted" }, text) : null,
+      item.detail ? el("p", {}, item.detail) : null,
+      el("p", {}, el("strong", {}, "What to do: "), item.remedy),
+      isCriterion && run.repo_path ? criterionControls(run, item.id, text, false) : null);
+  }
+
+  function unverifiableSection(report, run) {
+    const items = report.unverifiable || [];
+    if (!items.length) {
+      state.nodes.unverifiable = null;
+      return null;
+    }
+    const section = el("section", { "aria-label": "Couldn't verify" }, el("h3", {}, "Couldn't verify (" + items.length + ")"),
+      el("p", { class: "muted" }, "qgate could not decide these; they are not failures. Marks apply from the next scan."),
+      el("ul", { class: "plain" }, items.map((item) => unverifiableCard(item, report, run))));
+    state.nodes.unverifiable = section;
     return section;
   }
 
@@ -843,11 +956,13 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     return section;
   }
 
-  function agentNotesSection(agents) {
-    if (!agents || (!agents.notes.length && agents.cost_usd === null)) return null;
+  function agentNotesSection(agents, reportNotes) {
+    const notes = [...(agents ? agents.notes : []), ...(reportNotes || [])];
+    const cost = agents ? agents.cost_usd : null;
+    if (!notes.length && (cost === null || cost === undefined)) return null;
     return el("section", { "aria-label": "Agent notes" }, el("h3", {}, "Agent notes"),
-      agents.notes.length ? el("ul", { class: "reasons" }, agents.notes.map((n) => el("li", {}, n))) : null,
-      agents.cost_usd === null ? null : el("p", { class: "muted" }, "Agent cost " + fmtCost(agents.cost_usd)));
+      notes.length ? el("ul", { class: "reasons" }, notes.map((n) => el("li", {}, n))) : null,
+      cost === null || cost === undefined ? null : el("p", { class: "muted" }, "Agent cost " + fmtCost(cost)));
   }
 
   function checksSection(checks) {

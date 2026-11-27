@@ -1,10 +1,33 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::agent_results::{AgentReport, DesignMismatchKind, TestVerdict};
 use super::checks::CheckResult;
 use super::feedback::FeedbackMark;
 use super::finding::{Category, Confidence, Finding, Severity};
 use super::requirements::RequirementsReport;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnverifiablePolicy {
+    #[default]
+    Strict,
+    Advisory,
+}
+
+impl UnverifiablePolicy {
+    pub const ALL: [Self; 2] = [Self::Strict, Self::Advisory];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Advisory => "advisory",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == value.trim().to_ascii_lowercase())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatePolicy {
@@ -20,6 +43,7 @@ pub struct GatePolicy {
     pub fail_on_rule_violation: bool,
     pub fail_on_design: Vec<DesignMismatchKind>,
     pub require_reproduce_for_critical: bool,
+    pub unverifiable: UnverifiablePolicy,
 }
 
 impl Default for GatePolicy {
@@ -43,6 +67,7 @@ impl Default for GatePolicy {
             fail_on_rule_violation: false,
             fail_on_design: Vec::new(),
             require_reproduce_for_critical: true,
+            unverifiable: UnverifiablePolicy::Strict,
         }
     }
 }
@@ -63,6 +88,8 @@ pub struct GateDecision {
     pub rule_violations: Vec<String>,
     #[serde(default)]
     pub design_mismatches: Vec<String>,
+    #[serde(default)]
+    pub unverified_criteria: Vec<String>,
 }
 
 pub struct GateInput<'a> {
@@ -84,17 +111,11 @@ impl GatePolicy {
     pub fn decide(&self, input: GateInput<'_>) -> GateDecision {
         let blocking: Vec<usize> =
             input.findings.iter().enumerate().filter(|(_, f)| self.is_blocking(f)).map(|(i, _)| i).collect();
-        let unmet_criteria: Vec<String> = input
-            .requirements
-            .map(|r| {
-                let ids = if self.require_all_criteria_met { r.unsatisfied() } else { r.unmet() };
-                ids.into_iter().filter(|id| !r.is_inferred(id)).map(str::to_string).collect()
-            })
-            .unwrap_or_default();
+        let (unmet_criteria, unverified_criteria) = self.criteria_outcome(input.requirements);
         let failed_checks: Vec<String> =
             input.checks.iter().filter(|c| c.is_blocking()).map(|c| c.name.clone()).collect();
         let criteria_ok = !self.fail_on_unmet_criteria || unmet_criteria.is_empty();
-        let completeness_ok = !self.fail_on_incomplete || !input.incomplete;
+        let completeness_ok = self.is_advisory() || !self.fail_on_incomplete || !input.incomplete;
         let (rule_violations, design_mismatches) =
             input.agents.map_or_else(Default::default, |a| self.agent_violations(a));
         let (tests_block, failed_tests, advisory_tests) =
@@ -112,7 +133,24 @@ impl GatePolicy {
             advisory_tests,
             rule_violations,
             design_mismatches,
+            unverified_criteria,
         }
+    }
+
+    fn is_advisory(&self) -> bool {
+        self.unverifiable == UnverifiablePolicy::Advisory
+    }
+
+    fn criteria_outcome(&self, requirements: Option<&RequirementsReport>) -> (Vec<String>, Vec<String>) {
+        let Some(report) = requirements else {
+            return (Vec::new(), Vec::new());
+        };
+        let owned = |ids: Vec<&str>| -> Vec<String> {
+            ids.into_iter().filter(|id| !report.is_inferred(id)).map(str::to_string).collect()
+        };
+        let blocking =
+            if self.require_all_criteria_met && !self.is_advisory() { report.unsatisfied() } else { report.unmet() };
+        (owned(blocking), owned(report.unverified()))
     }
 
     fn test_gate(
@@ -141,6 +179,7 @@ impl GatePolicy {
         let mut edge_total = 0u32;
         let mut edge_pass = 0u32;
         let mut edge_unpassed = Vec::new();
+        let mut edge_unpassed_advisory = Vec::new();
         for test in &agents.tests {
             if advisory_only(&test.scenario_id) {
                 if test.verdict != TestVerdict::Passed {
@@ -152,6 +191,8 @@ impl GatePolicy {
                     TestVerdict::FailedAssertion => must_failed = true,
                     _ => unverified.push(test.scenario_id.clone()),
                 }
+            } else if self.is_advisory() && test.verdict == TestVerdict::Inconclusive {
+                edge_unpassed_advisory.push(test.scenario_id.clone());
             } else {
                 edge_total += 1;
                 if test.verdict == TestVerdict::Passed {
@@ -162,7 +203,7 @@ impl GatePolicy {
             }
         }
         let edge_ok = edge_total == 0 || edge_pass * 100 >= edge_total * self.min_edge_pass_pct;
-        let must_unverified_blocks = self.fail_on_test_failure && !unverified.is_empty();
+        let must_unverified_blocks = !self.is_advisory() && self.fail_on_test_failure && !unverified.is_empty();
         let edge_blocks = !edge_ok || (self.fail_on_test_failure && !edge_unpassed.is_empty());
         let block = (self.require_must_pass_tests && must_failed) || edge_blocks || must_unverified_blocks;
         let mut advisory = unverified;
@@ -170,6 +211,7 @@ impl GatePolicy {
         if !edge_blocks {
             advisory.extend(edge_unpassed);
         }
+        advisory.extend(edge_unpassed_advisory);
         (block, failed, advisory)
     }
 
@@ -192,6 +234,7 @@ mod tests {
     use super::*;
     use crate::review::domain::checks::CheckOutcome;
     use crate::review::domain::finding::fixtures::finding;
+    use crate::review::domain::unverifiable::UnverifiableReason;
 
     fn only(findings: &[Finding]) -> GateInput<'_> {
         GateInput { findings, requirements: None, checks: &[], incomplete: false, agents: None }
@@ -239,6 +282,9 @@ mod tests {
                 status: CriterionStatus::NotMet,
                 explanation: String::new(),
                 evidence: vec![],
+                reason: None,
+                retried: false,
+                human: None,
             }],
         }
     }
@@ -280,12 +326,18 @@ mod tests {
                     status: CriterionStatus::Met,
                     explanation: String::new(),
                     evidence: vec![],
+                    reason: None,
+                    retried: false,
+                    human: None,
                 },
                 CriterionAssessment {
                     criterion_id: "AC-2".into(),
                     status: CriterionStatus::Unclear,
                     explanation: String::new(),
                     evidence: vec![],
+                    reason: None,
+                    retried: false,
+                    human: None,
                 },
             ],
         };
@@ -320,6 +372,9 @@ mod tests {
                 status,
                 explanation: String::new(),
                 evidence: vec![],
+                reason: None,
+                retried: false,
+                human: None,
             }],
         }
     }
@@ -362,6 +417,7 @@ mod tests {
             verdict: TestVerdict::FailedAssertion,
             evidence: None,
             note: String::new(),
+            reason: None,
         };
         let agents = AgentReport {
             brief: Some(TicketBrief { scenarios: vec![scenario("S1", &["K-1/AC-I1"])], ..TicketBrief::default() }),
@@ -414,6 +470,7 @@ mod tests {
             verdict,
             evidence: None,
             note: String::new(),
+            reason: None,
         };
         let report = |scenarios: Vec<TestScenario>, tests: Vec<TestResult>| AgentReport {
             brief: Some(TicketBrief { scenarios, ..TicketBrief::default() }),
@@ -533,6 +590,7 @@ mod tests {
                 verdict: TestVerdict::FailedAssertion,
                 evidence: None,
                 note: String::new(),
+                reason: None,
             }],
             violations: vec![RuleViolation {
                 rule_id: "R1".into(),
@@ -571,5 +629,100 @@ mod tests {
         let decision = strict.decide(input());
         assert!(!decision.passed);
         assert!(decision.design_mismatches.is_empty(), "states never blocks");
+    }
+
+    fn unclear_report() -> RequirementsReport {
+        use crate::review::domain::requirements::*;
+        let unclear = |id: &str| CriterionAssessment::unclear(id, UnverifiableReason::NeedsContext, String::new());
+        let mut not_applicable = unclear("AC-3");
+        not_applicable.human = Some(HumanMark::NotApplicable);
+        RequirementsReport {
+            requirements: Requirements {
+                key: "K-1".into(),
+                title: "t".into(),
+                url: None,
+                criteria: vec![AcceptanceCriterion::inferred("AC-4", "x")],
+            },
+            assessments: vec![unclear("AC-1"), unclear("AC-4"), not_applicable],
+        }
+    }
+
+    fn decide_with(policy: &GatePolicy, report: &RequirementsReport, incomplete: bool) -> GateDecision {
+        policy.decide(GateInput { findings: &[], requirements: Some(report), checks: &[], incomplete, agents: None })
+    }
+
+    #[test]
+    fn strict_policy_blocks_on_unclear_and_still_lists_them_as_unverified() {
+        let decision = decide_with(&GatePolicy::default(), &unclear_report(), false);
+        assert!(!decision.passed);
+        assert_eq!(decision.unmet_criteria, vec!["AC-1"]);
+        assert_eq!(decision.unverified_criteria, vec!["AC-1"]);
+    }
+
+    #[test]
+    fn advisory_policy_never_blocks_on_unverifiable_work() {
+        let advisory = GatePolicy { unverifiable: UnverifiablePolicy::Advisory, ..GatePolicy::default() };
+        let decision = decide_with(&advisory, &unclear_report(), true);
+        assert!(decision.passed);
+        assert!(decision.unmet_criteria.is_empty());
+        assert_eq!(decision.unverified_criteria, vec!["AC-1"]);
+        assert!(decision.incomplete, "still reported as incomplete");
+    }
+
+    #[test]
+    fn advisory_policy_still_blocks_on_not_met() {
+        let advisory = GatePolicy { unverifiable: UnverifiablePolicy::Advisory, ..GatePolicy::default() };
+        let decision = decide_with(&advisory, &report_with_unmet(), false);
+        assert!(!decision.passed);
+        assert_eq!(decision.unmet_criteria, vec!["AC-1"]);
+        assert!(decision.unverified_criteria.is_empty());
+    }
+
+    #[test]
+    fn advisory_policy_keeps_inconclusive_tests_advisory_even_when_tests_must_pass() {
+        use crate::review::domain::agent_results::*;
+        let scenario = |id: &str, acs: &[&str]| TestScenario {
+            id: id.into(),
+            criterion_ids: acs.iter().map(|a| (*a).to_string()).collect(),
+            title: id.into(),
+            given: String::new(),
+            when: String::new(),
+            then: String::new(),
+        };
+        let result = |id: &str, verdict| TestResult {
+            scenario_id: id.into(),
+            language: "go".into(),
+            verdict,
+            evidence: None,
+            note: String::new(),
+            reason: None,
+        };
+        let agents = AgentReport {
+            brief: Some(TicketBrief {
+                scenarios: vec![scenario("M1", &["AC-1"]), scenario("E1", &[])],
+                ..TicketBrief::default()
+            }),
+            tests: vec![result("M1", TestVerdict::Inconclusive), result("E1", TestVerdict::Inconclusive)],
+            ..AgentReport::default()
+        };
+        let input =
+            || GateInput { findings: &[], requirements: None, checks: &[], incomplete: false, agents: Some(&agents) };
+        let strict = GatePolicy { fail_on_test_failure: true, ..GatePolicy::default() };
+        assert!(!strict.decide(input()).passed);
+        let advisory = GatePolicy { unverifiable: UnverifiablePolicy::Advisory, ..strict };
+        let decision = advisory.decide(input());
+        assert!(decision.passed);
+        assert_eq!(decision.advisory_tests, vec!["M1", "E1"]);
+    }
+
+    #[test]
+    fn unverifiable_policy_parses_its_names() {
+        for policy in UnverifiablePolicy::ALL {
+            assert_eq!(UnverifiablePolicy::parse(policy.as_str()), Some(policy));
+            assert_eq!(serde_json::to_value(policy).unwrap(), policy.as_str());
+        }
+        assert_eq!(UnverifiablePolicy::parse(" Advisory "), Some(UnverifiablePolicy::Advisory));
+        assert_eq!(UnverifiablePolicy::parse("lax"), None);
+        assert_eq!(UnverifiablePolicy::default(), UnverifiablePolicy::Strict);
     }
 }

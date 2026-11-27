@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::change_set::ChangeSet;
 use super::requirements::EvidenceRef;
+use super::unverifiable::UnverifiableReason;
 use super::verification::evidence_exists;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -83,6 +84,8 @@ pub struct TestResult {
     pub verdict: TestVerdict,
     pub evidence: Option<TestEvidence>,
     pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<UnverifiableReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +164,7 @@ pub fn verify_agent_report(changes: &ChangeSet, mut report: AgentReport) -> Agen
         let missing = test.evidence.as_ref().map_or_else(|| vec!["all evidence"], TestEvidence::missing_parts);
         if !missing.is_empty() {
             test.verdict = TestVerdict::Inconclusive;
+            test.reason = Some(UnverifiableReason::TestEvidenceMissing);
             test.note = format!("downgraded to inconclusive: missing {}", missing.join(", "));
         }
     }
@@ -220,6 +224,7 @@ mod tests {
             verdict: TestVerdict::FailedAssertion,
             evidence,
             note: String::new(),
+            reason: None,
         }
     }
 
@@ -246,6 +251,7 @@ mod tests {
         assert!(report.tests[0].note.contains("exit code"));
         assert!(report.tests[0].note.contains("reproduce command"));
         assert_eq!(report.tests[1].verdict, TestVerdict::Inconclusive);
+        assert!(report.tests.iter().all(|t| t.reason == Some(UnverifiableReason::TestEvidenceMissing)));
     }
 
     #[test]

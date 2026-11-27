@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::review::application::{Category, Confidence, GatePolicy, Severity};
+use crate::review::application::{Category, Confidence, GatePolicy, Severity, UnverifiablePolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -11,11 +11,18 @@ pub enum GateField {
     MinConfidence,
     FailOnUnmetCriteria,
     FailOnIncomplete,
+    Unverifiable,
 }
 
 impl GateField {
-    pub const ALL: [Self; 5] =
-        [Self::FailOn, Self::Categories, Self::MinConfidence, Self::FailOnUnmetCriteria, Self::FailOnIncomplete];
+    pub const ALL: [Self; 6] = [
+        Self::FailOn,
+        Self::Categories,
+        Self::MinConfidence,
+        Self::FailOnUnmetCriteria,
+        Self::FailOnIncomplete,
+        Self::Unverifiable,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -24,6 +31,7 @@ impl GateField {
             Self::MinConfidence => "min_confidence",
             Self::FailOnUnmetCriteria => "fail_on_unmet_criteria",
             Self::FailOnIncomplete => "fail_on_incomplete",
+            Self::Unverifiable => "unverifiable",
         }
     }
 
@@ -43,6 +51,7 @@ pub fn gate_value(policy: &GatePolicy, field: GateField) -> Value {
         GateField::MinConfidence => to_value(policy.min_confidence),
         GateField::FailOnUnmetCriteria => Value::Bool(policy.fail_on_unmet_criteria),
         GateField::FailOnIncomplete => Value::Bool(policy.fail_on_incomplete),
+        GateField::Unverifiable => to_value(policy.unverifiable),
     }
 }
 
@@ -64,6 +73,7 @@ pub fn with_gate_value(policy: &GatePolicy, field: GateField, value: &Value) -> 
         GateField::MinConfidence => next.min_confidence = parse::<Confidence>(value, "one of low, medium, high")?,
         GateField::FailOnUnmetCriteria => next.fail_on_unmet_criteria = parse(value, "true or false")?,
         GateField::FailOnIncomplete => next.fail_on_incomplete = parse(value, "true or false")?,
+        GateField::Unverifiable => next.unverifiable = parse::<UnverifiablePolicy>(value, "one of strict, advisory")?,
     }
     Ok(next)
 }
@@ -75,6 +85,9 @@ pub fn loosens_gate(field: GateField, before: &GatePolicy, after: &GatePolicy) -
         GateField::MinConfidence => after.min_confidence > before.min_confidence,
         GateField::FailOnUnmetCriteria => before.fail_on_unmet_criteria && !after.fail_on_unmet_criteria,
         GateField::FailOnIncomplete => before.fail_on_incomplete && !after.fail_on_incomplete,
+        GateField::Unverifiable => {
+            before.unverifiable == UnverifiablePolicy::Strict && after.unverifiable == UnverifiablePolicy::Advisory
+        }
     }
 }
 
@@ -125,6 +138,10 @@ mod tests {
         let lenient = with_gate_value(&policy, GateField::FailOnUnmetCriteria, &json!(false)).unwrap();
         assert!(!lenient.fail_on_unmet_criteria);
         assert!(with_gate_value(&policy, GateField::FailOnIncomplete, &json!("no")).is_err());
+        assert_eq!(gate_value(&policy, GateField::Unverifiable), json!("strict"));
+        let advisory = with_gate_value(&policy, GateField::Unverifiable, &json!("advisory")).unwrap();
+        assert_eq!(advisory.unverifiable, UnverifiablePolicy::Advisory);
+        assert!(with_gate_value(&policy, GateField::Unverifiable, &json!("lax")).unwrap_err().contains("strict"));
         assert_eq!(GateField::ALL.map(|f| GateField::parse(f.as_str())), GateField::ALL.map(Some));
         assert_eq!(GateField::parse("nope"), None);
     }
@@ -143,6 +160,9 @@ mod tests {
         assert!(loosens_gate(GateField::FailOnUnmetCriteria, &before, &off(GateField::FailOnUnmetCriteria)));
         assert!(loosens_gate(GateField::FailOnIncomplete, &before, &off(GateField::FailOnIncomplete)));
         assert!(!loosens_gate(GateField::FailOnIncomplete, &off(GateField::FailOnIncomplete), &before));
+        let advisory = set(GateField::Unverifiable, json!("advisory"));
+        assert!(loosens_gate(GateField::Unverifiable, &before, &advisory));
+        assert!(!loosens_gate(GateField::Unverifiable, &advisory, &before));
     }
 
     #[test]

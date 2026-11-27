@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use super::rules::{RuleCandidate, candidates};
 use super::tasks;
-use crate::review::application::{CriterionStatus, GatePolicy, ReviewReport};
+use crate::review::application::{CriterionStatus, GatePolicy, HumanMark, ReviewReport, Unverifiable};
 
 const SHORT_SHA_LEN: usize = 7;
 const DATE_FORMAT: &str = "%Y-%m-%d %H:%M:%S UTC";
@@ -70,6 +70,7 @@ pub struct Verdict {
     pub label: &'static str,
     pub incomplete: bool,
     pub reasons: Vec<String>,
+    pub unverified: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -119,6 +120,7 @@ pub struct CriterionRow {
     pub status: CriterionStatus,
     pub explanation: String,
     pub evidence: Vec<String>,
+    pub human: Option<HumanMark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -148,6 +150,7 @@ pub struct HandoffDocument {
     pub context: HandoffContext,
     pub rules_to_add: Vec<RuleCandidate>,
     pub rules_file: Option<String>,
+    pub unverifiable: Vec<Unverifiable>,
 }
 
 impl HandoffDocument {
@@ -162,6 +165,7 @@ impl HandoffDocument {
             context: context(input),
             rules_to_add: candidates(input.report),
             rules_file: None,
+            unverifiable: input.report.unverifiable.clone(),
         }
     }
 
@@ -222,6 +226,7 @@ fn verdict(input: &HandoffInput<'_>) -> Verdict {
         label: if gate.passed { "PASSED" } else { "FAILED" },
         incomplete: gate.incomplete,
         reasons,
+        unverified: gate.unverified_criteria.clone(),
     }
 }
 
@@ -237,6 +242,7 @@ fn criteria(report: &ReviewReport) -> Vec<CriterionRow> {
             status: a.status,
             explanation: a.explanation.clone(),
             evidence: a.evidence.iter().map(|e| format!("{}:{}", e.file, e.line)).collect(),
+            human: a.human,
         })
         .collect()
 }
@@ -263,7 +269,12 @@ fn context(input: &HandoffInput<'_>) -> HandoffContext {
             .unwrap_or_default(),
         design_links: ticket.map(|t| t.design_links.clone()).unwrap_or_default(),
         description: ticket.and_then(|t| summary(&t.description)),
-        notes: agents.map(|a| a.notes.clone()).unwrap_or_default(),
+        notes: agents
+            .map(|a| a.notes.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(input.report.notes.clone())
+            .collect(),
         skipped_files: input.report.skipped.iter().map(|s| format!("{} ({})", s.path, s.reason.describe())).collect(),
     }
 }

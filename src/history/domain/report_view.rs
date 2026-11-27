@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::agent_view::{AgentReportView, TicketContextView};
-use crate::review::application::{Category, Confidence, CriterionStatus, Severity};
+use crate::review::application::{
+    Category, Confidence, CriterionStatus, HumanMark, Severity, Unverifiable, UnverifiableReason,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReportView {
@@ -28,6 +30,10 @@ pub struct ReportView {
     pub ticket: Option<TicketContextView>,
     #[serde(default)]
     pub audited: bool,
+    #[serde(default)]
+    pub unverifiable: Vec<Unverifiable>,
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,6 +161,12 @@ pub struct AssessmentView {
     pub explanation: String,
     #[serde(default)]
     pub evidence: Vec<EvidenceView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<UnverifiableReason>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retried: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human: Option<HumanMark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,6 +216,8 @@ pub struct GateView {
     pub rule_violations: Vec<String>,
     #[serde(default)]
     pub design_mismatches: Vec<String>,
+    #[serde(default)]
+    pub unverified_criteria: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +237,40 @@ mod tests {
     use super::*;
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::finding::{Demotion, Reproduce};
+
+    #[test]
+    fn runs_stored_before_unverifiable_existed_still_load() {
+        let old = serde_json::json!({
+            "gate": {"passed": true},
+            "requirements": {"requirements": {"key": "K"}, "assessments": [
+                {"criterion_id": "K/AC-1", "status": "unclear"}]}
+        });
+        let view: ReportView = serde_json::from_value(old).unwrap();
+        let assessment = &view.requirements.unwrap().assessments[0];
+        assert_eq!((assessment.reason, assessment.retried, assessment.human), (None, false, None));
+        assert!(view.unverifiable.is_empty() && view.notes.is_empty());
+        assert!(view.gate.unverified_criteria.is_empty());
+    }
+
+    #[test]
+    fn unverifiable_items_and_human_marks_read_into_the_view() {
+        let json = serde_json::json!({
+            "gate": {"passed": true, "unverified_criteria": ["K/AC-1"]},
+            "notes": ["retried once"],
+            "unverifiable": [{"subject": "criterion", "id": "K/AC-1", "reason": "no_evidence",
+                              "detail": "d", "retried": true, "remedy": "r"}],
+            "requirements": {"requirements": {"key": "K"}, "assessments": [
+                {"criterion_id": "K/AC-1", "status": "met", "human": "verified_met",
+                 "reason": "no_evidence", "retried": true}]}
+        });
+        let view: ReportView = serde_json::from_value(json).unwrap();
+        assert_eq!(view.unverifiable[0].reason, UnverifiableReason::NoEvidence);
+        assert!(view.unverifiable[0].retried);
+        let assessment = &view.requirements.as_ref().unwrap().assessments[0];
+        assert_eq!(assessment.human, Some(HumanMark::VerifiedMet));
+        assert_eq!(view.gate.unverified_criteria, vec!["K/AC-1"]);
+        assert_eq!(view.notes, vec!["retried once"]);
+    }
 
     #[test]
     fn criterion_inferred_defaults_to_false_and_reads_true() {

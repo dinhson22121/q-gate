@@ -31,7 +31,7 @@ impl CodeReviewer for ClaudeReviewer {
     }
 
     async fn assess_requirements(&self, input: RequirementsInput<'_>) -> Result<AssessmentOutput, ReviewerError> {
-        let user = requirements_user_message(input.requirements, input.files);
+        let user = requirements_user_message(&input);
         let answer = self
             .model
             .structured::<AssessmentAnswer>(REQUIREMENTS_SYSTEM_PROMPT, &user, &assessment_schema())
@@ -129,14 +129,19 @@ mod tests {
     #[tokio::test]
     async fn assess_requirements_parses_assessments() {
         let fake = Arc::new(FakeModel::answering(json!({"assessments": [
-            {"criterion_id": "SHOP-1/AC-1", "status": "met", "explanation": "ok",
+            {"criterion_id": "SHOP-1/AC-1", "status": "met", "explanation": "ok", "unclear_reason": "none",
              "evidence": [{"file": "app.py", "line": 1, "quote": "eval(user_input)"}]}
         ]})));
         let files = files();
         let requirements = requirements();
 
         let output = ClaudeReviewer::new(fake.clone())
-            .assess_requirements(RequirementsInput { files: &files, requirements: &requirements })
+            .assess_requirements(RequirementsInput {
+                files: &files,
+                requirements: &requirements,
+                clarifications: &[],
+                expanded: false,
+            })
             .await
             .unwrap();
 

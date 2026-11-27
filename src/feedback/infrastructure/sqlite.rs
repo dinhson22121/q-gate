@@ -5,7 +5,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::feedback::application::{FeedbackError, FeedbackStore};
+use crate::feedback::application::{CriterionStore, FeedbackError, FeedbackStore};
+use crate::feedback::domain::criterion::{CriterionVerdict, CriterionVerification};
 use crate::feedback::domain::model::{Judgment, Scope, Verdict};
 use crate::feedback::domain::scoring::KindEvent;
 
@@ -36,6 +37,18 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE feedback_judgments ADD COLUMN scope TEXT NOT NULL DEFAULT 'repo';
     CREATE INDEX feedback_judgments_global ON feedback_judgments (fingerprint) WHERE scope = 'global';
+",
+    "
+    CREATE TABLE criterion_verifications (
+        repo           TEXT NOT NULL,
+        criterion_id   TEXT NOT NULL,
+        text_hash      TEXT NOT NULL,
+        criterion_text TEXT NOT NULL,
+        verdict        TEXT NOT NULL,
+        note           TEXT NOT NULL,
+        recorded_at    TEXT NOT NULL,
+        PRIMARY KEY (repo, criterion_id, text_hash)
+    );
 ",
 ];
 
@@ -195,6 +208,99 @@ impl FeedbackStore for SqliteFeedbackStore {
         )
         .map_err(storage)?;
         tx.commit().map_err(storage)
+    }
+}
+
+const CRITERION_COLUMNS: &str = "repo, criterion_id, text_hash, criterion_text, verdict, note, recorded_at";
+
+type CriterionRow = (String, String, String, String, String, String, String);
+
+fn criterion_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CriterionRow> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+}
+
+fn to_verification(row: CriterionRow) -> Result<CriterionVerification, FeedbackError> {
+    let (repo, criterion_id, text_hash, criterion_text, verdict, note, recorded_at) = row;
+    let verdict = CriterionVerdict::parse(&verdict)
+        .ok_or_else(|| FeedbackError::Storage(format!("unknown criterion verdict '{verdict}'")))?;
+    Ok(CriterionVerification {
+        repo,
+        criterion_id,
+        text_hash,
+        criterion_text,
+        verdict,
+        note,
+        recorded_at: parse_time(&recorded_at)?,
+    })
+}
+
+impl CriterionStore for SqliteFeedbackStore {
+    fn put_criterion(&self, v: &CriterionVerification) -> Result<(), FeedbackError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO criterion_verifications (repo, criterion_id, text_hash, criterion_text, verdict, note, recorded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(repo, criterion_id, text_hash) DO UPDATE SET criterion_text = excluded.criterion_text,
+                 verdict = excluded.verdict, note = excluded.note, recorded_at = excluded.recorded_at",
+            params![
+                v.repo,
+                v.criterion_id,
+                v.text_hash,
+                v.criterion_text,
+                v.verdict.as_str(),
+                v.note,
+                v.recorded_at.to_rfc3339()
+            ],
+        )
+        .map_err(storage)?;
+        Ok(())
+    }
+
+    fn delete_criterion(&self, repo: &str, criterion_id: &str, text_hash: &str) -> Result<bool, FeedbackError> {
+        let conn = self.lock()?;
+        let removed = conn
+            .execute(
+                "DELETE FROM criterion_verifications WHERE repo = ?1 AND criterion_id = ?2 AND text_hash = ?3",
+                params![repo, criterion_id, text_hash],
+            )
+            .map_err(storage)?;
+        Ok(removed > 0)
+    }
+
+    fn list_criteria(&self, repo: &str) -> Result<Vec<CriterionVerification>, FeedbackError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {CRITERION_COLUMNS} FROM criterion_verifications WHERE repo = ?1
+                 ORDER BY recorded_at DESC, criterion_id"
+            ))
+            .map_err(storage)?;
+        let rows =
+            stmt.query_map([repo], criterion_row).map_err(storage)?.collect::<Result<Vec<_>, _>>().map_err(storage)?;
+        rows.into_iter().map(to_verification).collect()
+    }
+
+    fn find_criteria(
+        &self,
+        repo: &str,
+        keys: &[(String, String)],
+    ) -> Result<Vec<CriterionVerification>, FeedbackError> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {CRITERION_COLUMNS} FROM criterion_verifications
+                 WHERE repo = ?1 AND criterion_id = ?2 AND text_hash = ?3"
+            ))
+            .map_err(storage)?;
+        let mut found = Vec::new();
+        for (criterion_id, text_hash) in keys {
+            let row =
+                stmt.query_row(params![repo, criterion_id, text_hash], criterion_row).optional().map_err(storage)?;
+            if let Some(row) = row {
+                found.push(to_verification(row)?);
+            }
+        }
+        Ok(found)
     }
 }
 

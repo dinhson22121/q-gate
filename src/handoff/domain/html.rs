@@ -1,9 +1,10 @@
 use std::fmt::Write as _;
 
 use super::document::{CriterionRow, HandoffDocument, HandoffInput};
+use super::text::{human_label, reason_label, subject_label};
 use crate::review::application::{
     AgentReport, CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, EvidenceRef, Finding, ReviewReport,
-    RuleViolation, Severity, TestResult, TestVerdict,
+    RuleViolation, Severity, TestResult, TestVerdict, Unverifiable,
 };
 use crate::review::domain::finding::FindingSource;
 
@@ -78,6 +79,7 @@ pub fn render_html(doc: &HandoffDocument, input: &HandoffInput<'_>) -> String {
         escape(&title)
     );
     header(&mut out, doc);
+    unverifiable(&mut out, &doc.unverifiable);
     criteria(&mut out, doc, report);
     findings(&mut out, &report.findings, &report.gate.blocking);
     checks(&mut out, &report.checks);
@@ -102,6 +104,13 @@ fn header(out: &mut String, doc: &HandoffDocument) {
             "The quality gate passed."
         };
         let _ = writeln!(out, "<p>{note}</p>");
+        if !verdict.unverified.is_empty() {
+            let _ = writeln!(
+                out,
+                "<p class=\"muted\">Not verified (advisory, did not block the gate): {}</p>",
+                escape(&verdict.unverified.join(", "))
+            );
+        }
     } else {
         let _ = writeln!(out, "<div class=\"reasons\"><strong>Why it failed</strong><ul>");
         for reason in &verdict.reasons {
@@ -142,6 +151,31 @@ fn label_text(row: &CriterionRow) -> String {
     if row.inferred { format!("{} (inferred, advisory)", row.text) } else { row.text.clone() }
 }
 
+fn unverifiable(out: &mut String, items: &[Unverifiable]) {
+    if items.is_empty() {
+        return;
+    }
+    out.push_str("<section id=\"unverifiable\"><h2>Couldn't verify</h2>\n");
+    out.push_str("<p class=\"muted\">qgate could not decide these; they are not failures.</p>\n");
+    for item in items {
+        let retried = if item.retried { tag("unclear", "retried") } else { String::new() };
+        let _ = writeln!(
+            out,
+            "<div class=\"card\"><h3>{}{} <strong>{}</strong> {}</h3>",
+            tag("inconclusive", subject_label(item.subject)),
+            retried,
+            escape(&item.id),
+            escape(&reason_label(item.reason))
+        );
+        if !item.detail.trim().is_empty() {
+            let _ = writeln!(out, "<p>{}</p>", escape(&item.detail));
+        }
+        out.push_str(&labelled("What to do", &item.remedy));
+        out.push_str("</div>\n");
+    }
+    out.push_str("</section>\n");
+}
+
 fn criteria(out: &mut String, doc: &HandoffDocument, report: &ReviewReport) {
     out.push_str("<section id=\"criteria\"><h2>Acceptance criteria</h2>\n");
     if doc.criteria.is_empty() {
@@ -157,8 +191,9 @@ fn criteria(out: &mut String, doc: &HandoffDocument, report: &ReviewReport) {
             CriterionStatus::NotMet => ("notmet", "Not met"),
             CriterionStatus::Unclear => ("unclear", "Unclear"),
         };
+        let human = row.human.map(|mark| tag("met", human_label(mark))).unwrap_or_default();
         let heading =
-            format!("{} <strong>{}</strong> {}", tag(class, label), escape(&row.id), escape(&label_text(row)));
+            format!("{}{human} <strong>{}</strong> {}", tag(class, label), escape(&row.id), escape(&label_text(row)));
         let _ = writeln!(out, "<div class=\"card\"><h3>{heading}</h3>");
         if !row.explanation.trim().is_empty() {
             let _ = writeln!(out, "<p>{}</p>", escape(&row.explanation));

@@ -9,4 +9,5 @@ pub mod language;
 pub mod report;
 pub mod reproduce;
 pub mod requirements;
+pub mod unverifiable;
 pub mod verification;

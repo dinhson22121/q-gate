@@ -154,6 +154,7 @@ async fn failure_without_code_reference_is_inconclusive() {
     assert_eq!(result.verdict, TestVerdict::Inconclusive);
     assert!(result.note.contains("code under test"), "{}", result.note);
     assert!(result.note.contains("without report_result"), "{}", result.note);
+    assert_eq!(result.reason, Some(UnverifiableReason::TestEvidenceMissing));
 }
 
 #[tokio::test]
@@ -162,6 +163,7 @@ async fn never_touches_the_repository_without_a_snapshot() {
     let result = run_fake(script, FakeRunner::default(), None).await;
     assert_eq!(result.verdict, TestVerdict::Inconclusive);
     assert!(result.note.contains("no writable snapshot"));
+    assert_eq!(result.reason, Some(UnverifiableReason::TestNotRunnable));
 }
 
 #[tokio::test]
@@ -176,6 +178,7 @@ async fn unsupported_setups_are_inconclusive() {
     );
     let result = agent.run_scenario(&input(&files, &requirements, Some(dir.path())), &scenario()).await;
     assert_eq!(result.note, "language not enabled: go");
+    assert_eq!(result.reason, Some(UnverifiableReason::TestNotRunnable));
 
     fs::remove_file(dir.path().join("go.mod")).unwrap();
     let result = run_fake(ScriptedLoop::default(), FakeRunner::default(), Some(dir.path())).await;
@@ -184,6 +187,7 @@ async fn unsupported_setups_are_inconclusive() {
     let missing = Path::new("/definitely/not/a/snapshot");
     let result = run_fake(ScriptedLoop::default(), FakeRunner::default(), Some(missing)).await;
     assert!(result.note.contains("cannot create the scenario's snapshot"), "{}", result.note);
+    assert_eq!(result.reason, Some(UnverifiableReason::ToolError));
 }
 
 #[tokio::test]

@@ -7,6 +7,7 @@ use super::checks::CheckResult;
 use super::finding::Finding;
 use super::gate::GateDecision;
 use super::requirements::RequirementsReport;
+use super::unverifiable::Unverifiable;
 use super::verification::RejectedFinding;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -70,6 +71,10 @@ pub struct ReviewReport {
     pub usage: TokenUsage,
     pub estimated_cost_usd: Option<f64>,
     pub audited: bool,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub unverifiable: Vec<Unverifiable>,
 }
 
 impl ReviewReport {
@@ -115,6 +120,8 @@ mod tests {
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
             audited: false,
+            notes: vec![],
+            unverifiable: vec![],
         };
         assert!(!report.is_incomplete());
         report.skipped.push(SkippedFile { path: "b".into(), reason: SkipReason::ReviewFailed("x".into()) });

@@ -122,7 +122,14 @@ async fn requirements_assessment_always_reaches_the_inner_reviewer() {
     let r = reviewer(&cache, tags(), false, false);
     let requirements = Requirements { key: "K".into(), title: "t".into(), url: None, criteria: Vec::new() };
     for _ in 0..2 {
-        r.assess_requirements(RequirementsInput { files: &[], requirements: &requirements }).await.unwrap();
+        r.assess_requirements(RequirementsInput {
+            files: &[],
+            requirements: &requirements,
+            clarifications: &[],
+            expanded: false,
+        })
+        .await
+        .unwrap();
     }
     assert_eq!(*r.inner.assessments.lock().unwrap(), 2);
 }

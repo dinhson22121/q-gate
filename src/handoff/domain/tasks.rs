@@ -1,9 +1,9 @@
 use super::document::{CodeBlock, Fact, HandoffInput, Task, TaskKind};
-use super::text::language_of;
+use super::text::{language_of, reason_label};
 use crate::review::application::{
     Category, CheckOutcome, CheckResult, CriterionStatus, DesignMismatch, DesignMismatchKind, EvidenceRef,
-    FeedbackMark, Finding, Reproduce, RequirementsReport, RuleViolation, Severity, TestEvidence, TestResult,
-    TestVerdict,
+    FeedbackMark, Finding, HumanMark, Reproduce, RequirementsReport, RuleViolation, Severity, TestEvidence, TestResult,
+    TestVerdict, UnverifiableReason,
 };
 
 const DO_NOT_EDIT_TEST: &str =
@@ -63,6 +63,7 @@ pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
                     let advisory = criterion_inferred(requirements, &assessment.criterion_id);
                     if rules.unmet_criteria && !advisory { blocking.push(task) } else { criteria_warnings.push(task) }
                 }
+                CriterionStatus::Unclear if assessment.human == Some(HumanMark::NotApplicable) => {}
                 CriterionStatus::Unclear => criteria_warnings.push(criterion_task(
                     requirements,
                     &assessment.criterion_id,
@@ -219,7 +220,10 @@ fn test_task(test: &TestResult, kind: TaskKind) -> Task {
         fix: Some(if failed {
             DO_NOT_EDIT_TEST.into()
         } else {
-            "Check that the scenario is implemented; make it testable (or add your own test) if needed.".into()
+            test.reason.map_or_else(
+                || "Check that the scenario is implemented; make it testable (or add your own test) if needed.".into(),
+                |reason| reason.remedy().to_string(),
+            )
         }),
     };
     if failed && let Some(note) = non_empty(&test.note) {
@@ -285,6 +289,13 @@ fn criterion_task(requirements: &RequirementsReport, id: &str, kind: TaskKind) -
     let assessment = requirements.assessments.iter().find(|a| a.criterion_id == id);
     let unmet = kind == TaskKind::UnmetCriterion;
     let mut facts = vec![fact("Ticket", requirements.requirements.key.as_str())];
+    let reason = assessment.and_then(|a| a.reason).unwrap_or(UnverifiableReason::AmbiguousRequirement);
+    if !unmet {
+        facts.push(fact("Why unverifiable", reason_label(reason)));
+        if assessment.is_some_and(|a| a.retried) {
+            facts.push(fact("Retried", "qgate already retried this assessment once"));
+        }
+    }
     if criterion_inferred(requirements, id) {
         facts.push(fact("Advisory", "inferred from the ticket description; does not block the gate"));
     }
@@ -303,7 +314,7 @@ fn criterion_task(requirements: &RequirementsReport, id: &str, kind: TaskKind) -
         fix: Some(if unmet {
             "Implement the behaviour the criterion describes, with a test that proves it.".into()
         } else {
-            "Make the implementation of this criterion explicit (code and a test) so it can be verified.".into()
+            format!("{}. Or make the implementation explicit (code and a test) so it can be verified.", reason.remedy())
         }),
     }
 }

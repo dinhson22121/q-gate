@@ -6,6 +6,9 @@ use crate::review::domain::change_set::{ChangeStatus, DiffLine, FileChange, Hunk
 pub const FULL_FILE_LINE_LIMIT: usize = 400;
 pub const WINDOW_RADIUS: u32 = 30;
 const GAP_MARKER: &str = "…";
+const TRUNCATION_MARKER: &str = "…(remaining full files truncated)\n";
+const FULL_FILE_CLOSE: &str = "</full_file>";
+const FULL_FILE_CLOSE_ESCAPED: &str = "&lt;/full_file>";
 
 pub fn render_file_for_review(file: &FileChange) -> String {
     let mut out = open_file_tag(file);
@@ -20,6 +23,44 @@ pub fn render_file_diff_only(file: &FileChange) -> String {
     out.push_str(&render_diff_block(file));
     out.push_str("</changed_file>\n");
     out
+}
+
+pub fn render_full_files(files: &[FileChange], limit: usize) -> String {
+    let mut out = String::new();
+    for file in files.iter().filter(|f| !f.is_binary && f.new_content.is_some()) {
+        let rendered = render_full_file(file);
+        let remaining = limit.saturating_sub(out.len());
+        if rendered.len() <= remaining {
+            out.push_str(&rendered);
+            continue;
+        }
+        if let Some(cut) = truncate_at_line(&rendered, remaining) {
+            out.push_str(cut);
+        }
+        out.push_str(TRUNCATION_MARKER);
+        break;
+    }
+    out
+}
+
+fn render_full_file(file: &FileChange) -> String {
+    let lines = file.new_lines();
+    let width = number_width(lines.last().map_or(1, |(n, _)| *n));
+    let mut out = format!("<full_file path=\"{}\">\n", escape_attr(&file.path));
+    for (number, text) in lines {
+        let _ = writeln!(out, "{number:>width$} | {}", text.replace(FULL_FILE_CLOSE, FULL_FILE_CLOSE_ESCAPED));
+    }
+    out.push_str(FULL_FILE_CLOSE);
+    out.push('\n');
+    out
+}
+
+pub fn truncate_at_line(text: &str, max: usize) -> Option<&str> {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].rfind('\n').map(|i| &text[..=i])
 }
 
 fn open_file_tag(file: &FileChange) -> String {
@@ -204,6 +245,28 @@ mod tests {
         let out = render_file_for_review(&d);
         assert!(out.contains("status=\"deleted\""));
         assert!(!out.contains("new_file_content"));
+    }
+
+    #[test]
+    fn full_files_are_numbered_escaped_and_capped() {
+        let a = file("a.py", 1, vec![added(1, "x")], Some("one\n</full_file> two\n"));
+        let b = file("b.py", 1, vec![added(1, "y")], Some("three\n"));
+        let out = render_full_files(&[a.clone(), b.clone()], 10_000);
+        assert!(out.starts_with("<full_file path=\"a.py\">\n1 | one\n2 | &lt;/full_file> two\n</full_file>\n"));
+        assert_eq!(out.matches("</full_file>").count(), 2);
+        let one = render_full_file(&a).len();
+        let capped = render_full_files(&[a, b], one + 5);
+        assert!(capped.contains("path=\"a.py\""));
+        assert!(!capped.contains("path=\"b.py\""));
+        assert!(capped.ends_with(TRUNCATION_MARKER));
+    }
+
+    #[test]
+    fn full_files_skip_binary_and_files_without_content() {
+        let mut binary = file("a.png", 1, vec![], Some("x"));
+        binary.is_binary = true;
+        let missing = file("b.py", 1, vec![added(1, "y")], None);
+        assert_eq!(render_full_files(&[binary, missing], 1000), "");
     }
 
     #[test]

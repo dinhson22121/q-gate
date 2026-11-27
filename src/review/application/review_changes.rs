@@ -5,10 +5,14 @@ use futures::{StreamExt, stream};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::batching::plan_batches;
+pub use super::ports::MAX_RETRY_CONTEXT_BYTES;
 use super::ports::{
     AssessmentOutput, AuditInput, CallerFinder, ChangeSource, CheckRunner, CodeReviewer, FeedbackPolicy,
-    FindingAuditor, RequirementsInput, ReviewInput, ReviewerError, ReviewerOutput, SourceError,
+    FindingAuditor, HumanInput, HumanVerifications, RequirementsInput, ReviewInput, ReviewerError, ReviewerOutput,
+    SourceError,
 };
+pub use super::retry_criteria::MAX_RETRY_CRITERIA;
+use super::retry_criteria::retry_unverified;
 use super::run_agents::{AgentRun, run_agents};
 use crate::review::domain::agent_results::{TicketContext, verify_agent_report};
 use crate::review::domain::callers::{CallerContext, CallerSite};
@@ -19,7 +23,8 @@ use crate::review::domain::finding::Finding;
 use crate::review::domain::gate::{GateInput, GatePolicy};
 use crate::review::domain::report::{ReviewReport, SkipReason, SkippedFile, TokenUsage};
 use crate::review::domain::reproduce::demote_unproven;
-use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, Requirements, verify_assessments};
+use crate::review::domain::requirements::{CriterionAssessment, Requirements, apply_human_marks, verify_assessments};
+use crate::review::domain::unverifiable::{UnverifiableReason, collect_unverifiable};
 use crate::review::domain::verification::{Verification, apply_audit, verify_findings};
 
 #[derive(Debug, Clone)]
@@ -80,6 +85,7 @@ pub struct ReviewChanges<S, R, C> {
     auditor: Option<Arc<dyn FindingAuditor>>,
     callers: Option<Arc<dyn CallerFinder>>,
     feedback: Option<Arc<dyn FeedbackPolicy>>,
+    human: Option<Arc<dyn HumanVerifications>>,
 }
 
 #[derive(Default)]
@@ -136,7 +142,17 @@ where
 {
     pub fn new(source: S, reviewer: R, checks: C, settings: ReviewSettings) -> Result<Self, ReviewError> {
         let ignore = build_globset(&settings.ignore_patterns)?;
-        Ok(Self { source, reviewer, checks, settings, ignore, auditor: None, callers: None, feedback: None })
+        Ok(Self {
+            source,
+            reviewer,
+            checks,
+            settings,
+            ignore,
+            auditor: None,
+            callers: None,
+            feedback: None,
+            human: None,
+        })
     }
 
     pub fn with_auditor(mut self, auditor: Arc<dyn FindingAuditor>) -> Self {
@@ -154,6 +170,19 @@ where
     pub fn with_feedback(mut self, policy: Arc<dyn FeedbackPolicy>) -> Self {
         self.feedback = Some(policy);
         self
+    }
+
+    #[must_use]
+    pub fn with_human_verifications(mut self, human: Arc<dyn HumanVerifications>) -> Self {
+        self.human = Some(human);
+        self
+    }
+
+    async fn human_inputs(&self, requirements: Option<&Requirements>) -> Vec<HumanInput> {
+        match (&self.human, requirements) {
+            (Some(human), Some(requirements)) => human.lookup(&requirements.criteria).await,
+            _ => Vec::new(),
+        }
     }
 
     async fn audit(&self, change_set: &ChangeSet, verification: Verification) -> (Verification, AuditSpend) {
@@ -198,8 +227,9 @@ where
     ) -> Result<ReviewReport, ReviewError> {
         let changes = self.source.load().await?;
         let (reviewable, mut skipped) = self.select(changes.files);
+        let human = self.human_inputs(requirements.as_ref()).await;
         if reviewable.is_empty() {
-            let mut report = self.empty_report(skipped, requirements);
+            let mut report = self.empty_report(skipped, requirements, &human);
             report.ticket = ticket;
             return Ok(report);
         }
@@ -218,7 +248,8 @@ where
             .map(|(index, range)| self.review_batch(&reviewable[range], &batch_callers[index]))
             .buffer_unordered(self.settings.concurrency.max(1))
             .fold(BatchOutcome::default(), |acc, next| async move { acc.merge(next) });
-        let assessment = self.assess(&reviewable, requirements.as_ref());
+        let clarifications = clarifications_of(requirements.as_ref(), &human);
+        let assessment = self.assess(&reviewable, requirements.as_ref(), &clarifications);
         let agent_work = async {
             match &agents {
                 Some(run) if !run.suite.is_empty() => {
@@ -250,7 +281,17 @@ where
             let assessed = feedback.assess(&verification.accepted).await;
             verification.accepted = apply_feedback(verification.accepted, &assessed);
         }
-        let requirements_report = requirements.map(|r| verify_assessments(&change_set, r, assessment.assessments));
+        let mut notes = Vec::new();
+        let mut assessment_usage = assessment.usage;
+        let mut assessment_cost = assessment.cost_usd;
+        let mut requirements_report = requirements.map(|r| verify_assessments(&change_set, r, assessment.assessments));
+        if let Some(report) = requirements_report.take() {
+            let retry = retry_unverified(&self.reviewer, &change_set, report, &clarifications).await?;
+            assessment_usage += retry.usage;
+            assessment_cost = add_costs(assessment_cost, retry.cost_usd);
+            notes.extend(retry.note);
+            requirements_report = Some(apply_human_marks(retry.report, &human));
+        }
         let incomplete = skipped.iter().any(|s| matches!(s.reason, SkipReason::ReviewFailed(_)));
         let agent_report = agent_report.map(|report| {
             let mut report = verify_agent_report(&change_set, report);
@@ -265,8 +306,9 @@ where
             agents: agent_report.as_ref(),
         });
         let mut usage = outcome.usage;
-        usage += assessment.usage;
+        usage += assessment_usage;
         usage += audit.usage;
+        let unverifiable = collect_unverifiable(requirements_report.as_ref(), agent_report.as_ref(), &skipped);
         Ok(ReviewReport {
             files_reviewed,
             skipped,
@@ -278,13 +320,22 @@ where
             ticket,
             gate,
             usage,
-            estimated_cost_usd: add_costs(add_costs(outcome.cost_usd, assessment.cost_usd), audit.cost_usd),
+            estimated_cost_usd: add_costs(add_costs(outcome.cost_usd, assessment_cost), audit.cost_usd),
             audited: audit.performed,
+            notes,
+            unverifiable,
         })
     }
 
-    fn empty_report(&self, skipped: Vec<SkippedFile>, requirements: Option<Requirements>) -> ReviewReport {
-        let requirements_report = requirements.map(|r| verify_assessments(&ChangeSet::default(), r, Vec::new()));
+    fn empty_report(
+        &self,
+        skipped: Vec<SkippedFile>,
+        requirements: Option<Requirements>,
+        human: &[HumanInput],
+    ) -> ReviewReport {
+        let requirements_report =
+            requirements.map(|r| apply_human_marks(verify_assessments(&ChangeSet::default(), r, Vec::new()), human));
+        let unverifiable = collect_unverifiable(requirements_report.as_ref(), None, &skipped);
         let gate = self.effective_gate().decide(GateInput {
             findings: &[],
             requirements: requirements_report.as_ref(),
@@ -305,6 +356,8 @@ where
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
             audited: false,
+            notes: Vec::new(),
+            unverifiable,
         }
     }
 
@@ -312,22 +365,25 @@ where
         &self,
         files: &[FileChange],
         requirements: Option<&Requirements>,
+        clarifications: &[(String, String)],
     ) -> Result<AssessmentOutput, ReviewerError> {
         let Some(requirements) = requirements else {
             return Ok(AssessmentOutput::default());
         };
-        match self.reviewer.assess_requirements(RequirementsInput { files, requirements }).await {
+        let input = RequirementsInput { files, requirements, clarifications, expanded: false };
+        match self.reviewer.assess_requirements(input).await {
             Ok(output) => Ok(output),
             Err(error) if error.is_fatal() => Err(error),
             Err(error) => Ok(AssessmentOutput {
                 assessments: requirements
                     .criteria
                     .iter()
-                    .map(|c| CriterionAssessment {
-                        criterion_id: c.id.clone(),
-                        status: CriterionStatus::Unclear,
-                        explanation: format!("Assessment failed: {error}"),
-                        evidence: Vec::new(),
+                    .map(|c| {
+                        CriterionAssessment::unclear(
+                            c.id.clone(),
+                            UnverifiableReason::ToolError,
+                            format!("Assessment failed: {error}"),
+                        )
                     })
                     .collect(),
                 ..AssessmentOutput::default()
@@ -365,8 +421,7 @@ where
 
     fn review_batch<'a>(&'a self, files: &'a [FileChange], callers: &'a [CallerSite]) -> BoxFuture<'a, BatchOutcome> {
         Box::pin(async move {
-            let input = ReviewInput { files, guidelines: &self.settings.guidelines, callers };
-            match self.reviewer.review(input).await {
+            match self.attempt(files, callers).await {
                 Ok(output) => BatchOutcome::success(output),
                 Err(ReviewerError::Truncated) if files.len() > 1 => {
                     let (left, right) = files.split_at(files.len() / 2);
@@ -374,10 +429,33 @@ where
                     a.merge(b)
                 }
                 Err(error) if error.is_fatal() => BatchOutcome { fatal: Some(error), ..BatchOutcome::default() },
-                Err(error) => BatchOutcome::failed(files, &error),
+                Err(_) => match self.attempt(files, callers).await {
+                    Ok(output) => BatchOutcome::success(output),
+                    Err(error) if error.is_fatal() => BatchOutcome { fatal: Some(error), ..BatchOutcome::default() },
+                    Err(error) => BatchOutcome::failed(files, &error),
+                },
             }
         })
     }
+
+    async fn attempt(&self, files: &[FileChange], callers: &[CallerSite]) -> Result<ReviewerOutput, ReviewerError> {
+        self.reviewer.review(ReviewInput { files, guidelines: &self.settings.guidelines, callers }).await
+    }
+}
+
+fn clarifications_of(requirements: Option<&Requirements>, human: &[HumanInput]) -> Vec<(String, String)> {
+    let Some(requirements) = requirements else {
+        return Vec::new();
+    };
+    requirements
+        .criteria
+        .iter()
+        .zip(human)
+        .filter_map(|(criterion, input)| {
+            let text = input.clarification.as_deref()?.trim();
+            (!text.is_empty()).then(|| (criterion.id.clone(), text.to_string()))
+        })
+        .collect()
 }
 
 fn build_globset(patterns: &[String]) -> Result<GlobSet, ReviewError> {
@@ -403,7 +481,9 @@ mod tests {
     use crate::review::domain::feedback::{FeedbackMark, FindingFeedback};
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::finding::{Demotion, Reproduce, Severity};
-    use crate::review::domain::requirements::{AcceptanceCriterion, EvidenceRef};
+    use crate::review::domain::gate::UnverifiablePolicy;
+    use crate::review::domain::requirements::{AcceptanceCriterion, CriterionStatus, EvidenceRef, HumanMark};
+    use crate::review::domain::unverifiable::UnverifiableSubject;
     use crate::review::domain::verification::{AuditVerdict, FindingAudit, RejectReason};
 
     struct FakeSource(ChangeSet);
@@ -414,11 +494,14 @@ mod tests {
         }
     }
 
+    type AssessCall = (Vec<String>, bool, Vec<String>);
+
     struct FakeReviewer {
         script: Mutex<Vec<Result<ReviewerOutput, ReviewerError>>>,
         calls: Mutex<Vec<usize>>,
         callers_seen: Mutex<Vec<Vec<String>>>,
-        assessment_error: Mutex<Option<ReviewerError>>,
+        assessment_script: Mutex<Vec<Option<ReviewerError>>>,
+        assess_calls: Mutex<Vec<AssessCall>>,
     }
 
     impl FakeReviewer {
@@ -428,8 +511,15 @@ mod tests {
                 script: Mutex::new(script),
                 calls: Mutex::new(Vec::new()),
                 callers_seen: Mutex::new(Vec::new()),
-                assessment_error: Mutex::new(None),
+                assessment_script: Mutex::new(Vec::new()),
+                assess_calls: Mutex::new(Vec::new()),
             }
+        }
+
+        fn failing_assessments(self, mut script: Vec<Option<ReviewerError>>) -> Self {
+            script.reverse();
+            *self.assessment_script.lock().unwrap() = script;
+            self
         }
     }
 
@@ -441,7 +531,10 @@ mod tests {
         }
 
         async fn assess_requirements(&self, input: RequirementsInput<'_>) -> Result<AssessmentOutput, ReviewerError> {
-            if let Some(error) = self.assessment_error.lock().unwrap().take() {
+            let ids = input.requirements.criteria.iter().map(|c| c.id.clone()).collect();
+            let notes = input.clarifications.iter().map(|(_, text)| text.clone()).collect();
+            self.assess_calls.lock().unwrap().push((ids, input.expanded, notes));
+            if let Some(error) = self.assessment_script.lock().unwrap().pop().flatten() {
                 return Err(error);
             }
             let id = input.requirements.criteria[0].id.clone();
@@ -451,6 +544,9 @@ mod tests {
                     status: CriterionStatus::Met,
                     explanation: "done".into(),
                     evidence: vec![EvidenceRef { file: "a.go".into(), line: 1, quote: "total := compute(1)".into() }],
+                    reason: None,
+                    retried: false,
+                    human: None,
                 }],
                 usage: TokenUsage { input_tokens: 7, ..TokenUsage::default() },
                 cost_usd: Some(0.01),
@@ -721,12 +817,39 @@ mod tests {
 
     #[tokio::test]
     async fn refused_batch_marks_files_failed_and_report_incomplete() {
-        let reviewer = FakeReviewer::new(vec![Err(ReviewerError::Refused { category: Some("cyber".into()) })]);
+        let refused = || Err(ReviewerError::Refused { category: Some("cyber".into()) });
+        let reviewer = FakeReviewer::new(vec![refused(), refused()]);
         let report = use_case(vec![go_file("a.go")], reviewer, sequential()).execute(None, &NoProgress).await.unwrap();
         assert!(report.files_reviewed.is_empty());
         assert!(report.is_incomplete());
         assert!(report.gate.incomplete);
         assert!(!report.gate.passed, "an unreviewed change must not pass");
+        assert_eq!(report.unverifiable.len(), 1);
+        assert_eq!(report.unverifiable[0].subject, UnverifiableSubject::File);
+        assert_eq!(report.unverifiable[0].id, "a.go");
+    }
+
+    #[tokio::test]
+    async fn a_failed_batch_is_retried_once_and_recovers() {
+        let reviewer =
+            FakeReviewer::new(vec![Err(ReviewerError::Unavailable("blip".into())), Ok(output(vec![], 0.01))]);
+        let use_case = use_case(vec![go_file("a.go")], reviewer, sequential());
+        let report = use_case.execute(None, &NoProgress).await.unwrap();
+        assert_eq!(*use_case.reviewer.calls.lock().unwrap(), vec![1, 1]);
+        assert_eq!(report.files_reviewed, vec!["a.go"]);
+        assert!(!report.is_incomplete());
+        assert!(report.gate.passed);
+        assert!(report.unverifiable.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_fatal_error_on_the_batch_retry_aborts() {
+        let reviewer = FakeReviewer::new(vec![
+            Err(ReviewerError::Unavailable("blip".into())),
+            Err(ReviewerError::RateLimited("limit".into())),
+        ]);
+        let result = use_case(vec![go_file("a.go")], reviewer, sequential()).execute(None, &NoProgress).await;
+        assert!(matches!(result, Err(ReviewError::Reviewer(ReviewerError::RateLimited(_)))));
     }
 
     #[tokio::test]
@@ -758,7 +881,6 @@ mod tests {
 
     #[tokio::test]
     async fn ticket_in_progress_unmet_criterion_does_not_block_gate() {
-        use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus};
         struct NotMetReviewer;
         impl CodeReviewer for NotMetReviewer {
             async fn review(&self, _input: ReviewInput<'_>) -> Result<ReviewerOutput, ReviewerError> {
@@ -778,6 +900,9 @@ mod tests {
                             status: CriterionStatus::NotMet,
                             explanation: "not done yet".into(),
                             evidence: Vec::new(),
+                            reason: None,
+                            retried: false,
+                            human: None,
                         })
                         .collect(),
                     ..AssessmentOutput::default()
@@ -809,37 +934,150 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn requirements_are_assessed_verified_and_gate_fails_on_unmet() {
-        let report = use_case(vec![go_file("a.go")], FakeReviewer::new(vec![]), sequential())
+    async fn unassessed_criterion_is_retried_with_full_files_and_resolved() {
+        let use_case = use_case(vec![go_file("a.go")], FakeReviewer::new(vec![]), sequential());
+        let report = use_case.execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress).await.unwrap();
+        let req = report.requirements.as_ref().unwrap();
+        assert_eq!(req.assessments[0].status, CriterionStatus::Met);
+        assert!(!req.assessments[0].retried);
+        assert_eq!(req.assessments[1].status, CriterionStatus::Met);
+        assert!(req.assessments[1].retried);
+        assert_eq!(report.usage.input_tokens, 14);
+        assert!(report.gate.passed);
+        assert!(report.unverifiable.is_empty());
+        assert_eq!(report.notes, vec!["retried 1 unverifiable criteria with full-file context; 1 resolved"]);
+        let calls = use_case.reviewer.assess_calls.lock().unwrap();
+        assert_eq!(calls[0], (vec!["AC-1".to_string(), "AC-2".to_string()], false, vec![]));
+        assert_eq!(calls[1], (vec!["AC-2".to_string()], true, vec![]));
+    }
+
+    #[tokio::test]
+    async fn criterion_still_unclear_after_retry_is_reported_as_unverifiable() {
+        let reviewer =
+            FakeReviewer::new(vec![]).failing_assessments(vec![None, Some(ReviewerError::Unavailable("x".into()))]);
+        let report = use_case(vec![go_file("a.go")], reviewer, sequential())
             .execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress)
             .await
             .unwrap();
         let req = report.requirements.as_ref().unwrap();
-        assert_eq!(req.assessments[0].status, CriterionStatus::Met);
         assert_eq!(req.assessments[1].status, CriterionStatus::Unclear);
-        assert_eq!(report.usage.input_tokens, 7);
+        assert!(!req.assessments[1].retried);
         assert!(!report.gate.passed, "an unclear acceptance criterion is not demonstrably met, so it blocks");
         assert_eq!(report.gate.unmet_criteria, vec!["AC-2"]);
+        assert_eq!(report.gate.unverified_criteria, vec!["AC-2"]);
+        assert_eq!(report.unverifiable.len(), 1);
+        assert_eq!(report.unverifiable[0].reason, UnverifiableReason::NotAssessed);
+        assert_eq!(report.unverifiable[0].subject, UnverifiableSubject::Criterion);
+        assert!(report.notes[0].contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn advisory_policy_lists_unverified_criteria_without_blocking() {
+        let reviewer =
+            FakeReviewer::new(vec![]).failing_assessments(vec![None, Some(ReviewerError::Unavailable("x".into()))]);
+        let mut settings = sequential();
+        settings.gate.unverifiable = UnverifiablePolicy::Advisory;
+        let report = use_case(vec![go_file("a.go")], reviewer, settings)
+            .execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress)
+            .await
+            .unwrap();
+        assert!(report.gate.passed);
+        assert!(report.gate.unmet_criteria.is_empty());
+        assert_eq!(report.gate.unverified_criteria, vec!["AC-2"]);
+    }
+
+    struct FakeHuman(Vec<HumanInput>);
+
+    impl HumanVerifications for FakeHuman {
+        fn lookup<'a>(&'a self, criteria: &'a [AcceptanceCriterion]) -> BoxFuture<'a, Vec<HumanInput>> {
+            assert_eq!(criteria.len(), self.0.len());
+            let inputs = self.0.clone();
+            Box::pin(async move { inputs })
+        }
+    }
+
+    #[tokio::test]
+    async fn human_marks_and_clarifications_are_applied_around_the_assessment() {
+        let reviewer =
+            FakeReviewer::new(vec![]).failing_assessments(vec![None, Some(ReviewerError::Unavailable("x".into()))]);
+        let human = FakeHuman(vec![
+            HumanInput { mark: None, clarification: Some("  CSV only  ".into()) },
+            HumanInput { mark: Some(HumanMark::VerifiedMet), clarification: Some("   ".into()) },
+        ]);
+        let use_case =
+            use_case(vec![go_file("a.go")], reviewer, sequential()).with_human_verifications(Arc::new(human));
+        let report = use_case.execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress).await.unwrap();
+        let req = report.requirements.as_ref().unwrap();
+        assert_eq!(req.assessments[1].status, CriterionStatus::Met);
+        assert_eq!(req.assessments[1].human, Some(HumanMark::VerifiedMet));
+        assert!(report.gate.passed);
+        assert!(report.unverifiable.is_empty());
+        assert_eq!(use_case.reviewer.assess_calls.lock().unwrap()[0].2, vec!["CSV only".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn not_applicable_mark_excludes_the_criterion_from_the_gate_and_unverifiable_list() {
+        let reviewer =
+            FakeReviewer::new(vec![]).failing_assessments(vec![None, Some(ReviewerError::Unavailable("x".into()))]);
+        let human = FakeHuman(vec![
+            HumanInput::default(),
+            HumanInput { mark: Some(HumanMark::NotApplicable), clarification: None },
+        ]);
+        let report = use_case(vec![go_file("a.go")], reviewer, sequential())
+            .with_human_verifications(Arc::new(human))
+            .execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress)
+            .await
+            .unwrap();
+        assert!(report.gate.passed);
+        assert!(report.gate.unverified_criteria.is_empty());
+        assert!(report.unverifiable.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_change_applies_human_marks_and_lists_unverifiable_criteria() {
+        let human = FakeHuman(vec![
+            HumanInput { mark: Some(HumanMark::NotApplicable), clarification: None },
+            HumanInput::default(),
+        ]);
+        let report = use_case(vec![], FakeReviewer::new(vec![]), sequential())
+            .with_human_verifications(Arc::new(human))
+            .execute(Some(requirements(&["AC-1", "AC-2"])), &NoProgress)
+            .await
+            .unwrap();
+        assert_eq!(report.unverifiable.len(), 1);
+        assert_eq!(report.unverifiable[0].id, "AC-2");
+        assert_eq!(report.unverifiable[0].reason, UnverifiableReason::NotAssessed);
     }
 
     #[tokio::test]
     async fn failed_assessment_marks_criteria_unclear_but_fatal_aborts() {
-        let reviewer = FakeReviewer::new(vec![]);
-        *reviewer.assessment_error.lock().unwrap() = Some(ReviewerError::Unavailable("overloaded".into()));
+        let reviewer = FakeReviewer::new(vec![]).failing_assessments(vec![
+            Some(ReviewerError::Unavailable("overloaded".into())),
+            Some(ReviewerError::Unavailable("overloaded".into())),
+        ]);
         let report = use_case(vec![go_file("a.go")], reviewer, sequential())
             .execute(Some(requirements(&["AC-1"])), &NoProgress)
             .await
             .unwrap();
         let assessment = &report.requirements.unwrap().assessments[0];
         assert_eq!(assessment.status, CriterionStatus::Unclear);
+        assert_eq!(assessment.reason, Some(UnverifiableReason::ToolError));
         assert!(assessment.explanation.contains("overloaded"));
 
-        let reviewer = FakeReviewer::new(vec![]);
-        *reviewer.assessment_error.lock().unwrap() = Some(ReviewerError::Rejected("401".into()));
+        let reviewer = FakeReviewer::new(vec![]).failing_assessments(vec![Some(ReviewerError::Rejected("401".into()))]);
         let result = use_case(vec![go_file("a.go")], reviewer, sequential())
             .execute(Some(requirements(&["AC-1"])), &NoProgress)
             .await;
         assert!(result.is_err());
+
+        let reviewer = FakeReviewer::new(vec![]).failing_assessments(vec![
+            Some(ReviewerError::Unavailable("x".into())),
+            Some(ReviewerError::RateLimited("l".into())),
+        ]);
+        let result = use_case(vec![go_file("a.go")], reviewer, sequential())
+            .execute(Some(requirements(&["AC-1"])), &NoProgress)
+            .await;
+        assert!(matches!(result, Err(ReviewError::Reviewer(ReviewerError::RateLimited(_)))));
     }
 
     #[tokio::test]

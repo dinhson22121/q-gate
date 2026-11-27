@@ -11,7 +11,7 @@ use super::tickets::{TicketLoad, load_ticket_context};
 use crate::cache::application::NoCacheTrailer;
 use crate::conventions::application::{RulebookStore, repo_key};
 use crate::conventions::infrastructure::SqliteRulebookStore;
-use crate::feedback::application::FeedbackService;
+use crate::feedback::application::{CriterionVerifications, FeedbackService};
 use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta};
@@ -32,6 +32,7 @@ use crate::review::infrastructure::claude_preflight::ClaudePreflight;
 use crate::review::infrastructure::commit_snapshots::GitCommitSnapshots;
 use crate::review::infrastructure::feedback::StoredFeedback;
 use crate::review::infrastructure::guidelines::load_guidelines;
+use crate::review::infrastructure::human_verifications::StoredHumanVerifications;
 use crate::review::infrastructure::local_git::{DiffTarget, LocalGit};
 use crate::review::infrastructure::snapshot::{GitScenarioSnapshots, commit_messages, export_commit};
 use crate::review::infrastructure::tool_checks::{
@@ -317,8 +318,12 @@ impl ReviewPipeline {
         use_case = use_case.with_callers(Arc::new(CallgraphCallers::new(checks_root)));
         match SqliteFeedbackStore::open(&db) {
             Ok(store) => {
-                let service = Arc::new(FeedbackService::new(Arc::new(store)));
-                use_case = use_case.with_feedback(Arc::new(StoredFeedback::new(service, repo_key(root))));
+                let store = Arc::new(store);
+                let service = Arc::new(FeedbackService::new(store.clone()));
+                let criteria = Arc::new(CriterionVerifications::new(store));
+                use_case = use_case
+                    .with_feedback(Arc::new(StoredFeedback::new(service, repo_key(root))))
+                    .with_human_verifications(Arc::new(StoredHumanVerifications::new(criteria, repo_key(root))));
             }
             Err(e) => eprintln!("qgate: warning: feedback not applied: {e}"),
         }

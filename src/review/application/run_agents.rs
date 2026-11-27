@@ -199,6 +199,7 @@ mod tests {
                     verdict: TestVerdict::Passed,
                     evidence: None,
                     note: String::new(),
+                    reason: None,
                 }
             })
         }

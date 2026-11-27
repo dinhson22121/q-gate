@@ -30,6 +30,8 @@ pub fn redact_report(report: &mut ReviewReport, secrets: &[&str]) {
     if let Some(agents) = report.agents.as_mut() {
         redact_agents(agents, &clean);
     }
+    report.notes.iter_mut().for_each(clean);
+    report.unverifiable.iter_mut().for_each(|u| clean(&mut u.detail));
 }
 
 fn redact_agents(agents: &mut AgentReport, clean: &impl Fn(&mut String)) {
@@ -147,6 +149,15 @@ mod tests {
             usage: TokenUsage::default(),
             estimated_cost_usd: None,
             audited: false,
+            notes: vec!["retry failed: ghp_abcdefghijklmnopqrst".into()],
+            unverifiable: vec![crate::review::domain::unverifiable::Unverifiable {
+                subject: crate::review::domain::unverifiable::UnverifiableSubject::File,
+                id: "a.go".into(),
+                reason: crate::review::domain::unverifiable::UnverifiableReason::ReviewFailed,
+                detail: "boom ghp_abcdefghijklmnopqrst".into(),
+                retried: false,
+                remedy: String::new(),
+            }],
         };
         report.findings.push(crate::review::domain::finding::fixtures::finding(
             "a.go",
@@ -161,6 +172,8 @@ mod tests {
             reason: crate::review::domain::verification::RejectReason::EvidenceNotFound,
         });
         redact_report(&mut report, &[]);
+        assert_eq!(report.notes[0], "retry failed: [REDACTED]");
+        assert_eq!(report.unverifiable[0].detail, "boom [REDACTED]");
         assert_eq!(report.checks[0].output_tail, "ANTHROPIC_API_KEY=[REDACTED]");
         assert_eq!(report.findings[0].prevention_rule.as_ref().unwrap().text, "Never hardcode tokens like [REDACTED]");
         assert_eq!(
@@ -206,6 +219,7 @@ mod tests {
                     reproduce: S.into(),
                 }),
                 note: S.into(),
+                reason: None,
             }],
             violations: vec![RuleViolation {
                 rule_id: "R1".into(),

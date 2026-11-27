@@ -24,6 +24,9 @@ min_confidence = "high"
 fail_on_unmet_criteria = true
 # Fail when some files could not be reviewed (e.g. Claude unavailable or refusing).
 fail_on_incomplete = true
+# Criteria, tests or files qgate could not verify: strict | advisory.
+# strict blocks on them (subject to the fail_on_* switches); advisory lists them as unverified without blocking.
+unverifiable = "strict"
 
 [report]
 # Findings shown in reports (blocking or not).

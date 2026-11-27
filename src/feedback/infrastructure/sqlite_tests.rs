@@ -164,3 +164,84 @@ fn a_database_from_before_scopes_upgrades_with_existing_judgments_kept_per_repo(
     assert!(store.find("other", &["f".into()]).unwrap().is_empty());
     assert_eq!(current_version(&store.lock().unwrap()).unwrap(), MIGRATIONS.len());
 }
+
+fn verification(id: &str, text: &str, verdict: CriterionVerdict, at: &str) -> CriterionVerification {
+    CriterionVerification {
+        repo: "r".into(),
+        criterion_id: id.into(),
+        text_hash: crate::feedback::domain::criterion::criterion_text_hash(text),
+        criterion_text: text.into(),
+        verdict,
+        note: "n".into(),
+        recorded_at: DateTime::parse_from_rfc3339(at).unwrap().with_timezone(&Utc),
+    }
+}
+
+#[test]
+fn criterion_verifications_upsert_list_find_and_delete_across_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(&dir);
+    let first = verification("K/AC-1", "one", CriterionVerdict::VerifiedMet, "2026-01-01T00:00:00+00:00");
+    let second = verification("K/AC-2", "two", CriterionVerdict::Clarified, "2026-01-02T00:00:00+00:00");
+    store.put_criterion(&first).unwrap();
+    store.put_criterion(&second).unwrap();
+    let updated = CriterionVerification { verdict: CriterionVerdict::NotApplicable, ..first.clone() };
+    store.put_criterion(&updated).unwrap();
+    drop(store);
+
+    let store = open(&dir);
+    let listed = store.list_criteria("r").unwrap();
+    assert_eq!(listed, vec![second.clone(), updated.clone()]);
+    assert!(store.list_criteria("other").unwrap().is_empty());
+    let keys = [
+        ("K/AC-1".to_string(), first.text_hash.clone()),
+        ("K/AC-1".to_string(), "stale".to_string()),
+        ("K/AC-2".to_string(), second.text_hash.clone()),
+    ];
+    assert_eq!(store.find_criteria("r", &keys).unwrap(), vec![updated, second]);
+    assert!(store.delete_criterion("r", "K/AC-1", &first.text_hash).unwrap());
+    assert!(!store.delete_criterion("r", "K/AC-1", &first.text_hash).unwrap());
+}
+
+#[test]
+fn an_unknown_stored_criterion_verdict_is_a_storage_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(&dir);
+    store
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO criterion_verifications VALUES ('r', 'i', 'h', 't', 'weird', '', '2026-01-01T00:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+    assert!(matches!(store.list_criteria("r"), Err(FeedbackError::Storage(_))));
+}
+
+#[test]
+fn a_database_from_before_criteria_upgrades_and_keeps_judgments() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("qgate.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE feedback_schema_version (version INTEGER NOT NULL PRIMARY KEY);
+             INSERT INTO feedback_schema_version VALUES (1), (2);",
+        )
+        .unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.execute(
+            "INSERT INTO feedback_judgments VALUES ('r', 'f', 'llm/x', 'dismissed', 1, '2026-01-01T00:00:00+00:00', 'repo')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let store = SqliteFeedbackStore::open(&path).unwrap();
+
+    assert_eq!(store.find("r", &["f".into()]).unwrap().len(), 1);
+    store.put_criterion(&verification("i", "t", CriterionVerdict::VerifiedMet, "2026-01-01T00:00:00+00:00")).unwrap();
+    assert_eq!(store.list_criteria("r").unwrap().len(), 1);
+    assert_eq!(current_version(&store.lock().unwrap()).unwrap(), MIGRATIONS.len());
+}
