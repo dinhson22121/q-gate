@@ -1,4 +1,6 @@
-use crate::feedback::domain::model::{Judgment, Verdict};
+use chrono::{DateTime, Utc};
+
+use crate::feedback::domain::model::{Judgment, Scope, Verdict};
 use crate::feedback::domain::scoring::KindEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -10,7 +12,15 @@ pub enum FeedbackError {
 }
 
 pub trait FeedbackStore: Send + Sync {
-    fn put(&self, repo: &str, fingerprint: &str, kind: &str, verdict: Verdict) -> Result<(), FeedbackError>;
+    fn put(
+        &self,
+        repo: &str,
+        fingerprint: &str,
+        kind: &str,
+        verdict: Verdict,
+        scope: Scope,
+        recorded_at: DateTime<Utc>,
+    ) -> Result<(), FeedbackError>;
     fn delete(&self, repo: &str, fingerprint: &str) -> Result<bool, FeedbackError>;
     fn find(&self, repo: &str, fingerprints: &[String]) -> Result<Vec<Judgment>, FeedbackError>;
     fn events(&self, repo: &str) -> Result<Vec<KindEvent>, FeedbackError>;

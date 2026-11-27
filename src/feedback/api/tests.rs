@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 
 use super::handlers::facts_of;
 use super::*;
+use crate::feedback::application::{FeedbackStore, Scope, Verdict};
 use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::history::api::{DashboardState, serve_on_with};
 use crate::history::application::{FindingView, RecordRun};
@@ -24,6 +25,7 @@ struct TestServer {
     repo: String,
     token: ApiToken,
     client: reqwest::Client,
+    store: Arc<SqliteFeedbackStore>,
     _stop: oneshot::Sender<()>,
     _dir: tempfile::TempDir,
 }
@@ -38,7 +40,7 @@ impl TestServer {
         let hosts = vec!["localhost".to_string(), "127.0.0.1".to_string()];
         let token = ApiToken::generate().unwrap();
         let extra = router(FeedbackApiState::new(
-            Arc::new(FeedbackService::new(store)),
+            Arc::new(FeedbackService::new(store.clone())),
             runs.clone(),
             hosts.clone(),
             token.clone(),
@@ -50,7 +52,7 @@ impl TestServer {
         tokio::spawn(serve_on_with(listener, dashboard, extra, async {
             let _ = stopped.await;
         }));
-        Self { addr, run_id, repo: run.repo_path, token, client: reqwest::Client::new(), _stop: stop, _dir: dir }
+        Self { addr, run_id, repo: run.repo_path, token, client: reqwest::Client::new(), store, _stop: stop, _dir: dir }
     }
 
     fn url(&self, path: &str) -> String {
@@ -201,4 +203,66 @@ async fn mutations_require_header_token_origin_and_json() {
     assert_eq!(foreign.send().await.unwrap().status(), StatusCode::FORBIDDEN);
     let text = server.request_with("/api/feedback", "text/plain", "http://localhost").body(body);
     assert_eq!(text.send().await.unwrap().status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn records_a_global_scope_and_reports_scope_and_expiry() {
+    let server = TestServer::start().await;
+    let body = json!({"run_id": server.run_id, "index": 0, "verdict": "dismissed", "scope": "global"});
+
+    let (status, recorded) = server.post("/api/feedback", body).await;
+
+    assert_eq!((status, &recorded["scope"]), (StatusCode::OK, &json!("global")));
+    let feedback = server.feedback().await;
+    let item = &feedback["items"][0];
+    assert_eq!(
+        (&item["verdict"], &item["scope"], &item["expired"]),
+        (&json!("dismissed"), &json!("global"), &json!(false))
+    );
+    assert!(item["expires_at"].is_string());
+    assert_eq!(item["inherited"], json!(false));
+    assert_eq!(feedback["dismissal_ttl_days"], json!(crate::feedback::application::DISMISSAL_TTL_DAYS));
+    let (_, accepted) =
+        server.post("/api/feedback", json!({"run_id": server.run_id, "index": 0, "verdict": "accepted"})).await;
+    assert_eq!(accepted["scope"], json!("repo"));
+    assert_eq!(server.feedback().await["items"][0]["expires_at"], Value::Null);
+}
+
+#[tokio::test]
+async fn an_expired_dismissal_is_reported_without_an_effective_verdict() {
+    let server = TestServer::start().await;
+    let fingerprint = server.feedback().await["items"][0]["fingerprint"].as_str().unwrap().to_string();
+    let long_ago = chrono::Utc::now() - chrono::Duration::days(crate::feedback::application::DISMISSAL_TTL_DAYS + 1);
+    server.store.put(&server.repo, &fingerprint, "llm/security", Verdict::Dismissed, Scope::Repo, long_ago).unwrap();
+
+    let item = server.feedback().await["items"][0].clone();
+
+    assert_eq!((&item["verdict"], &item["expired"], &item["scope"]), (&Value::Null, &json!(true), &json!("repo")));
+}
+
+#[tokio::test]
+async fn a_global_judgment_from_another_repo_is_marked_inherited() {
+    let server = TestServer::start().await;
+    let fingerprint = server.feedback().await["items"][0]["fingerprint"].as_str().unwrap().to_string();
+    server
+        .store
+        .put("/elsewhere", &fingerprint, "llm/security", Verdict::Dismissed, Scope::Global, chrono::Utc::now())
+        .unwrap();
+
+    let item = server.feedback().await["items"][0].clone();
+
+    assert_eq!(
+        (&item["verdict"], &item["scope"], &item["inherited"]),
+        (&json!("dismissed"), &json!("global"), &json!(true))
+    );
+}
+
+#[tokio::test]
+async fn rejects_an_unknown_scope() {
+    let server = TestServer::start().await;
+    let body = json!({"run_id": server.run_id, "index": 0, "verdict": "dismissed", "scope": "team"});
+
+    let (status, _) = server.post("/api/feedback", body).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
