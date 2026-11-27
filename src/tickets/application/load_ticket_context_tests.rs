@@ -275,6 +275,44 @@ async fn thin_ticket_reports_completeness_gaps_as_notes() {
     );
 }
 
+fn uncovered_keys(loaded: &LoadedTickets) -> Vec<&str> {
+    loaded.uncovered.iter().map(|t| t.key.as_str()).collect()
+}
+
+#[tokio::test]
+async fn only_tickets_without_criteria_of_their_own_their_parents_or_qa_tickets_are_uncovered() {
+    let mut item = ticket("KAN-7", "Task", None, &[]);
+    item.description = "  POST /items saves an item  ".into();
+    let covered_by_story = ticket("KAN-8", "Sub-task", Some(("KAN-1", "Story")), &[]);
+    let covered_by_qa = linked(ticket("KAN-9", "Task", None, &[]), "QA-2", "is tested by");
+    let source = FakeSource::with(vec![
+        ticket("KAN-6", "Bug", None, &["traversal is rejected"]),
+        item,
+        covered_by_story,
+        ticket("KAN-1", "Story", None, &["story ac"]),
+        covered_by_qa,
+        ticket("QA-2", "Test", None, &["qa ac"]),
+    ]);
+    let keys = [key("KAN-7"), key("KAN-6"), key("KAN-8"), key("KAN-9")];
+
+    let loaded = LoadTicketContext::new(&source, options()).execute(&keys).await.unwrap();
+
+    assert_eq!(uncovered_keys(&loaded), vec!["KAN-7"]);
+    assert_eq!(loaded.uncovered[0].title, "Title KAN-7");
+    assert_eq!(loaded.uncovered[0].description, "POST /items saves an item");
+}
+
+#[tokio::test]
+async fn uncovered_tickets_carry_no_description_when_descriptions_are_disabled() {
+    let source = FakeSource::with(vec![ticket("KAN-7", "Task", None, &[])]);
+    let options = LoadOptions { include_description: false, ..options() };
+
+    let loaded = LoadTicketContext::new(&source, options).execute(&[key("KAN-7")]).await.unwrap();
+
+    assert_eq!(uncovered_keys(&loaded), vec!["KAN-7"]);
+    assert!(loaded.uncovered[0].description.is_empty());
+}
+
 #[test]
 fn long_descriptions_are_truncated_by_chars() {
     let text = "é".repeat(MAX_DESCRIPTION_CHARS + 5);

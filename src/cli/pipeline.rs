@@ -439,16 +439,18 @@ async fn with_criteria(
     mut notes: Vec<String>,
     inferrer: Option<&InferCriteria>,
 ) -> (Option<Requirements>, Option<TicketContext>, Vec<String>) {
-    if loaded.requirements.criteria.is_empty()
-        && let Some(inferrer) = inferrer
-    {
-        let requirements = &loaded.requirements;
-        let inferred = inferrer.execute(&requirements.key, &requirements.title, &loaded.context.description).await;
+    for ticket in std::mem::take(&mut loaded.uncovered) {
+        let inferred = match inferrer {
+            Some(inferrer) => inferrer.execute(&ticket.key, &ticket.title, &ticket.description).await,
+            None => Default::default(),
+        };
         notes.extend(inferred.note);
-        loaded.requirements.criteria = inferred.criteria;
+        if inferred.criteria.is_empty() {
+            notes.push(format!("{} has no acceptance criteria to check", ticket.key));
+        }
+        loaded.requirements.criteria.extend(inferred.criteria);
     }
     if loaded.requirements.criteria.is_empty() {
-        notes.push(format!("{} has no acceptance criteria to check", loaded.requirements.key));
         return (None, Some(loaded.context), notes);
     }
     (Some(loaded.requirements), Some(loaded.context), notes)
@@ -555,8 +557,14 @@ mod pipeline_tests;
 mod tests {
     use super::*;
     use crate::review::application::{AcceptanceCriterion, ReviewError};
+    use crate::tickets::application::UncoveredTicket;
 
     fn loaded(criteria: Vec<AcceptanceCriterion>, description: &str) -> LoadedTickets {
+        let uncovered = criteria
+            .is_empty()
+            .then(|| UncoveredTicket { key: "KAN-9".into(), title: "Login".into(), description: description.into() })
+            .into_iter()
+            .collect();
         LoadedTickets {
             requirements: Requirements { key: "KAN-9".into(), title: "Login".into(), url: None, criteria },
             context: TicketContext {
@@ -566,6 +574,7 @@ mod tests {
                 notes: Vec::new(),
             },
             notes: Vec::new(),
+            uncovered,
         }
     }
 
@@ -605,6 +614,28 @@ mod tests {
         assert_eq!(requirements.unwrap().criteria, written);
         assert!(notes.is_empty());
         assert_eq!(model.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_ticket_without_criteria_among_tickets_with_criteria_still_gets_inferred_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (inferrer, model) = inferrer(serde_json::json!({"criteria": ["valid item -> 201"]}), &dir);
+        let written = vec![AcceptanceCriterion::new("KAN-6/AC-1", "traversal is rejected")];
+        let mut tickets = loaded(written.clone(), "all tickets");
+        tickets.uncovered = vec![
+            UncoveredTicket { key: "KAN-7".into(), title: "Add item".into(), description: "POST /items saves".into() },
+            UncoveredTicket { key: "KAN-8".into(), title: "Empty".into(), description: String::new() },
+        ];
+
+        let (requirements, _, notes) = with_criteria(tickets, vec![], Some(&inferrer)).await;
+
+        let criteria = requirements.unwrap().criteria;
+        assert_eq!(criteria[0], written[0]);
+        assert_eq!((criteria[1].id.as_str(), criteria[1].inferred), ("KAN-7/AC-I1", true));
+        assert_eq!(criteria.len(), 2);
+        assert!(notes[0].starts_with("KAN-7 has no written acceptance criteria"), "{notes:?}");
+        assert_eq!(notes[1], "KAN-8 has no acceptance criteria to check");
+        assert_eq!(model.call_count(), 1);
     }
 
     #[tokio::test]
