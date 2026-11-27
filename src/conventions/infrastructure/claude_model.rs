@@ -90,6 +90,15 @@ pub(crate) fn build_user_message(request: &DraftRequest) -> String {
     out
 }
 
+pub fn prompt_material() -> Vec<String> {
+    vec![
+        BUILD_SYSTEM_PROMPT.to_string(),
+        CHECK_SYSTEM_PROMPT.to_string(),
+        rules_schema().to_string(),
+        violations_schema().to_string(),
+    ]
+}
+
 pub(crate) fn check_system_prompt(rules: &[Rule]) -> String {
     format!("{CHECK_SYSTEM_PROMPT}\n\n{}", rulebook_text(rules))
 }

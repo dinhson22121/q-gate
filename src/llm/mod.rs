@@ -7,6 +7,7 @@ pub use application::FakeModel;
 pub use application::{MeteredModel, StructuredModel, UsageMeter};
 pub use domain::error::{LlmError, USAGE_LIMIT_PREFIX};
 pub use domain::message::{ContentPart, Structured, SystemBlock};
+pub use domain::model_id::is_pinned_model_id;
 pub use domain::tools::{LoopLimits, LoopOutcome, LoopStop, ToolHandler, ToolOutput, ToolSpec};
 pub use domain::usage::Usage;
 pub use infrastructure::cli::{CliClient, CliConfig, estimate_input_tokens, tokens_for_chars};

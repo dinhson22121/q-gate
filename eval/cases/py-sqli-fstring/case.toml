@@ -1,0 +1,10 @@
+id = "py-sqli-fstring"
+description = "A request parameter is interpolated into a SQL string with an f-string."
+language = "python"
+
+[[expected]]
+file = "app/db.py"
+line = 10
+line_tolerance = 3
+category = "security"
+min_severity = "major"

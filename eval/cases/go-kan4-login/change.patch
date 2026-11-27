@@ -1,0 +1,121 @@
+diff --git a/main.go b/main.go
+index 2779fc9..fe80c39 100644
+--- a/main.go
++++ b/main.go
+@@ -1,12 +1,107 @@
+ package main
+ 
+ import (
++	"crypto/rand"
++	"crypto/sha256"
++	"crypto/subtle"
+ 	"database/sql"
++	"encoding/hex"
+ 	"fmt"
+ 	"net/http"
+ 	"os"
++	"sync"
+ )
+ 
++type credentials struct {
++	salt []byte
++	hash []byte
++}
++
++var users = map[string]credentials{}
++
++var sessions = struct {
++	sync.Mutex
++	byID map[string]string
++}{byID: map[string]string{}}
++
++func passwordHash(salt []byte, password string) []byte {
++	h := sha256.New()
++	h.Write(salt)
++	h.Write([]byte(password))
++	return h.Sum(nil)
++}
++
++func registerUser(email, password string) {
++	salt := make([]byte, 16)
++	_, _ = rand.Read(salt)
++	users[email] = credentials{salt: salt, hash: passwordHash(salt, password)}
++}
++
++func newSessionID() (string, error) {
++	raw := make([]byte, 16)
++	if _, err := rand.Read(raw); err != nil {
++		return "", err
++	}
++	return hex.EncodeToString(raw), nil
++}
++
++func sessionCookie(value string, maxAge int) *http.Cookie {
++	return &http.Cookie{
++		Name:     "session",
++		Value:    value,
++		Path:     "/",
++		MaxAge:   maxAge,
++		HttpOnly: true,
++		Secure:   true,
++		SameSite: http.SameSiteStrictMode,
++	}
++}
++
++func loginHandler(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodPost {
++		w.WriteHeader(http.StatusMethodNotAllowed)
++		return
++	}
++	email := r.FormValue("email")
++	password := r.FormValue("password")
++
++	cred, known := users[email]
++	if !known {
++		cred = credentials{salt: make([]byte, 16), hash: make([]byte, sha256.Size)}
++	}
++	match := subtle.ConstantTimeCompare(cred.hash, passwordHash(cred.salt, password)) == 1
++	if !known || !match {
++		http.Error(w, "invalid email or password", http.StatusUnauthorized)
++		return
++	}
++
++	id, err := newSessionID()
++	if err != nil {
++		http.Error(w, "internal error", http.StatusInternalServerError)
++		return
++	}
++	sessions.Lock()
++	sessions.byID[id] = email
++	sessions.Unlock()
++
++	http.SetCookie(w, sessionCookie(id, 3600))
++	w.WriteHeader(http.StatusOK)
++}
++
++func logoutHandler(w http.ResponseWriter, r *http.Request) {
++	if r.Method != http.MethodPost {
++		w.WriteHeader(http.StatusMethodNotAllowed)
++		return
++	}
++	if c, err := r.Cookie("session"); err == nil {
++		sessions.Lock()
++		delete(sessions.byID, c.Value)
++		sessions.Unlock()
++	}
++	http.SetCookie(w, sessionCookie("", -1))
++	w.WriteHeader(http.StatusOK)
++}
++
+ func userHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+ 	id := r.URL.Query().Get("id")
+ 	query := "SELECT name, email FROM users WHERE id = " + id
+@@ -26,6 +121,8 @@ func fileHandler(w http.ResponseWriter, r *http.Request) {
+ }
+ 
+ func main() {
++	http.HandleFunc("/login", loginHandler)
++	http.HandleFunc("/logout", logoutHandler)
+ 	http.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) { userHandler(nil, w, r) })
+ 	http.HandleFunc("/file", fileHandler)
+ 	_ = http.ListenAndServe(":8080", nil)

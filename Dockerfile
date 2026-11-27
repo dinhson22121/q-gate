@@ -63,6 +63,7 @@ COPY --from=builder /out/qgate /usr/local/bin/qgate
 COPY docker/entrypoint.sh /opt/qgate/entrypoint.sh
 COPY docker/toolchains/ /opt/qgate/toolchains/
 COPY config/qgate.toml.example /opt/qgate/qgate.toml.example
+COPY eval/cases /usr/share/qgate/eval/cases
 # Strip CRLF in case the repo was checked out on Windows with autocrlf.
 RUN sed -i 's/\r$//' /opt/qgate/entrypoint.sh /opt/qgate/toolchains/*.sh \
     && chmod 0755 /opt/qgate/entrypoint.sh /opt/qgate/toolchains/*.sh \

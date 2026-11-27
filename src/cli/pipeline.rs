@@ -7,6 +7,7 @@ use chrono::Utc;
 
 use super::agents::{apply_agent_policy, build_agents, effort_name};
 use super::caching::{ReviewCache, cache_tags, wrap_test_agent};
+use super::fingerprint::current_provenance;
 use super::tickets::{TicketLoad, load_ticket_context};
 use crate::cache::application::NoCacheTrailer;
 use crate::conventions::application::{RulebookStore, repo_key};
@@ -16,7 +17,7 @@ use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::handoff::application::{RunMeta as HandoffRunMeta, render_review_markdown};
 use crate::handoff::domain::{BlockingRules, HandoffInput, RunMeta as HandoffMeta};
 use crate::handoff::{ExportReview, FsReviewFileSink, native_default_dir};
-use crate::history::application::{RecordRun, ReviewRun, RunRepository, RunStatus, Trigger};
+use crate::history::application::{RecordRun, ReviewRun, RunProvenance, RunRepository, RunStatus, Trigger};
 use crate::history::infrastructure::SqliteRunRepository;
 use crate::llm::{CliClient, CliConfig, LlmError, StructuredModel};
 use crate::review::application::redaction::redact_report;
@@ -106,6 +107,10 @@ impl AppContext {
         Ok(Arc::new(CliClient::new(self.cli_config(model, effort))?))
     }
 
+    pub async fn provenance(&self, model: &str) -> RunProvenance {
+        current_provenance(model, &PathBuf::from(self.server().llm.claude_bin)).await
+    }
+
     pub fn cli_config(&self, model: &str, effort: &str) -> CliConfig {
         let llm = self.server().llm;
         CliConfig {
@@ -169,7 +174,8 @@ impl ReviewPipeline {
     pub async fn run(&self, request: &ReviewRequest, progress: &dyn ReviewProgress) -> Result<ReviewOutcome> {
         let meta = collect_meta(request).await;
         let result = self.review(request, &meta, progress).await;
-        let run_id = self.record(request, &meta, &result).await;
+        let provenance = self.provenance(request, &result).await;
+        let run_id = self.record(request, &meta, &result, provenance).await;
         if let Ok(outcome) = &result {
             self.export(request, &meta, outcome, run_id);
         }
@@ -428,9 +434,23 @@ impl ReviewPipeline {
         }
     }
 
-    async fn record(&self, request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutcome>) -> Option<i64> {
+    async fn provenance(&self, request: &ReviewRequest, result: &Result<ReviewOutcome>) -> Option<RunProvenance> {
+        let model = match result {
+            Ok(outcome) => outcome.config.llm.model.clone(),
+            Err(_) => load_review_config(&request.repo_root, &request.target).await.ok()?.llm.model,
+        };
+        Some(self.context.provenance(&model).await)
+    }
+
+    async fn record(
+        &self,
+        request: &ReviewRequest,
+        meta: &RunMeta,
+        result: &Result<ReviewOutcome>,
+        provenance: Option<RunProvenance>,
+    ) -> Option<i64> {
         let history = self.history.clone()?;
-        let run = build_run(request, meta, result);
+        let run = ReviewRun { provenance, ..build_run(request, meta, result) };
         let recorded = tokio::task::spawn_blocking(move || RecordRun::new(history).execute(&run))
             .await
             .map_err(|e| e.to_string())
@@ -497,6 +517,7 @@ fn build_run(request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutc
         error,
         report,
         report_md,
+        provenance: None,
     }
 }
 

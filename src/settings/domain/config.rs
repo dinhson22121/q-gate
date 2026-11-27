@@ -4,9 +4,11 @@ use super::jira::{JiraConfig, JiraOverride, require_command};
 use super::legacy::LegacyField;
 use super::server::require_ref_token;
 use super::validation::{ValidationError, ValidationResult, require_non_empty, require_range};
+use crate::llm::is_pinned_model_id;
 use crate::review::application::{Category, CheckSpec, Confidence, GatePolicy, Severity, UnverifiablePolicy};
 
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
+const MODEL_NOT_PINNED: &str = "must be a full, pinned model id such as claude-opus-5-5 (aliases like opus, sonnet, haiku, default, best, -latest and [1m] variants are not allowed)";
 const DEFAULT_CONCURRENCY: usize = 4;
 const MIN_CONCURRENCY: usize = 1;
 const MAX_CONCURRENCY: usize = 16;
@@ -64,6 +66,17 @@ pub enum Effort {
     Max,
 }
 
+impl std::str::FromStr for Effort {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        [Self::Low, Self::Medium, Self::High, Self::Xhigh, Self::Max]
+            .into_iter()
+            .find(|effort| effort.as_str() == value)
+            .ok_or_else(|| format!("`{value}` is not one of low, medium, high, xhigh, max"))
+    }
+}
+
 impl Effort {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -105,6 +118,9 @@ impl Default for LlmConfig {
 impl LlmConfig {
     fn validate(&self) -> ValidationResult {
         require_non_empty("llm.model", &self.model)?;
+        if !is_pinned_model_id(&self.model) {
+            return Err(ValidationError::new("llm.model", MODEL_NOT_PINNED));
+        }
         require_range("llm.concurrency", self.concurrency, MIN_CONCURRENCY, MAX_CONCURRENCY)
     }
 }
@@ -323,6 +339,19 @@ mod tests {
         assert_eq!(config.review.guideline_files.len(), 4);
         assert!(config.watch.enabled && config.watch.review_on_push);
         assert_eq!(config.gate_policy(), GatePolicy::default());
+    }
+
+    #[test]
+    fn model_aliases_are_rejected_with_a_pointer_to_full_ids() {
+        for alias in ["opus", "sonnet", "haiku", "default", "claude-opus-latest", "opus[1m]"] {
+            let mut config = Config::default();
+            config.llm.model = alias.into();
+            let err = config.validate().unwrap_err();
+            assert_eq!(err.field, "llm.model", "{alias}");
+            assert!(err.message.contains("claude-opus-5-5"), "{alias}");
+        }
+        let toml_alias: Config = toml::from_str("[llm]\nmodel = \"haiku\"\n").unwrap();
+        assert!(toml_alias.validate().is_err());
     }
 
     #[test]

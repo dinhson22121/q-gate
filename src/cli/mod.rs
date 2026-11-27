@@ -3,6 +3,8 @@ mod args;
 mod caching;
 mod commands;
 mod doctor;
+mod eval;
+mod fingerprint;
 mod login;
 mod pipeline;
 mod policy;
@@ -42,6 +44,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Auth { action } => commands::auth(&context, action),
         Command::LoginUrl => login::print_login_url(&context),
         Command::Ticket { key } => commands::fetch_ticket(context, key).await,
+        Command::Eval(args) => Ok(eval::eval(context, args).await),
         Command::Init { .. } | Command::Runner(_) => unreachable!("handled above"),
     }
 }

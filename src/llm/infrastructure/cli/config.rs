@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::llm::LlmError;
+use crate::llm::{LlmError, is_pinned_model_id};
 
 const VALID_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -32,6 +32,12 @@ impl CliConfig {
         }
         if self.model.trim().is_empty() {
             return invalid("model is empty".into());
+        }
+        if !is_pinned_model_id(&self.model) {
+            return invalid(format!(
+                "model must be a full, pinned model id such as claude-opus-5-5, got {:?}",
+                self.model
+            ));
         }
         if self.model.starts_with('-') {
             return invalid(format!("model must not start with '-', got {:?}", self.model));
@@ -65,6 +71,7 @@ mod tests {
         assert!(reason(CliConfig { claude_bin: PathBuf::new(), ..base() }).contains("claude_bin"));
         assert!(reason(CliConfig { model: " ".into(), ..base() }).contains("model"));
         assert!(reason(CliConfig { model: "--dangerous".into(), ..base() }).contains("model"));
+        assert!(reason(CliConfig { model: "opus".into(), ..base() }).contains("pinned"));
         assert!(reason(CliConfig { effort: "huge".into(), ..base() }).contains("effort"));
         assert!(reason(CliConfig { timeout: Duration::ZERO, ..base() }).contains("timeout"));
     }

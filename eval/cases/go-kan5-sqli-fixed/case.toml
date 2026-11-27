@@ -1,0 +1,30 @@
+id = "go-kan5-sqli-fixed"
+description = "KAN-5 replaces the concatenated /user query with a parameterized one; the fixed query must not be flagged."
+language = "go"
+
+[ticket]
+key = "KAN-5"
+title = "Fix SQL injection in /user"
+
+[[ac]]
+text = "AC-1: The `/user` handler uses a parameterized query (a placeholder bound to the `id` value); the `id` value is never concatenated or interpolated into the SQL string."
+expect = "met"
+
+[[ac]]
+text = "AC-2: A request whose `id` contains SQL metacharacters (e.g. `1 OR 1=1`, `1; DROP TABLE users`, `' OR '1'='1`) cannot alter the query: it returns only rows matching that literal value, or an empty result, never the whole table and never a second statement."
+expect = "met"
+
+[[ac]]
+text = "AC-3: A missing or non-numeric `id` is rejected with HTTP 400 rather than sent into the query."
+expect = "met"
+
+[[ac]]
+text = "AC-4: Errors from the query and row scan are handled (no silent HTTP 200 on failure, no nil-pointer panic when the query fails)."
+expect = "met"
+
+[[forbidden]]
+file = "main.go"
+line = 116
+line_tolerance = 3
+category = "security"
+min_severity = "major"

@@ -133,7 +133,7 @@ qgate has three layers of configuration:
 |---|---|---|
 | `qgate.env` (from `qgate.env.example`) | Docker setup | Claude subscription token, repo folder, port, toolchains, Jira credentials, webhook, base branch, runner limits/network, container uid/gid |
 | Settings page (<http://localhost:8080/settings>), stored in the `qgate-data` volume | Server | dashboard, repo scanning depth, poll interval, concurrency, base branch, Claude CLI binary/timeout, Jira connection and defaults, agents, Figma, review files. Seeded once from `config/qgate.toml` |
-| `.qgate.toml` in each repository | Repository | model, effort, gate policy, base branch, ignored paths, checks (`[[checks]]`), Jira `enabled`/`ac_field`/`key_pattern_projects` |
+| `.qgate.toml` in each repository | Repository | model (a full pinned id such as `claude-opus-5-5`; aliases like `opus`/`sonnet`/`haiku`, `-latest` and `[1m]` are rejected), effort, gate policy, base branch, ignored paths, checks (`[[checks]]`), Jira `enabled`/`ac_field`/`key_pattern_projects` |
 
 **Server settings live in qgate's database** (`/data/qgate.db`, tables `server_settings` and
 `settings_schema_version`). On the very first start, `config/qgate.toml` (created from `config/qgate.toml.example`)
@@ -328,6 +328,136 @@ settings. Its write endpoints (`PUT /api/settings`, `POST /api/settings/rollback
 website open in your browser cannot change them. They also need the dashboard session and a per-start API token
 that only logged-in pages carry, so a process that can reach the port (e.g. test code in the runner container via
 `host.docker.internal`) gets neither data nor write access without the login token.
+
+## Evaluating qgate (P7)
+
+`qgate eval` measures how good qgate's own reviews are, so a prompt, model or CLI change can be checked against a
+fixed set of cases before it ships. It reviews each **golden case** in a throwaway git repository with the same
+reviewer, auditor and acceptance-criteria assessment as a real review (no cache, no recorded feedback, no
+`.qgate.toml`, so results do not depend on your own history), scores the result against the labels in the case, and
+stores the run in `qgate.db` together with its provenance (model, Claude CLI version, prompt hash).
+
+**Every eval run calls Claude and consumes your subscription quota.** The output prints the cost per case and in
+total (a case costs roughly what one review of a small change costs; repetitions multiply it). The usage-limit
+probe at the start applies as usual: if the limit is reached nothing runs.
+
+### Golden case format
+
+A case is a folder `eval/cases/<case-id>/` (ids are `[a-z0-9-]+`, 80 characters at most, and must equal the folder
+name):
+
+```
+eval/cases/go-kan5-sqli-fixed/
+  case.toml        labels (below)
+  base/            the repository tree before the change (source files only, no .git)
+  change.patch     unified diff of the change, relative to base/ (a/ and b/ prefixes, `git apply`-able)
+```
+
+`case.toml`:
+
+```toml
+id = "go-kan5-sqli-fixed"
+description = "KAN-5 parameterizes the /user query; the fixed query must not be flagged."
+language = "go"
+
+[ticket]                       # needed when the case has [[ac]]
+key = "KAN-5"
+title = "Fix SQL injection in /user"
+description = "..."            # optional, given to the test agent with --with-tests
+
+[[ac]]                         # acceptance criteria, numbered KEY/AC-1, KEY/AC-2, ... in file order
+text = "The /user handler uses a parameterized query ..."
+expect = "met"                 # "met" or "not_met"; omit to leave the criterion unscored
+
+[[expected]]                   # a finding the review must report
+file = "main.go"
+line = 12
+line_tolerance = 3             # default 3, at most 50
+category = "security"
+min_severity = "major"         # optional: info | minor | major | critical
+
+[[forbidden]]                  # a finding that would be a false positive
+file = "main.go"
+line = 116
+line_tolerance = 3
+category = "security"          # optional: omit to forbid any category
+min_severity = "major"         # optional: only findings at least this severe count as false positives
+```
+
+A case needs at least one `[[expected]]`, `[[forbidden]]` or `[[ac]]` with an `expect`. Unknown keys are rejected.
+Paths must be relative and stay inside the tree. `eval/cases/` ships 10 cases (Go, Python, TypeScript); a test
+applies every `change.patch` to its `base/` so a broken case fails the build.
+
+### Metrics
+
+* A finding **catches** an expected entry when it has the same file and category, its line is within
+  `line_tolerance`, and its severity is at least `min_severity`. Each expected entry is matched at most once
+  (greedy, closest line first) and a finding matches at most one entry.
+* **TP** = expected entries caught, **FN** = expected entries missed, **FP** = findings that hit a `[[forbidden]]`
+  entry. Findings that match nothing are **unlabeled**: the golden set is not exhaustive, so they are reported
+  separately and never counted as false positives.
+* **precision** = TP / (TP + FP), **recall** = TP / (TP + FN), **F1** = 2TP / (2TP + FP + FN). A metric with an
+  empty denominator is undefined (shown as `-`), not zero.
+* **AC accuracy** = labelled criteria whose status equals `expect` / all labelled criteria. A criterion the review
+  answers `unclear` (or does not answer) counts as its own bucket and is never correct. **Unverifiable rate** =
+  `unclear` / labelled criteria.
+* With `--runs k`, each repetition is scored on its own over all cases; the headline value is the mean and the
+  spread is the standard deviation across repetitions (`0.833 ± 0.047`). An expected entry or criterion counts as
+  caught/correct for the run set when it is so in at least half of the repetitions. Per-category precision/recall
+  and total cost and review time are reported too.
+
+### Commands
+
+```
+qgate eval [--cases DIR] [--only CASE_ID]... [--runs 1..10] [--with-tests]
+           [--baseline latest|ID] [--max-drop 0.05] [--json]
+           [--model ID] [--effort low|medium|high|xhigh|max] [--config PATH/.qgate.toml]
+qgate eval list                                   past eval runs
+qgate eval import-run RUN_ID [--out eval/cases] [--id CASE_ID]
+```
+
+`--with-tests` also runs the test agent (it writes and runs tests for the change in the sandbox), which is
+considerably slower and costlier; by default no agents run. `--json` prints `{ "run": ..., "comparison": ... }`.
+The dashboard shows the runs at `/eval` and exposes them read-only at `GET /api/eval/runs`, `/api/eval/runs/{id}`
+and `/api/eval/status`.
+
+The reviewer model, effort and gate come from `--config` (a `.qgate.toml`; defaults when omitted), and `--model`
+(a pinned model id) and `--effort` override it. The model actually used is recorded as the run's provenance.
+
+`--cases` defaults to `./eval/cases` when that folder exists and otherwise to `/usr/share/qgate/eval/cases`, the copy
+of the golden set baked into the Docker image. Inside the container:
+
+```
+docker compose exec qgate qgate eval --runs 2 --baseline latest
+```
+
+### Baselines and regressions
+
+`--baseline latest` (the newest stored run when the command starts) or `--baseline ID` compares the new run with a
+stored one on the cases both contain; cases present on one side only are excluded and listed. It is a **regression**
+when F1 or AC accuracy drops by more than `--max-drop` (a fraction, default 0.05), when an expected finding caught
+in the baseline is no longer caught, or when a criterion judged correctly in the baseline is now wrong. Changes of
+model, CLI version or prompt hash, and of `--runs`/`--with-tests`, are printed as notes because they explain a
+difference rather than hide it.
+
+Exit codes of `qgate eval`: `0` ok (or no baseline given), `2` regression against the baseline, `1` error (nothing
+is stored when a review fails part-way, since a partial run would corrupt later baselines). Note that this differs
+from `qgate review`, where `1` is a failed gate and `2` an error.
+
+### Growing the set from real reviews
+
+Judge a real run in the dashboard (accept or dismiss findings, mark criteria as verified), then:
+
+```
+qgate eval import-run 42 --out eval/cases
+```
+
+This creates a case from the run's repository: `base/` is the tree at the merge-base with the configured base
+branch, `change.patch` the diff from there to the reviewed commit, the ticket comes from the run's requirements,
+**accepted** findings become `[[expected]]` and **dismissed** ones `[[forbidden]]`, and criteria a human marked
+*verified met* get `expect = "met"`. Other criteria are written without `expect` and are not scored until you set
+it. Findings you never judged are not labelled. A run with nothing judged is refused. Read the generated
+`case.toml` before committing it: a case is only as good as its labels, and `base/` is a copy of your source.
 
 ## Claude authentication and usage limits
 

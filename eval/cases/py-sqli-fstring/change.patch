@@ -1,0 +1,14 @@
+diff --git a/app/db.py b/app/db.py
+index 9508127..2952150 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -3,3 +3,9 @@ import sqlite3
+ 
+ def connect(path):
+     return sqlite3.connect(path)
++
++
++def find_user(conn, request):
++    name = request.args.get("name")
++    query = f"SELECT id, email FROM users WHERE name = '{name}'"
++    return conn.execute(query).fetchall()

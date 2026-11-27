@@ -230,6 +230,25 @@ fn capped_diffs(files: &[FileChange], limit: usize) -> (String, Vec<String>) {
     (out, omitted)
 }
 
+pub fn prompt_material() -> Vec<String> {
+    use super::schema::{assessment_schema, audit_schema, review_schema};
+    let schemas = [review_schema(), assessment_schema(), audit_schema()].map(|schema| schema.to_string());
+    [
+        REVIEW_SYSTEM_PROMPT,
+        REQUIREMENTS_SYSTEM_PROMPT,
+        AUDIT_SYSTEM_PROMPT,
+        REVIEW_INSTRUCTIONS,
+        CALLERS_INSTRUCTIONS,
+        AUDIT_INSTRUCTIONS,
+        REQUIREMENTS_INSTRUCTIONS,
+        EXPANDED_INSTRUCTIONS,
+    ]
+    .map(String::from)
+    .into_iter()
+    .chain(schemas)
+    .collect()
+}
+
 pub fn prompt_fingerprint() -> String {
     let schema = super::schema::review_schema().to_string();
     crate::cache::application::digest([
@@ -247,6 +266,15 @@ mod tests {
     use crate::review::domain::finding::Severity;
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::requirements::AcceptanceCriterion;
+
+    #[test]
+    fn prompt_material_covers_every_reviewer_assessor_and_auditor_input() {
+        let material = prompt_material();
+        assert_eq!(material.len(), 11);
+        assert!(material.iter().any(|m| m == REVIEW_SYSTEM_PROMPT));
+        assert!(material.iter().any(|m| m == AUDIT_SYSTEM_PROMPT));
+        assert!(material.iter().any(|m| m.contains("\"verdict\"")));
+    }
 
     #[test]
     fn prompt_fingerprint_is_stable_hex() {

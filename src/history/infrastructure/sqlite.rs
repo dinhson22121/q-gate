@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::history::application::{HistoryError, RunFilter, RunRepository};
-use crate::history::domain::{ReportView, ReviewRun, RunStatus, StoredRun, TicketKey, Trigger};
+use crate::history::domain::{ReportView, ReviewRun, RunProvenance, RunStatus, StoredRun, TicketKey, Trigger};
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const UNREADABLE_REPORT: &str = "stored report could not be read";
@@ -31,10 +31,11 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_runs_status ON runs (status, created_at_ms DESC);
 ",
     "ALTER TABLE runs ADD COLUMN report_md TEXT;",
+    "ALTER TABLE runs ADD COLUMN provenance_json TEXT;",
 ];
 
 const COLUMNS: &str = "id, repo_path, repo_name, commit_sha, branch, ticket_key, trigger_kind, \
-                       created_at_ms, status, error, report_json, report_md";
+                       created_at_ms, status, error, report_json, report_md, provenance_json";
 const FILTER: &str = "(?1 IS NULL OR repo_name = ?1 OR repo_path = ?1) AND (?2 IS NULL OR status = ?2)";
 
 pub struct SqliteRunRepository {
@@ -115,6 +116,8 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<StoredRun> {
             None
         }
     });
+    let provenance_json: Option<String> = row.get(12)?;
+    let provenance = provenance_json.and_then(|json| serde_json::from_str::<RunProvenance>(&json).ok());
     Ok(ReviewRun {
         id: row.get(0)?,
         repo_path: row.get(1)?,
@@ -129,17 +132,19 @@ fn read_row(row: &Row<'_>) -> rusqlite::Result<StoredRun> {
         error,
         report,
         report_md: row.get(11)?,
+        provenance,
     })
 }
 
 impl RunRepository for SqliteRunRepository {
     fn insert(&self, run: &ReviewRun) -> Result<i64, HistoryError> {
         let report_json = run.report.as_ref().map(serde_json::to_string).transpose().map_err(storage)?;
+        let provenance_json = run.provenance.as_ref().map(serde_json::to_string).transpose().map_err(storage)?;
         let conn = self.lock()?;
         conn.prepare_cached(
             "INSERT INTO runs (repo_path, repo_name, commit_sha, branch, ticket_key, trigger_kind, \
-             created_at_ms, status, error, report_json, report_md) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             created_at_ms, status, error, report_json, report_md, provenance_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .and_then(|mut stmt| {
             stmt.execute(params![
@@ -154,6 +159,7 @@ impl RunRepository for SqliteRunRepository {
                 run.error,
                 report_json,
                 run.report_md,
+                provenance_json,
             ])
         })
         .map_err(storage)?;
@@ -255,6 +261,23 @@ mod tests {
         assert_eq!(report.usage.input_tokens, 100);
         assert_eq!(report.estimated_cost_usd, Some(0.042));
         assert!(repo.get(id + 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn provenance_round_trips_and_old_rows_read_as_none() {
+        let (_dir, repo) = open_temp();
+        let provenance = RunProvenance {
+            model: "claude-opus-5-5".into(),
+            claude_cli_version: "2.1.0".into(),
+            prompt_hash: "ab".repeat(32),
+        };
+        let with =
+            repo.insert(&ReviewRun { provenance: Some(provenance.clone()), ..live_run("api", at(1, 0)) }).unwrap();
+        let without = repo.insert(&live_run("api", at(2, 0))).unwrap();
+        assert_eq!(repo.get(with).unwrap().unwrap().provenance, Some(provenance));
+        assert_eq!(repo.get(without).unwrap().unwrap().provenance, None);
+        repo.lock().unwrap().execute("UPDATE runs SET provenance_json = '{bad' WHERE id = ?1", [with]).unwrap();
+        assert_eq!(repo.get(with).unwrap().unwrap().provenance, None);
     }
 
     #[test]

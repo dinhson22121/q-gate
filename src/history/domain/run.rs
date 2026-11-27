@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::report_view::ReportView;
 use crate::review::application::{CriterionStatus, ReviewReport, Severity};
@@ -64,6 +64,13 @@ impl RunStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunProvenance {
+    pub model: String,
+    pub claude_cli_version: String,
+    pub prompt_hash: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewRun<R = ReviewReport> {
     pub id: i64,
@@ -79,6 +86,7 @@ pub struct ReviewRun<R = ReviewReport> {
     pub report: Option<R>,
     #[serde(skip)]
     pub report_md: Option<String>,
+    pub provenance: Option<RunProvenance>,
 }
 
 pub type StoredRun = ReviewRun<ReportView>;
@@ -118,6 +126,7 @@ pub struct RunListItem {
     pub criteria_met: u64,
     pub criteria_total: u64,
     pub estimated_cost_usd: Option<f64>,
+    pub provenance: Option<RunProvenance>,
 }
 
 impl From<&StoredRun> for RunListItem {
@@ -146,6 +155,7 @@ impl From<&StoredRun> for RunListItem {
             criteria_met,
             criteria_total,
             estimated_cost_usd: run.report.as_ref().and_then(|r| r.estimated_cost_usd),
+            provenance: run.provenance.clone(),
         }
     }
 }

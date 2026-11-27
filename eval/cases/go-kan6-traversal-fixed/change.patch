@@ -1,0 +1,139 @@
+diff --git a/go.mod b/go.mod
+new file mode 100644
+index 0000000..4ddc22f
+--- /dev/null
++++ b/go.mod
+@@ -0,0 +1,3 @@
++module shop-api
++
++go 1.27
+diff --git a/main.go b/main.go
+index 29161aa..0769311 100644
+--- a/main.go
++++ b/main.go
+@@ -6,9 +6,12 @@ import (
+ 	"crypto/subtle"
+ 	"database/sql"
+ 	"encoding/hex"
++	"errors"
+ 	"fmt"
++	"io/fs"
+ 	"net/http"
+ 	"os"
++	"path/filepath"
+ 	"strconv"
+ 	"sync"
+ )
+@@ -132,16 +135,37 @@ func userHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+ 	}
+ }
+ 
+-func fileHandler(w http.ResponseWriter, r *http.Request) {
+-	name := r.URL.Query().Get("f")
+-	data, _ := os.ReadFile("/var/data/" + name)
+-	w.Write(data)
++const dataDir = "/var/data"
++
++func fileHandler(dir string) http.HandlerFunc {
++	return func(w http.ResponseWriter, r *http.Request) {
++		name := r.URL.Query().Get("f")
++		if name == "" || !filepath.IsLocal(name) {
++			http.Error(w, "invalid file name", http.StatusBadRequest)
++			return
++		}
++		root, err := os.OpenRoot(dir)
++		if err != nil {
++			http.Error(w, "internal error", http.StatusInternalServerError)
++			return
++		}
++		defer root.Close()
++		data, err := root.ReadFile(name)
++		switch {
++		case errors.Is(err, fs.ErrNotExist):
++			http.Error(w, "not found", http.StatusNotFound)
++		case err != nil:
++			http.Error(w, "internal error", http.StatusInternalServerError)
++		default:
++			w.Write(data)
++		}
++	}
+ }
+ 
+ func main() {
+ 	http.HandleFunc("/login", loginHandler)
+ 	http.HandleFunc("/logout", logoutHandler)
+ 	http.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) { userHandler(nil, w, r) })
+-	http.HandleFunc("/file", fileHandler)
++	http.HandleFunc("/file", fileHandler(dataDir))
+ 	_ = http.ListenAndServe(":8080", nil)
+ }
+diff --git a/main_file_test.go b/main_file_test.go
+new file mode 100644
+index 0000000..67739f4
+--- /dev/null
++++ b/main_file_test.go
+@@ -0,0 +1,64 @@
++package main
++
++import (
++	"net/http"
++	"net/http/httptest"
++	"net/url"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func serveFile(t *testing.T, dir, name string) *httptest.ResponseRecorder {
++	t.Helper()
++	rec := httptest.NewRecorder()
++	req := httptest.NewRequest(http.MethodGet, "/file?f="+url.QueryEscape(name), nil)
++	fileHandler(dir)(rec, req)
++	return rec
++}
++
++func TestFileHandlerServesFilesInsideTheDataDir(t *testing.T) {
++	dir := t.TempDir()
++	if err := os.WriteFile(filepath.Join(dir, "report.txt"), []byte("hello"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	rec := serveFile(t, dir, "report.txt")
++	if rec.Code != http.StatusOK || rec.Body.String() != "hello" {
++		t.Fatalf("got %d %q", rec.Code, rec.Body.String())
++	}
++}
++
++func TestFileHandlerRejectsTraversalAndAbsolutePaths(t *testing.T) {
++	dir := t.TempDir()
++	for _, name := range []string{"", "../../etc/passwd", "/etc/passwd", "subdir/../../x", "..%2F..%2Fetc%2Fpasswd"} {
++		decoded, _ := url.QueryUnescape(name)
++		if rec := serveFile(t, dir, decoded); rec.Code != http.StatusBadRequest {
++			t.Errorf("%q: got %d, want 400", name, rec.Code)
++		}
++	}
++}
++
++func TestFileHandlerDoesNotFollowSymlinksOutOfTheDataDir(t *testing.T) {
++	dir, outside := t.TempDir(), t.TempDir()
++	secret := filepath.Join(outside, "secret.txt")
++	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(secret, filepath.Join(dir, "link.txt")); err != nil {
++		t.Skip("symlinks unsupported")
++	}
++	if rec := serveFile(t, dir, "link.txt"); rec.Code == http.StatusOK {
++		t.Fatalf("symlink escape served %q", rec.Body.String())
++	}
++}
++
++func TestFileHandlerMissingFileIsNotFoundWithoutLeakingPaths(t *testing.T) {
++	dir := t.TempDir()
++	rec := serveFile(t, dir, "missing.txt")
++	if rec.Code != http.StatusNotFound {
++		t.Fatalf("got %d, want 404", rec.Code)
++	}
++	if body := rec.Body.String(); filepath.IsAbs(body) || len(body) > 20 {
++		t.Fatalf("body leaks detail: %q", body)
++	}
++}

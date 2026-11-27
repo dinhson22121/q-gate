@@ -233,7 +233,7 @@ fn invalid_settings_are_rejected() {
 #[tokio::test]
 #[ignore = "launches the real claude CLI"]
 async fn live_claude_calls_a_trivial_mcp_tool() {
-    let model = std::env::var("QGATE_SMOKE_MODEL").unwrap_or_else(|_| "haiku".into());
+    let model = std::env::var("QGATE_SMOKE_MODEL").unwrap_or_else(|_| "claude-haiku-5-5".into());
     let config = CliConfig { model, effort: "low".into(), timeout: Duration::from_secs(180), ..CliConfig::default() };
     let cli = CliToolLoop::new(config).unwrap().with_finish_grace(Duration::from_secs(60));
     let handler = Recorder::new("ping");

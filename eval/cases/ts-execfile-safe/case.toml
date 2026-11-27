@@ -1,0 +1,10 @@
+id = "ts-execfile-safe"
+description = "The conversion through execFile with an argument array and an allowlisted file name (no leading dash, no coder prefix, no path) must not be flagged."
+language = "typescript"
+
+[[forbidden]]
+file = "src/image.ts"
+line = 16
+line_tolerance = 3
+category = "security"
+min_severity = "major"
