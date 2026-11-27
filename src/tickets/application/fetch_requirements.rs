@@ -37,10 +37,7 @@ pub fn to_requirements(ticket: &Ticket) -> Requirements {
         .criteria
         .iter()
         .enumerate()
-        .map(|(index, text)| AcceptanceCriterion {
-            id: format!("{CRITERION_ID_PREFIX}{}", index + 1),
-            text: text.clone(),
-        })
+        .map(|(index, text)| AcceptanceCriterion::new(format!("{CRITERION_ID_PREFIX}{}", index + 1), text.clone()))
         .collect();
     Requirements { key: ticket.key.to_string(), title: ticket.title.clone(), url: ticket.url.clone(), criteria }
 }

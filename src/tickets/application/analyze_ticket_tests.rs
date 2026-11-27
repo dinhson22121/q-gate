@@ -21,7 +21,7 @@ fn scenario(id: &str, criteria: &[&str]) -> TestScenario {
 fn criteria() -> Vec<AcceptanceCriterion> {
     ["SHOP-7/AC-1", "SHOP-7/AC-2"]
         .iter()
-        .map(|id| AcceptanceCriterion { id: id.to_string(), text: format!("text {id}") })
+        .map(|id| AcceptanceCriterion::new(id.to_string(), format!("text {id}")))
         .collect()
 }
 

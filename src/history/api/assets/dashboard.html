@@ -455,9 +455,23 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     replace($("detail"), nodes);
   }
 
+  function findCriterion(requirements, id) {
+    return requirements && requirements.requirements.criteria.find((c) => c.id === id);
+  }
+
   function criterionText(requirements, id) {
-    const found = requirements && requirements.requirements.criteria.find((c) => c.id === id);
+    const found = findCriterion(requirements, id);
     return found ? found.text : "";
+  }
+
+  const INFERRED_HINT = "Derived from the ticket description because the ticket has no written acceptance criteria; does not block the gate";
+
+  function inferredChip(requirements, id) {
+    const found = findCriterion(requirements, id);
+    if (!found || !found.inferred) return null;
+    const node = chip("inferred · advisory", "info");
+    node.title = INFERRED_HINT;
+    return node;
   }
 
   function scenarioIndex(agents) {
@@ -645,7 +659,8 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
   function assessmentItem(requirements, a) {
     return el("li", { class: "ac-card" },
       el("div", { class: "card-head" }, chip(CRITERION_LABEL[a.status] || a.status, CRITERION_CLASS[a.status]),
-        el("strong", {}, a.criterion_id), criterionText(requirements, a.criterion_id)),
+        el("strong", {}, a.criterion_id), criterionText(requirements, a.criterion_id),
+        inferredChip(requirements, a.criterion_id)),
       a.explanation ? el("p", {}, a.explanation) : null,
       a.evidence.map((e) => el("div", {}, el("span", { class: "mono muted" }, e.file + ":" + e.line),
         e.quote ? codeBlock(e.quote) : null)));
@@ -660,6 +675,10 @@ button.small { height: 28px; padding: 0 10px; font-size: 12px; border-radius: 10
     const ticket = requirements.requirements;
     const label = ticket.key + (ticket.title ? " — " + ticket.title : "");
     section.append(el("p", {}, ticket.url ? safeTicketLink(ticket.url, label) : label));
+    if (ticket.criteria.length && ticket.criteria.every((c) => c.inferred)) {
+      section.append(el("p", { class: "muted" },
+        "The ticket has no written acceptance criteria; these were inferred from its description."));
+    }
     if (!requirements.assessments.length) section.append(empty("The ticket has no acceptance criteria."));
     const byTicket = new Map();
     for (const a of requirements.assessments) {

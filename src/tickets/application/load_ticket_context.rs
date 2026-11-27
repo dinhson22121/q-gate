@@ -235,9 +235,8 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         let criteria: Vec<AcceptanceCriterion> = all
             .iter()
             .flat_map(|ticket| {
-                ticket.criteria.iter().enumerate().map(|(index, text)| AcceptanceCriterion {
-                    id: format!("{}/AC-{}", ticket.key, index + 1),
-                    text: text.clone(),
+                ticket.criteria.iter().enumerate().map(|(index, text)| {
+                    AcceptanceCriterion::new(format!("{}/AC-{}", ticket.key, index + 1), text.clone())
                 })
             })
             .collect();

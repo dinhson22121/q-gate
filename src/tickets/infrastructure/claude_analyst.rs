@@ -176,7 +176,7 @@ mod tests {
             key: "SHOP-7".into(),
             title: "Cart".into(),
             url: None,
-            criteria: vec![AcceptanceCriterion { id: "SHOP-7/AC-1".into(), text: "Totals include tax".into() }],
+            criteria: vec![AcceptanceCriterion::new("SHOP-7/AC-1", "Totals include tax")],
         };
         let ticket = TicketContext {
             keys: vec!["SHOP-7".into()],
@@ -246,11 +246,8 @@ mod tests {
 
         let request = BriefRequest {
             criteria: vec![
-                AcceptanceCriterion { id: "PAY-12/AC-1".into(), text: "Checkout total includes 10% tax".into() },
-                AcceptanceCriterion {
-                    id: "PAY-12/AC-2".into(),
-                    text: "A receipt email is sent after a successful payment".into(),
-                },
+                AcceptanceCriterion::new("PAY-12/AC-1", "Checkout total includes 10% tax"),
+                AcceptanceCriterion::new("PAY-12/AC-2", "A receipt email is sent after a successful payment"),
             ],
             description: "As a buyer I want the cart total to include tax and to receive a receipt by email \
                           after paying."

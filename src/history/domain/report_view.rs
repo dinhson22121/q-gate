@@ -143,6 +143,8 @@ pub struct TicketView {
 pub struct CriterionView {
     pub id: String,
     pub text: String,
+    #[serde(default)]
+    pub inferred: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +223,14 @@ mod tests {
     use super::*;
     use crate::review::domain::finding::fixtures::finding;
     use crate::review::domain::finding::{Demotion, Reproduce};
+
+    #[test]
+    fn criterion_inferred_defaults_to_false_and_reads_true() {
+        let old: CriterionView = serde_json::from_str(r#"{"id":"K/AC-1","text":"t"}"#).unwrap();
+        let inferred: CriterionView = serde_json::from_str(r#"{"id":"K/AC-I1","text":"t","inferred":true}"#).unwrap();
+        assert!(!old.inferred);
+        assert!(inferred.inferred);
+    }
 
     #[test]
     fn live_finding_with_reproduce_and_demotion_reads_into_the_view() {

@@ -479,7 +479,7 @@ mod tests {
             key: "ABC-1".into(),
             title: "t".into(),
             url: None,
-            criteria: ids.iter().map(|id| AcceptanceCriterion { id: (*id).into(), text: "do it".into() }).collect(),
+            criteria: ids.iter().map(|id| AcceptanceCriterion::new(*id, "do it")).collect(),
         }
     }
 

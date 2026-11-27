@@ -48,7 +48,7 @@ use crate::settings::infrastructure::{
     AppPaths, CONFIG_FILE_NAME, SqliteServerConfigStore, TomlSeedSource, default_store, load_config, parse_config,
     process_env, resolve_credential,
 };
-use crate::tickets::application::{LoadOptions, TicketCache};
+use crate::tickets::application::{InferCriteria, LoadOptions, LoadedTickets, TicketCache};
 use crate::tickets::domain::extract_implemented_keys;
 use crate::tickets::infrastructure::SqliteTicketCache;
 
@@ -253,7 +253,9 @@ impl ReviewPipeline {
             );
             wrap_test_agent(&mut agents.suite, &cache, ids.clone(), agent_tags);
         }
-        let (requirements, ticket, ticket_notes) = self.tickets(&config, &server, request, meta, &db).await;
+        let inferrer = agents.as_ref().and_then(|a| a.criteria.clone());
+        let (requirements, ticket, ticket_notes) =
+            self.tickets(&config, &server, request, meta, &db, inferrer.as_deref()).await;
         let ticket_note = (!ticket_notes.is_empty()).then(|| ticket_notes.join("; "));
         let guidelines =
             load_guidelines(root, &config.review.guideline_files, &config.review.guidelines, MAX_GUIDELINE_BYTES).await;
@@ -393,6 +395,7 @@ impl ReviewPipeline {
         request: &ReviewRequest,
         meta: &RunMeta,
         db: &Path,
+        inferrer: Option<&InferCriteria>,
     ) -> (Option<Requirements>, Option<TicketContext>, Vec<String>) {
         let jira = config.jira(&server.jira);
         let analyst = &server.agents.ticket_analyst;
@@ -414,13 +417,7 @@ impl ReviewPipeline {
         )
         .await;
         match load {
-            Ok(TicketLoad { loaded: Some(loaded), mut notes }) => {
-                if loaded.requirements.criteria.is_empty() {
-                    notes.push(format!("{} has no acceptance criteria to check", loaded.requirements.key));
-                    return (None, Some(loaded.context), notes);
-                }
-                (Some(loaded.requirements), Some(loaded.context), notes)
-            }
+            Ok(TicketLoad { loaded: Some(loaded), notes }) => with_criteria(loaded, notes, inferrer).await,
             Ok(TicketLoad { loaded: None, notes }) => (None, None, notes),
             Err(e) => (None, None, vec![format!("Jira: {e}")]),
         }
@@ -435,6 +432,26 @@ impl ReviewPipeline {
             .and_then(|r| r.map_err(|e| e.to_string()));
         recorded.map_err(|e| eprintln!("qgate: warning: could not save the run to history: {e}")).ok()
     }
+}
+
+async fn with_criteria(
+    mut loaded: LoadedTickets,
+    mut notes: Vec<String>,
+    inferrer: Option<&InferCriteria>,
+) -> (Option<Requirements>, Option<TicketContext>, Vec<String>) {
+    if loaded.requirements.criteria.is_empty()
+        && let Some(inferrer) = inferrer
+    {
+        let requirements = &loaded.requirements;
+        let inferred = inferrer.execute(&requirements.key, &requirements.title, &loaded.context.description).await;
+        notes.extend(inferred.note);
+        loaded.requirements.criteria = inferred.criteria;
+    }
+    if loaded.requirements.criteria.is_empty() {
+        notes.push(format!("{} has no acceptance criteria to check", loaded.requirements.key));
+        return (None, Some(loaded.context), notes);
+    }
+    (Some(loaded.requirements), Some(loaded.context), notes)
 }
 
 fn build_run(request: &ReviewRequest, meta: &RunMeta, result: &Result<ReviewOutcome>) -> ReviewRun {
@@ -537,7 +554,72 @@ mod pipeline_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::review::application::ReviewError;
+    use crate::review::application::{AcceptanceCriterion, ReviewError};
+
+    fn loaded(criteria: Vec<AcceptanceCriterion>, description: &str) -> LoadedTickets {
+        LoadedTickets {
+            requirements: Requirements { key: "KAN-9".into(), title: "Login".into(), url: None, criteria },
+            context: TicketContext {
+                keys: vec!["KAN-9".into()],
+                description: description.into(),
+                design_links: Vec::new(),
+                notes: Vec::new(),
+            },
+            notes: Vec::new(),
+        }
+    }
+
+    fn inferrer(answer: serde_json::Value, dir: &tempfile::TempDir) -> (InferCriteria, Arc<crate::llm::FakeModel>) {
+        let model = Arc::new(crate::llm::FakeModel::answering(answer));
+        let cache = Arc::new(SqliteTicketCache::open(dir.path().join("q.db")).unwrap());
+        let inferrer = crate::tickets::infrastructure::ClaudeCriteriaInferrer::new(model.clone());
+        (InferCriteria::new(Arc::new(inferrer), cache), model)
+    }
+
+    #[tokio::test]
+    async fn a_ticket_without_written_criteria_gets_inferred_advisory_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (inferrer, _) = inferrer(serde_json::json!({"criteria": ["wrong password -> Invalid credential"]}), &dir);
+
+        let (requirements, context, notes) = with_criteria(
+            loaded(vec![], "User logs in; wrong password shows Invalid credential"),
+            vec![],
+            Some(&inferrer),
+        )
+        .await;
+
+        let criteria = requirements.unwrap().criteria;
+        assert_eq!((criteria[0].id.as_str(), criteria[0].inferred), ("KAN-9/AC-I1", true));
+        assert!(context.is_some());
+        assert!(notes[0].contains("inferred from its description"), "{notes:?}");
+    }
+
+    #[tokio::test]
+    async fn written_criteria_are_never_replaced_by_inferred_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let (inferrer, model) = inferrer(serde_json::json!({"criteria": ["x"]}), &dir);
+        let written = vec![AcceptanceCriterion::new("KAN-9/AC-1", "login works")];
+
+        let (requirements, _, notes) = with_criteria(loaded(written.clone(), "desc"), vec![], Some(&inferrer)).await;
+
+        assert_eq!(requirements.unwrap().criteria, written);
+        assert!(notes.is_empty());
+        assert_eq!(model.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn without_an_inferrer_or_anything_inferred_the_ticket_has_no_criteria_to_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let (inferrer, _) = inferrer(serde_json::json!({"criteria": []}), &dir);
+
+        for inferrer in [None, Some(&inferrer)] {
+            let (requirements, context, notes) = with_criteria(loaded(vec![], "just context"), vec![], inferrer).await;
+
+            assert!(requirements.is_none());
+            assert!(context.is_some());
+            assert_eq!(notes, vec!["KAN-9 has no acceptance criteria to check"]);
+        }
+    }
 
     fn request() -> ReviewRequest {
         ReviewRequest {

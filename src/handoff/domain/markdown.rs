@@ -107,6 +107,10 @@ fn status_label(status: CriterionStatus) -> &'static str {
     }
 }
 
+fn criterion_text(row: &CriterionRow) -> String {
+    if row.inferred { format!("{} (inferred, advisory)", row.text) } else { row.text.clone() }
+}
+
 fn criteria(out: &mut String, rows: &[CriterionRow]) {
     out.push_str("## Acceptance criteria status\n\n");
     if rows.is_empty() {
@@ -120,7 +124,7 @@ fn criteria(out: &mut String, rows: &[CriterionRow]) {
             out,
             "| {} | {} | {} | {} |",
             cell(&row.id),
-            cell(&row.text),
+            cell(&criterion_text(row)),
             status_label(row.status),
             cell(&evidence)
         );

@@ -60,7 +60,8 @@ pub(super) fn collect(input: &HandoffInput<'_>) -> (Vec<Task>, Vec<Task>) {
             match assessment.status {
                 CriterionStatus::NotMet => {
                     let task = criterion_task(requirements, &assessment.criterion_id, TaskKind::UnmetCriterion);
-                    if rules.unmet_criteria { blocking.push(task) } else { criteria_warnings.push(task) }
+                    let advisory = criterion_inferred(requirements, &assessment.criterion_id);
+                    if rules.unmet_criteria && !advisory { blocking.push(task) } else { criteria_warnings.push(task) }
                 }
                 CriterionStatus::Unclear => criteria_warnings.push(criterion_task(
                     requirements,
@@ -275,10 +276,18 @@ pub(super) fn criterion_text(requirements: &RequirementsReport, id: &str) -> Str
     requirements.requirements.criteria.iter().find(|c| c.id == id).map(|c| c.text.clone()).unwrap_or_default()
 }
 
+pub(super) fn criterion_inferred(requirements: &RequirementsReport, id: &str) -> bool {
+    requirements.requirements.criteria.iter().any(|c| c.id == id && c.inferred)
+}
+
 fn criterion_task(requirements: &RequirementsReport, id: &str, kind: TaskKind) -> Task {
     let text = criterion_text(requirements, id);
     let assessment = requirements.assessments.iter().find(|a| a.criterion_id == id);
     let unmet = kind == TaskKind::UnmetCriterion;
+    let mut facts = vec![fact("Ticket", requirements.requirements.key.as_str())];
+    if criterion_inferred(requirements, id) {
+        facts.push(fact("Advisory", "inferred from the ticket description; does not block the gate"));
+    }
     Task {
         kind,
         title: if unmet {
@@ -288,7 +297,7 @@ fn criterion_task(requirements: &RequirementsReport, id: &str, kind: TaskKind) -
         },
         location: assessment.and_then(|a| a.evidence.first()).and_then(|e| location(&e.file, e.line)),
         problem: assessment.map(|a| a.explanation.clone()).unwrap_or_default(),
-        facts: vec![fact("Ticket", requirements.requirements.key.as_str())],
+        facts,
         code: assessment.map(|a| evidence_blocks("Related code", &a.evidence)).unwrap_or_default(),
         expected: non_empty(&text),
         fix: Some(if unmet {

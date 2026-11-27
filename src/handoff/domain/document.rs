@@ -115,6 +115,7 @@ pub struct Task {
 pub struct CriterionRow {
     pub id: String,
     pub text: String,
+    pub inferred: bool,
     pub status: CriterionStatus,
     pub explanation: String,
     pub evidence: Vec<String>,
@@ -232,6 +233,7 @@ fn criteria(report: &ReviewReport) -> Vec<CriterionRow> {
         .map(|a| CriterionRow {
             id: a.criterion_id.clone(),
             text: tasks::criterion_text(requirements, &a.criterion_id),
+            inferred: tasks::criterion_inferred(requirements, &a.criterion_id),
             status: a.status,
             explanation: a.explanation.clone(),
             evidence: a.evidence.iter().map(|e| format!("{}:{}", e.file, e.line)).collect(),

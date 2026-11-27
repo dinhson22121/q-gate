@@ -75,9 +75,9 @@ pub fn requirements() -> RequirementsReport {
             title: "Pay with tax".into(),
             url: Some("https://acme.atlassian.net/browse/SHOP-7".into()),
             criteria: vec![
-                AcceptanceCriterion { id: "AC-1".into(), text: "Total includes tax".into() },
-                AcceptanceCriterion { id: "AC-2".into(), text: "Receipt | is emailed".into() },
-                AcceptanceCriterion { id: "AC-3".into(), text: "Works offline".into() },
+                AcceptanceCriterion::new("AC-1", "Total includes tax"),
+                AcceptanceCriterion::new("AC-2", "Receipt | is emailed"),
+                AcceptanceCriterion::new("AC-3", "Works offline"),
             ],
         },
         assessments: vec![
