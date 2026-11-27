@@ -61,7 +61,15 @@ fn check(name: &str, required: bool, outcome: CheckOutcome) -> CheckResult {
 }
 
 fn assessment(id: &str, status: CriterionStatus, evidence: Vec<EvidenceRef>) -> CriterionAssessment {
-    CriterionAssessment { criterion_id: id.into(), status, explanation: format!("{id} assessed."), evidence }
+    CriterionAssessment {
+        criterion_id: id.into(),
+        status,
+        explanation: format!("{id} assessed."),
+        evidence,
+        reason: None,
+        retried: false,
+        human: None,
+    }
 }
 
 fn evidence_ref(file: &str, line: u32, quote: &str) -> EvidenceRef {
@@ -126,12 +134,15 @@ pub fn failing_report() -> ReviewReport {
             advisory_tests: Vec::new(),
             rule_violations: vec!["R1".into()],
             design_mismatches: vec!["copy:1:2".into()],
+            unverified_criteria: Vec::new(),
         },
         agents: Some(agents()),
         ticket: Some(ticket()),
         usage: TokenUsage::default(),
         estimated_cost_usd: Some(0.12),
         audited: true,
+        notes: Vec::new(),
+        unverifiable: Vec::new(),
     }
 }
 
@@ -196,6 +207,7 @@ pub fn agents() -> AgentReport {
                 verdict: TestVerdict::FailedAssertion,
                 evidence: Some(test_evidence()),
                 note: String::new(),
+                reason: None,
             },
             TestResult {
                 scenario_id: "S1".into(),
@@ -203,6 +215,7 @@ pub fn agents() -> AgentReport {
                 verdict: TestVerdict::Inconclusive,
                 evidence: None,
                 note: "test did not compile".into(),
+                reason: Some(crate::review::application::UnverifiableReason::TestUnrepairable),
             },
         ],
         violations: vec![violation("R2", false, 3), violation("R1", true, 42)],
@@ -252,5 +265,7 @@ pub fn passing_report() -> ReviewReport {
         usage: TokenUsage::default(),
         estimated_cost_usd: None,
         audited: true,
+        notes: Vec::new(),
+        unverifiable: Vec::new(),
     }
 }

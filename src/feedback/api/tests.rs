@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 
 use super::handlers::facts_of;
 use super::*;
-use crate::feedback::application::{FeedbackStore, Scope, Verdict};
+use crate::feedback::application::{CriterionVerifications, FeedbackStore, Scope, Verdict};
 use crate::feedback::infrastructure::SqliteFeedbackStore;
 use crate::history::api::{DashboardState, serve_on_with};
 use crate::history::application::{FindingView, RecordRun};
@@ -41,6 +41,7 @@ impl TestServer {
         let token = ApiToken::generate().unwrap();
         let extra = router(FeedbackApiState::new(
             Arc::new(FeedbackService::new(store.clone())),
+            Arc::new(CriterionVerifications::new(store.clone())),
             runs.clone(),
             hosts.clone(),
             token.clone(),
@@ -265,4 +266,136 @@ async fn rejects_an_unknown_scope() {
     let (status, _) = server.post("/api/feedback", body).await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+fn criterion(extra: Value) -> Value {
+    let mut body = json!({"repo": "/src/r", "criterion_id": "K/AC-1", "criterion_text": "Total includes tax"});
+    body.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    body
+}
+
+impl TestServer {
+    async fn delete(&self, path: &str, body: Value) -> (StatusCode, Value) {
+        let response = self
+            .client
+            .delete(self.url(path))
+            .header(CONTENT_TYPE, "application/json")
+            .header(REQUEST_HEADER, REQUEST_HEADER_VALUE)
+            .header(TOKEN_HEADER, self.token.expose())
+            .body(body.to_string())
+            .send()
+            .await
+            .unwrap();
+        (response.status(), response.json().await.unwrap_or(Value::Null))
+    }
+
+    async fn criteria(&self, repo: &str) -> (StatusCode, Value) {
+        let mut url = url::Url::parse(&self.url("/api/feedback/criteria")).unwrap();
+        url.query_pairs_mut().append_pair("repo", repo);
+        let response = self.client.get(url).send().await.unwrap();
+        (response.status(), response.json().await.unwrap_or(Value::Null))
+    }
+}
+
+#[tokio::test]
+async fn verifies_lists_and_revokes_a_criterion() {
+    let server = TestServer::start().await;
+
+    let (status, stored) =
+        server.post("/api/feedback/criteria", criterion(json!({"verdict": "verified_met", "note": " checked "}))).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        (&stored["criterion_id"], &stored["verdict"], &stored["note"], &stored["repo"]),
+        (&json!("K/AC-1"), &json!("verified_met"), &json!("checked"), &json!("/src/r"))
+    );
+    assert_eq!(stored["text_hash"].as_str().unwrap().len(), 64);
+    let (_, listed) = server.criteria("/src/r").await;
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+    assert_eq!(server.criteria("/src/other").await.1["items"], json!([]));
+
+    let (_, changed) =
+        server.delete("/api/feedback/criteria", criterion(json!({"criterion_text": "Total excludes tax"}))).await;
+    assert_eq!(changed, json!({"removed": false}));
+    let (_, removed) = server.delete("/api/feedback/criteria", criterion(json!({}))).await;
+    assert_eq!(removed, json!({"removed": true}));
+    assert_eq!(server.criteria("/src/r").await.1["items"], json!([]));
+}
+
+#[tokio::test]
+async fn verifying_again_replaces_the_verdict() {
+    let server = TestServer::start().await;
+    server.post("/api/feedback/criteria", criterion(json!({"verdict": "verified_met"}))).await;
+
+    server.post("/api/feedback/criteria", criterion(json!({"verdict": "clarified", "note": "CSV only"}))).await;
+
+    let items = server.criteria("/src/r").await.1["items"].clone();
+    assert_eq!(items.as_array().unwrap().len(), 1);
+    assert_eq!((&items[0]["verdict"], &items[0]["note"]), (&json!("clarified"), &json!("CSV only")));
+}
+
+#[tokio::test]
+async fn rejects_invalid_criterion_input() {
+    let server = TestServer::start().await;
+    let post = |body: Value| server.post("/api/feedback/criteria", body);
+    assert_eq!(post(criterion(json!({"verdict": "maybe"}))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(post(criterion(json!({"verdict": "clarified"}))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "note": "n".repeat(2001)}))).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "repo": "r".repeat(513)}))).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "criterion_id": "i".repeat(201)}))).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "criterion_text": "t".repeat(4001)}))).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "criterion_text": " "}))).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        post(criterion(json!({"verdict": "verified_met", "extra": 1}))).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(post(json!({"repo": "r"})).await.0, StatusCode::UNPROCESSABLE_ENTITY);
+    let revoke = server.delete("/api/feedback/criteria", criterion(json!({"criterion_id": "i".repeat(201)}))).await;
+    assert_eq!(revoke.0, StatusCode::BAD_REQUEST);
+    let revoke = server.delete("/api/feedback/criteria", json!({"repo": "r"})).await;
+    assert_eq!(revoke.0, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(server.criteria("").await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(server.criteria(&"r".repeat(513)).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn criterion_mutations_need_the_request_header_and_token() {
+    let server = TestServer::start().await;
+    let body = criterion(json!({"verdict": "verified_met"})).to_string();
+
+    let no_header = server
+        .client
+        .post(server.url("/api/feedback/criteria"))
+        .header(CONTENT_TYPE, "application/json")
+        .body(body.clone())
+        .send()
+        .await
+        .unwrap();
+    let no_token = server
+        .client
+        .delete(server.url("/api/feedback/criteria"))
+        .header(CONTENT_TYPE, "application/json")
+        .header(REQUEST_HEADER, REQUEST_HEADER_VALUE)
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(no_header.status(), StatusCode::FORBIDDEN);
+    assert_eq!(no_token.status(), StatusCode::UNAUTHORIZED);
 }

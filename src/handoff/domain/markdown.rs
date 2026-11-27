@@ -2,8 +2,8 @@ use std::fmt::Write as _;
 
 use super::document::{CriterionRow, HandoffDocument, Task};
 use super::rules_markdown::candidate_line;
-use super::text::{cell, code_span, fenced, one_line, prose};
-use crate::review::application::CriterionStatus;
+use super::text::{cell, code_span, fenced, human_label, one_line, prose, reason_label, subject_label};
+use crate::review::application::{CriterionStatus, Unverifiable};
 
 const BLOCKING_PREFIX: &str = "";
 const WARNING_PREFIX: &str = "W";
@@ -13,6 +13,7 @@ pub fn render_markdown(doc: &HandoffDocument) -> String {
     header(&mut out, doc);
     tasks(&mut out, "Critical: must fix (blocking)", BLOCKING_PREFIX, &doc.blocking, "Nothing blocking.");
     tasks(&mut out, "Major: can defer (warnings)", WARNING_PREFIX, &doc.warnings, "No warnings.");
+    unverifiable(&mut out, &doc.unverifiable);
     criteria(&mut out, &doc.criteria);
     rules_to_add(&mut out, doc);
     context(&mut out, doc);
@@ -44,6 +45,10 @@ fn header(out: &mut String, doc: &HandoffDocument) {
             out.push_str(" Some files could not be reviewed (see Context).");
         }
         out.push_str("\n\n");
+        if !doc.verdict.unverified.is_empty() {
+            let ids = one_line(&doc.verdict.unverified.join(", "));
+            let _ = writeln!(out, "Not verified (advisory, did not block the gate): {ids}\n");
+        }
     } else {
         out.push_str("Why it failed:\n\n");
         for reason in &doc.verdict.reasons {
@@ -107,6 +112,32 @@ fn status_label(status: CriterionStatus) -> &'static str {
     }
 }
 
+fn status_cell(row: &CriterionRow) -> String {
+    let tag = row.human.map(|mark| format!(" [{}]", human_label(mark))).unwrap_or_default();
+    format!("{}{tag}", status_label(row.status))
+}
+
+fn unverifiable(out: &mut String, items: &[Unverifiable]) {
+    if items.is_empty() {
+        return;
+    }
+    out.push_str("## Couldn't verify\n\n");
+    out.push_str("qgate could not decide these; they are not failures. Each one says what to do.\n\n");
+    for item in items {
+        let retried = if item.retried { ", retried once" } else { "" };
+        let _ = writeln!(
+            out,
+            "- {} {} ({}{retried}): {}",
+            subject_label(item.subject),
+            code_span(&item.id),
+            reason_label(item.reason),
+            one_line(&item.detail)
+        );
+        let _ = writeln!(out, "  - What to do: {}", one_line(&item.remedy));
+    }
+    out.push('\n');
+}
+
 fn criterion_text(row: &CriterionRow) -> String {
     if row.inferred { format!("{} (inferred, advisory)", row.text) } else { row.text.clone() }
 }
@@ -125,7 +156,7 @@ fn criteria(out: &mut String, rows: &[CriterionRow]) {
             "| {} | {} | {} | {} |",
             cell(&row.id),
             cell(&criterion_text(row)),
-            status_label(row.status),
+            status_cell(row),
             cell(&evidence)
         );
     }

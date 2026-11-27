@@ -103,6 +103,7 @@ fn result(verdict: TestVerdict, evidence_file: &str) -> TestResult {
         verdict,
         evidence: Some(evidence),
         note: "the test passed".into(),
+        reason: None,
     }
 }
 

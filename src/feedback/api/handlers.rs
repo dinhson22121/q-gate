@@ -28,7 +28,7 @@ impl ApiError {
         Self(Box::new(error_response(status, message)))
     }
 
-    fn bad_request(message: &str) -> Self {
+    pub(super) fn bad_request(message: &str) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
 
@@ -67,9 +67,9 @@ impl From<HistoryError> for ApiError {
     }
 }
 
-type ApiResult = Result<Response<Body>, ApiError>;
+pub(super) type ApiResult = Result<Response<Body>, ApiError>;
 
-async fn blocking<T, E, F>(work: F) -> Result<T, ApiError>
+pub(super) async fn blocking<T, E, F>(work: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
     E: Send + 'static,
@@ -113,7 +113,7 @@ fn facts_at(run: &StoredRun, index: usize) -> Result<FindingFacts, ApiError> {
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "finding index out of range"))
 }
 
-fn parse<T: serde::de::DeserializeOwned>(body: &Bytes, hint: &str) -> Result<T, ApiError> {
+pub(super) fn parse<T: serde::de::DeserializeOwned>(body: &Bytes, hint: &str) -> Result<T, ApiError> {
     serde_json::from_slice(body).map_err(|_| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, hint))
 }
 

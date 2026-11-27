@@ -5,6 +5,7 @@ use crate::review::domain::finding::{
     Category, Confidence, Finding, FindingSource, PreventionRule, Reproduce, Severity,
 };
 use crate::review::domain::requirements::{CriterionAssessment, CriterionStatus, EvidenceRef};
+use crate::review::domain::unverifiable::UnverifiableReason;
 use crate::review::domain::verification::{AuditVerdict, FindingAudit};
 
 pub fn review_schema() -> Value {
@@ -40,6 +41,8 @@ fn reproduce_schema() -> Value {
     }))
 }
 
+const UNCLEAR_REASONS: [&str; 3] = ["none", "ambiguous_requirement", "needs_context"];
+
 pub fn assessment_schema() -> Value {
     let evidence = strict_object(json!({
         "file": string("Path exactly as given in the changed_file path attribute."),
@@ -51,6 +54,12 @@ pub fn assessment_schema() -> Value {
         "status": string_enum(CriterionStatus::ALL.map(CriterionStatus::as_str)),
         "explanation": string("Why this status, referring to the concrete change."),
         "evidence": array(evidence),
+        "unclear_reason": json!({
+            "type": "string",
+            "enum": UNCLEAR_REASONS,
+            "description": "Only for status unclear. ambiguous_requirement: the criterion itself is too vague to judge. \
+                            needs_context: it depends on code or configuration not shown. none: for met and not_met."
+        }),
     }));
     strict_object(json!({ "assessments": array(assessment) }))
 }
@@ -181,6 +190,18 @@ struct RawAssessment {
     status: CriterionStatus,
     explanation: String,
     evidence: Vec<RawEvidence>,
+    #[serde(default)]
+    unclear_reason: String,
+}
+
+fn parse_unclear_reason(status: CriterionStatus, raw: &str) -> Option<UnverifiableReason> {
+    if status != CriterionStatus::Unclear {
+        return None;
+    }
+    match raw.trim() {
+        "needs_context" => Some(UnverifiableReason::NeedsContext),
+        _ => Some(UnverifiableReason::AmbiguousRequirement),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +218,9 @@ impl AssessmentAnswer {
             .into_iter()
             .map(|a| CriterionAssessment {
                 criterion_id: a.criterion_id.trim().to_string(),
+                reason: parse_unclear_reason(a.status, &a.unclear_reason),
+                retried: false,
+                human: None,
                 status: a.status,
                 explanation: a.explanation,
                 evidence: a
@@ -366,12 +390,31 @@ mod tests {
     fn assessments_map_to_domain() {
         let answer: AssessmentAnswer = serde_json::from_value(json!({"assessments": [{
             "criterion_id": "AC-1", "status": "not_met", "explanation": "e",
-            "evidence": [{"file": "a.py", "line": 2, "quote": "q"}]
+            "evidence": [{"file": "a.py", "line": 2, "quote": "q"}], "unclear_reason": "none"
         }]}))
         .unwrap();
         let assessments = answer.into_assessments();
         assert_eq!(assessments[0].status, CriterionStatus::NotMet);
         assert_eq!(assessments[0].evidence[0], EvidenceRef { file: "a.py".into(), line: 2, quote: "q".into() });
+    }
+
+    #[test]
+    fn unclear_reason_is_parsed_only_for_unclear_assessments() {
+        let reason = |status: &str, raw: &str| {
+            let answer: AssessmentAnswer = serde_json::from_value(json!({"assessments": [{
+                "criterion_id": "AC-1", "status": status, "explanation": "e", "evidence": [], "unclear_reason": raw
+            }]}))
+            .unwrap();
+            answer.into_assessments().remove(0).reason
+        };
+        assert_eq!(reason("unclear", "needs_context"), Some(UnverifiableReason::NeedsContext));
+        assert_eq!(reason("unclear", "ambiguous_requirement"), Some(UnverifiableReason::AmbiguousRequirement));
+        assert_eq!(reason("unclear", "none"), Some(UnverifiableReason::AmbiguousRequirement));
+        assert_eq!(reason("unclear", "weird"), Some(UnverifiableReason::AmbiguousRequirement));
+        assert_eq!(reason("met", "needs_context"), None);
+        assert_eq!(reason("not_met", "none"), None);
+        let props = &assessment_schema()["properties"]["assessments"]["items"]["properties"];
+        assert_eq!(props["unclear_reason"]["enum"], json!(["none", "ambiguous_requirement", "needs_context"]));
     }
 
     #[test]

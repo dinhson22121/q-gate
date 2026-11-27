@@ -8,7 +8,8 @@ use crate::review::domain::checks::{CheckResult, CheckSpec};
 use crate::review::domain::feedback::FindingFeedback;
 use crate::review::domain::finding::Finding;
 use crate::review::domain::report::TokenUsage;
-use crate::review::domain::requirements::{CriterionAssessment, Requirements};
+pub use crate::review::domain::requirements::HumanInput;
+use crate::review::domain::requirements::{AcceptanceCriterion, CriterionAssessment, Requirements};
 use crate::review::domain::verification::FindingAudit;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +38,10 @@ pub trait CallerFinder: Send + Sync {
 
 pub trait FeedbackPolicy: Send + Sync {
     fn assess<'a>(&'a self, findings: &'a [Finding]) -> BoxFuture<'a, Vec<FindingFeedback>>;
+}
+
+pub trait HumanVerifications: Send + Sync {
+    fn lookup<'a>(&'a self, criteria: &'a [AcceptanceCriterion]) -> BoxFuture<'a, Vec<HumanInput>>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -68,9 +73,13 @@ impl ReviewerError {
     }
 }
 
+pub const MAX_RETRY_CONTEXT_BYTES: usize = 120_000;
+
 pub struct RequirementsInput<'a> {
     pub files: &'a [FileChange],
     pub requirements: &'a Requirements,
+    pub clarifications: &'a [(String, String)],
+    pub expanded: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

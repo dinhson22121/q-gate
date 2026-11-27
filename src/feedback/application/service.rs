@@ -15,7 +15,7 @@ pub struct FeedbackService {
     clock: Clock,
 }
 
-fn require(name: &str, value: &str) -> Result<(), FeedbackError> {
+pub(super) fn require(name: &str, value: &str) -> Result<(), FeedbackError> {
     if value.trim().is_empty() {
         return Err(FeedbackError::InvalidInput(format!("{name} must not be empty")));
     }

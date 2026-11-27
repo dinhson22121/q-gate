@@ -1,4 +1,6 @@
-use crate::review::application::{EvidenceRef, Requirements, TestEvidence, TestResult, TestScenario, TestVerdict};
+use crate::review::application::{
+    EvidenceRef, Requirements, TestEvidence, TestResult, TestScenario, TestVerdict, UnverifiableReason,
+};
 
 use super::classify::{RawRun, RunClass};
 use super::language::TestLanguage;
@@ -28,13 +30,19 @@ pub struct ScenarioOutcome<'a> {
     pub remarks: Vec<String>,
 }
 
-pub fn inconclusive(scenario_id: &str, language: &str, note: impl Into<String>) -> TestResult {
+pub fn inconclusive(
+    scenario_id: &str,
+    language: &str,
+    reason: UnverifiableReason,
+    note: impl Into<String>,
+) -> TestResult {
     TestResult {
         scenario_id: scenario_id.to_string(),
         language: language.to_string(),
         verdict: TestVerdict::Inconclusive,
         evidence: None,
         note: note.into(),
+        reason: Some(reason),
     }
 }
 
@@ -42,33 +50,12 @@ pub fn decide(outcome: ScenarioOutcome<'_>) -> TestResult {
     let language = outcome.language.as_str();
     let id = outcome.scenario.id.as_str();
     let (Some(target), Some(last)) = (outcome.target, outcome.runs.last()) else {
-        return inconclusive(id, language, with_remarks("the test was never run".into(), &outcome));
+        let note = with_remarks("the test was never run".into(), &outcome);
+        return inconclusive(id, language, UnverifiableReason::ToolError, note);
     };
     let evidence = assemble_evidence(&outcome, target, last);
-    let (verdict, reason) = match last.class {
-        RunClass::Passed => (TestVerdict::Passed, "the test passed".to_string()),
-        RunClass::FailedAssertion => match evidence.missing_parts() {
-            missing if missing.is_empty() => (TestVerdict::FailedAssertion, "an assertion failed".to_string()),
-            missing => {
-                (TestVerdict::Inconclusive, format!("assertion failed but evidence is missing: {}", missing.join(", ")))
-            }
-        },
-        RunClass::NeedsRepair => (
-            TestVerdict::Inconclusive,
-            format!(
-                "the test did not compile or failed without an assertion (repair rounds used: {} of {})",
-                outcome.runs.len().saturating_sub(1),
-                outcome.max_repair_rounds
-            ),
-        ),
-        RunClass::TimedOut => (TestVerdict::Inconclusive, "the test run timed out".to_string()),
-        RunClass::ToolchainMissing => (
-            TestVerdict::Inconclusive,
-            format!("toolchain missing: install {} via QGATE_TOOLCHAINS", outcome.language.toolchain()),
-        ),
-        RunClass::SetupFailed => (TestVerdict::Inconclusive, setup_failure(&last.raw)),
-    };
-    let mut note = reason;
+    let (verdict, reason, text) = classify_run(&outcome, last, &evidence);
+    let mut note = text;
     if let Some(advisory) = outcome.advisory.filter(|a| *a != verdict) {
         note.push_str(&format!("; the agent reported {} (advisory only)", verdict_name(advisory)));
     }
@@ -81,6 +68,40 @@ pub fn decide(outcome: ScenarioOutcome<'_>) -> TestResult {
         verdict,
         evidence: Some(evidence),
         note: with_remarks(note, &outcome),
+        reason,
+    }
+}
+
+fn classify_run(
+    outcome: &ScenarioOutcome<'_>,
+    last: &RunRecord,
+    evidence: &TestEvidence,
+) -> (TestVerdict, Option<UnverifiableReason>, String) {
+    use UnverifiableReason::{TestEvidenceMissing, TestNotRunnable, TestTimeout, TestUnrepairable};
+    let inconclusive = |reason, text: String| (TestVerdict::Inconclusive, Some(reason), text);
+    match last.class {
+        RunClass::Passed => (TestVerdict::Passed, None, "the test passed".to_string()),
+        RunClass::FailedAssertion => match evidence.missing_parts() {
+            missing if missing.is_empty() => (TestVerdict::FailedAssertion, None, "an assertion failed".to_string()),
+            missing => inconclusive(
+                TestEvidenceMissing,
+                format!("assertion failed but evidence is missing: {}", missing.join(", ")),
+            ),
+        },
+        RunClass::NeedsRepair => inconclusive(
+            TestUnrepairable,
+            format!(
+                "the test did not compile or failed without an assertion (repair rounds used: {} of {})",
+                outcome.runs.len().saturating_sub(1),
+                outcome.max_repair_rounds
+            ),
+        ),
+        RunClass::TimedOut => inconclusive(TestTimeout, "the test run timed out".to_string()),
+        RunClass::ToolchainMissing => inconclusive(
+            TestNotRunnable,
+            format!("toolchain missing: install {} via QGATE_TOOLCHAINS", outcome.language.toolchain()),
+        ),
+        RunClass::SetupFailed => inconclusive(TestNotRunnable, setup_failure(&last.raw)),
     }
 }
 
@@ -253,16 +274,17 @@ mod tests {
         assert!(result.note.contains("acceptance criterion text"), "{}", result.note);
         assert!(result.note.contains("code under test"));
         assert!(result.evidence.is_some(), "partial evidence is still shown");
+        assert_eq!(result.reason, Some(UnverifiableReason::TestEvidenceMissing));
     }
 
     #[test]
     fn other_run_classes_are_inconclusive() {
         let (scenario, target) = (scenario(), target());
-        for (class, expected) in [
-            (RunClass::NeedsRepair, "repair rounds used: 0 of 3"),
-            (RunClass::TimedOut, "timed out"),
-            (RunClass::ToolchainMissing, "install go via QGATE_TOOLCHAINS"),
-            (RunClass::SetupFailed, "could not be started"),
+        for (class, expected, reason) in [
+            (RunClass::NeedsRepair, "repair rounds used: 0 of 3", UnverifiableReason::TestUnrepairable),
+            (RunClass::TimedOut, "timed out", UnverifiableReason::TestTimeout),
+            (RunClass::ToolchainMissing, "install go via QGATE_TOOLCHAINS", UnverifiableReason::TestNotRunnable),
+            (RunClass::SetupFailed, "could not be started", UnverifiableReason::TestNotRunnable),
         ] {
             let runs = [run(class, 1, "x")];
             let mut o = outcome(&scenario, &target, &runs);
@@ -271,6 +293,7 @@ mod tests {
             assert_eq!(result.verdict, TestVerdict::Inconclusive);
             assert!(result.note.contains(expected), "{}", result.note);
             assert!(result.note.ends_with("; loop stopped"));
+            assert_eq!(result.reason, Some(reason));
         }
     }
 
@@ -282,6 +305,14 @@ mod tests {
         assert!(result.evidence.is_none());
         assert_eq!(result.language, "go");
         assert!(result.note.contains("never run"));
+        assert_eq!(result.reason, Some(UnverifiableReason::ToolError));
+    }
+
+    #[test]
+    fn conclusive_verdicts_carry_no_reason() {
+        let (scenario, target) = (scenario(), target());
+        let runs = [run(RunClass::Passed, 0, "ok")];
+        assert_eq!(decide(outcome(&scenario, &target, &runs)).reason, None);
     }
 
     #[test]

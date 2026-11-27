@@ -1,4 +1,25 @@
+use crate::review::application::{HumanMark, UnverifiableReason, UnverifiableSubject};
+
 const MIN_FENCE: usize = 3;
+
+pub fn reason_label(reason: UnverifiableReason) -> String {
+    reason.as_str().replace('_', " ")
+}
+
+pub fn subject_label(subject: UnverifiableSubject) -> &'static str {
+    match subject {
+        UnverifiableSubject::Criterion => "criterion",
+        UnverifiableSubject::Test => "test",
+        UnverifiableSubject::File => "file",
+    }
+}
+
+pub fn human_label(mark: HumanMark) -> &'static str {
+    match mark {
+        HumanMark::VerifiedMet => "human-verified",
+        HumanMark::NotApplicable => "not applicable",
+    }
+}
 
 fn longest_run(text: &str, ch: char) -> usize {
     let (mut best, mut current) = (0, 0);
@@ -95,6 +116,13 @@ mod tests {
     fn prose_escapes_fences_and_headings_but_keeps_text() {
         assert_eq!(prose("fine\n  ```rust\n# title\n~~~"), "fine\n  \\```rust\n\\# title\n\\~~~");
         assert_eq!(cell("a | b\nc"), "a \\| b c");
+    }
+
+    #[test]
+    fn reasons_and_human_marks_have_readable_labels() {
+        assert_eq!(reason_label(UnverifiableReason::TestNotRunnable), "test not runnable");
+        assert_eq!(human_label(HumanMark::VerifiedMet), "human-verified");
+        assert_eq!(human_label(HumanMark::NotApplicable), "not applicable");
     }
 
     #[test]

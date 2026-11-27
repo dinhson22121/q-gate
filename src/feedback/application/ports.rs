@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 
+use crate::feedback::domain::criterion::CriterionVerification;
 use crate::feedback::domain::model::{Judgment, Scope, Verdict};
 use crate::feedback::domain::scoring::KindEvent;
 
@@ -25,4 +26,12 @@ pub trait FeedbackStore: Send + Sync {
     fn find(&self, repo: &str, fingerprints: &[String]) -> Result<Vec<Judgment>, FeedbackError>;
     fn events(&self, repo: &str) -> Result<Vec<KindEvent>, FeedbackError>;
     fn reset(&self, repo: &str, kind: &str) -> Result<(), FeedbackError>;
+}
+
+pub trait CriterionStore: Send + Sync {
+    fn put_criterion(&self, verification: &CriterionVerification) -> Result<(), FeedbackError>;
+    fn delete_criterion(&self, repo: &str, criterion_id: &str, text_hash: &str) -> Result<bool, FeedbackError>;
+    fn list_criteria(&self, repo: &str) -> Result<Vec<CriterionVerification>, FeedbackError>;
+    fn find_criteria(&self, repo: &str, keys: &[(String, String)])
+    -> Result<Vec<CriterionVerification>, FeedbackError>;
 }

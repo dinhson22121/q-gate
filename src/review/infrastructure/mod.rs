@@ -5,6 +5,7 @@ pub mod claude_preflight;
 pub mod commit_snapshots;
 pub mod feedback;
 pub mod guidelines;
+pub mod human_verifications;
 pub mod local_git;
 pub mod local_git_ids;
 pub mod snapshot;

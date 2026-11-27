@@ -66,6 +66,13 @@ expires, and expired dismissals still count towards the score). A judgment appli
 "Apply to all repos" makes it apply to the same file and code in every repository, unless a repository has judged that
 finding itself. Undo removes the judgment wherever it applies. Scores stay per repository.
 
+Acceptance criteria the model cannot verify can be settled by hand. `POST /api/feedback/criteria` records a verdict
+for one criterion of a repository: `verified_met` counts it as met and tags it human-verified, `not_applicable`
+removes it from the gate, and `clarified` feeds the note to the next review as extra context. `DELETE
+/api/feedback/criteria` rolls the verdict back and `GET /api/feedback/criteria?repo=` lists the repository's verdicts.
+Mutations need the same `X-Qgate-Request: feedback` and `X-Qgate-Token` headers as finding feedback. A verdict is keyed
+by repository, criterion id and the whitespace-normalised criterion text, so editing the criterion's text invalidates it.
+
 ## What is checked beyond the model review
 
 Two deterministic checks cover what SonarQube does not. They run in the runner container and fold into the review

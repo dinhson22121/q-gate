@@ -51,6 +51,9 @@ pub fn report_view(findings: Vec<FindingView>, criteria: &[CriterionStatus], fai
                     status: *s,
                     explanation: String::new(),
                     evidence: Vec::new(),
+                    reason: None,
+                    retried: false,
+                    human: None,
                 })
                 .collect(),
         }),
@@ -74,12 +77,15 @@ pub fn report_view(findings: Vec<FindingView>, criteria: &[CriterionStatus], fai
             advisory_tests: Vec::new(),
             rule_violations: Vec::new(),
             design_mismatches: Vec::new(),
+            unverified_criteria: Vec::new(),
         },
         usage: UsageView::default(),
         estimated_cost_usd: Some(0.25),
         agents: None,
         ticket: None,
         audited: false,
+        unverifiable: Vec::new(),
+        notes: Vec::new(),
     }
 }
 
@@ -102,6 +108,9 @@ pub fn with_criteria(requirements_key: &str, criteria: &[(&str, CriterionStatus)
                 status: *status,
                 explanation: String::new(),
                 evidence: Vec::new(),
+                reason: None,
+                retried: false,
+                human: None,
             })
             .collect(),
     });
@@ -171,6 +180,9 @@ pub fn review_report() -> ReviewReport {
                 status: CriterionStatus::NotMet,
                 explanation: "no handler".into(),
                 evidence: vec![EvidenceRef { file: "src/a.rs".into(), line: 2, quote: "fn x()".into() }],
+                reason: None,
+                retried: false,
+                human: None,
             }],
         }),
         checks: vec![CheckResult {
@@ -194,6 +206,8 @@ pub fn review_report() -> ReviewReport {
         audited: false,
         agents: None,
         ticket: None,
+        notes: Vec::new(),
+        unverifiable: Vec::new(),
     }
 }
 

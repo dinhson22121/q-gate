@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use owo_colors::OwoColorize;
 use serde_json::json;
 
+use crate::handoff::domain::text::{human_label, reason_label, subject_label};
 use crate::review::application::{
     CheckOutcome, CheckResult, Confidence, CriterionStatus, Finding, RequirementsReport, ReviewReport, Severity,
 };
@@ -41,6 +42,7 @@ pub fn render_terminal(view: &TerminalView<'_>) -> String {
     render_requirements(&mut out, report.requirements.as_ref(), view);
     render_checks(&mut out, &report.checks, view.color);
     render_findings(&mut out, view);
+    render_unverifiable(&mut out, report, view.color);
     render_skipped(&mut out, report);
     render_verdict(&mut out, report, view.color);
     out
@@ -65,7 +67,9 @@ fn render_requirements(out: &mut String, requirements: Option<&RequirementsRepor
             CriterionStatus::Unclear => ("? unclear ", Tone::Warn),
         };
         let advisory = if criterion.inferred { " (inferred, advisory)" } else { "" };
-        let _ = writeln!(out, "  {} {} {}{advisory}", paint(symbol, tone, view.color), criterion.id, criterion.text);
+        let human = assessment.human.map(|m| format!(" [{}]", human_label(m))).unwrap_or_default();
+        let _ =
+            writeln!(out, "  {} {} {}{advisory}{human}", paint(symbol, tone, view.color), criterion.id, criterion.text);
         let _ = writeln!(out, "      {}", assessment.explanation);
         for evidence in &assessment.evidence {
             let _ = writeln!(out, "      {}:{}  {}", evidence.file, evidence.line, evidence.quote.trim());
@@ -176,6 +180,22 @@ fn render_finding(out: &mut String, finding: &Finding, blocking: bool, color: bo
     }
 }
 
+fn render_unverifiable(out: &mut String, report: &ReviewReport, color: bool) {
+    if report.unverifiable.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "\n{}", paint("Couldn't verify", Tone::Bold, color));
+    for item in &report.unverifiable {
+        let retried = if item.retried { ", retried" } else { "" };
+        let head = format!("{} {} ({}{retried})", subject_label(item.subject), item.id, reason_label(item.reason));
+        let _ = writeln!(out, "  {} {head}", paint("?", Tone::Warn, color));
+        if !item.detail.trim().is_empty() {
+            let _ = writeln!(out, "      {}", item.detail.trim());
+        }
+        let _ = writeln!(out, "      -> {}", item.remedy);
+    }
+}
+
 fn render_skipped(out: &mut String, report: &ReviewReport) {
     for skipped in &report.skipped {
         let _ = writeln!(out, "  skipped {} ({})", skipped.path, skipped.reason.describe());
@@ -232,6 +252,14 @@ fn render_verdict(out: &mut String, report: &ReviewReport, color: bool) {
             "Advisory: {} generated test(s) not verified (not blocking): {}",
             gate.advisory_tests.len(),
             gate.advisory_tests.join(", ")
+        );
+        let _ = writeln!(out, "{}", paint(&line, Tone::Warn, color));
+    }
+    if !gate.unverified_criteria.is_empty() {
+        let line = format!(
+            "Advisory: {} criterion(s) not verified (not blocking): {}",
+            gate.unverified_criteria.len(),
+            gate.unverified_criteria.join(", ")
         );
         let _ = writeln!(out, "{}", paint(&line, Tone::Warn, color));
     }
@@ -320,6 +348,9 @@ mod tests {
                     status: CriterionStatus::NotMet,
                     explanation: "no export endpoint".into(),
                     evidence: vec![],
+                    reason: None,
+                    retried: false,
+                    human: None,
                 }],
             }),
             checks: vec![CheckResult {
@@ -343,6 +374,8 @@ mod tests {
             usage: TokenUsage { input_tokens: 12_300, output_tokens: 2_100, ..TokenUsage::default() },
             estimated_cost_usd: Some(0.09),
             audited: false,
+            notes: Vec::new(),
+            unverifiable: Vec::new(),
         }
     }
 
@@ -377,6 +410,51 @@ mod tests {
             color: false,
         };
         assert!(render_terminal(&view).contains("AC-1 Export CSV (inferred, advisory)"));
+    }
+
+    fn plain_view(report: &ReviewReport) -> String {
+        render_terminal(&TerminalView {
+            report,
+            filter: DisplayFilter { min_severity: Severity::Minor, min_confidence: Confidence::Medium },
+            ticket_note: None,
+            color: false,
+        })
+    }
+
+    #[test]
+    fn terminal_output_lists_what_could_not_be_verified_with_remedies() {
+        use crate::review::application::{Unverifiable, UnverifiableReason, UnverifiableSubject};
+        let mut report = report();
+        report.unverifiable = vec![Unverifiable {
+            subject: UnverifiableSubject::Criterion,
+            id: "AC-1".into(),
+            reason: UnverifiableReason::NoEvidence,
+            detail: "nothing cited".into(),
+            retried: true,
+            remedy: "Point the change at concrete code".into(),
+        }];
+        report.gate.unverified_criteria = vec!["AC-1".into()];
+        let text = plain_view(&report);
+        assert!(text.contains("Couldn't verify"));
+        assert!(text.contains("criterion AC-1 (no evidence, retried)"));
+        assert!(text.contains("nothing cited"));
+        assert!(text.contains("-> Point the change at concrete code"));
+        assert!(text.contains("Advisory: 1 criterion(s) not verified (not blocking): AC-1"));
+    }
+
+    #[test]
+    fn terminal_output_omits_the_unverifiable_block_when_empty() {
+        assert!(!plain_view(&report()).contains("Couldn't verify"));
+    }
+
+    #[test]
+    fn terminal_output_tags_human_marked_criteria() {
+        use crate::review::application::HumanMark;
+        let mut report = report();
+        report.requirements.as_mut().unwrap().assessments[0].human = Some(HumanMark::VerifiedMet);
+        assert!(plain_view(&report).contains("AC-1 Export CSV [human-verified]"));
+        report.requirements.as_mut().unwrap().assessments[0].human = Some(HumanMark::NotApplicable);
+        assert!(plain_view(&report).contains("[not applicable]"));
     }
 
     #[test]

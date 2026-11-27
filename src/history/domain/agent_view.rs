@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::report_view::EvidenceView;
-use crate::review::application::{DesignMismatchKind, RuleComplianceStatus, TestVerdict};
+use crate::review::application::{DesignMismatchKind, RuleComplianceStatus, TestVerdict, UnverifiableReason};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketContextView {
@@ -68,6 +68,8 @@ pub struct TestResultView {
     pub evidence: Option<TestEvidenceView>,
     #[serde(default)]
     pub note: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<UnverifiableReason>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

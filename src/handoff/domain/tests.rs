@@ -2,7 +2,9 @@ use serde_json::Value;
 
 use super::fixtures::*;
 use super::*;
-use crate::review::application::{AcceptanceCriterion, ReviewReport};
+use crate::review::application::{
+    AcceptanceCriterion, CriterionStatus, ReviewReport, Unverifiable, UnverifiableReason, UnverifiableSubject,
+};
 
 fn input(report: &ReviewReport) -> HandoffInput<'_> {
     HandoffInput { meta: meta(), report, rules: BlockingRules::default() }
@@ -399,4 +401,93 @@ fn inferred_criterion_is_labelled_and_never_a_blocking_task() {
     assert!(!document.blocking.iter().any(|t| t.kind == TaskKind::UnmetCriterion));
     let warning = document.warnings.iter().find(|t| t.kind == TaskKind::UnmetCriterion).expect("advisory warning");
     assert!(warning.facts.iter().any(|f| f.label == "Advisory"));
+}
+
+fn unverifiable_item(subject: UnverifiableSubject, id: &str, reason: UnverifiableReason) -> Unverifiable {
+    Unverifiable {
+        subject,
+        id: id.into(),
+        reason,
+        detail: format!("{id} <detail>"),
+        retried: true,
+        remedy: reason.remedy().into(),
+    }
+}
+
+#[test]
+fn unverifiable_section_lists_reason_detail_remedy_and_retry_in_every_format() {
+    let mut report = failing_report();
+    report.unverifiable =
+        vec![unverifiable_item(UnverifiableSubject::Criterion, "AC-3", UnverifiableReason::NoEvidence)];
+    let doc = HandoffDocument::build(&input(&report));
+    let markdown = render_markdown(&doc);
+    assert!(markdown.contains("## Couldn't verify"));
+    assert!(markdown.contains("- criterion `AC-3` (no evidence, retried once): AC-3 <detail>"));
+    assert!(markdown.contains("  - What to do: Point the change at concrete code for this criterion"));
+    let html = render_html(&doc, &input(&report));
+    assert!(html.contains("<h2>Couldn't verify</h2>"));
+    assert!(html.contains("tag inconclusive\">criterion"));
+    assert!(html.contains("tag unclear\">retried"));
+    assert!(html.contains("AC-3 &lt;detail&gt;"));
+    assert!(html.contains("What to do:"));
+    assert!(render_json(&doc, &input(&report)).contains("\"unverifiable\""));
+}
+
+#[test]
+fn reports_without_unverifiable_items_render_no_section() {
+    let report = failing_report();
+    let doc = HandoffDocument::build(&input(&report));
+    assert!(!render_markdown(&doc).contains("Couldn't verify"));
+    assert!(!render_html(&doc, &input(&report)).contains("Couldn't verify"));
+}
+
+#[test]
+fn human_marked_criteria_are_tagged_and_produce_no_task() {
+    use crate::review::application::HumanMark;
+    let mut report = failing_report();
+    let assessments = &mut report.requirements.as_mut().unwrap().assessments;
+    assessments[2].human = Some(HumanMark::NotApplicable);
+    assessments[1].status = CriterionStatus::Met;
+    assessments[1].human = Some(HumanMark::VerifiedMet);
+    let doc = HandoffDocument::build(&input(&report));
+    let markdown = render_markdown(&doc);
+    assert!(markdown.contains("| AC-2 | Receipt \\| is emailed | met [human-verified] | - |"), "{markdown}");
+    assert!(markdown.contains("| AC-3 | Works offline | unclear [not applicable] | - |"), "{markdown}");
+    assert!(!doc.blocking.iter().chain(&doc.warnings).any(|t| t.title.contains("AC-2") || t.title.contains("AC-3")));
+    let html = render_html(&doc, &input(&report));
+    assert!(html.contains("tag met\">human-verified"));
+    assert!(html.contains("tag met\">not applicable"));
+}
+
+#[test]
+fn unclear_criterion_task_tells_the_agent_what_to_do_from_its_reason() {
+    let mut report = failing_report();
+    let assessment = &mut report.requirements.as_mut().unwrap().assessments[2];
+    assessment.reason = Some(UnverifiableReason::NeedsContext);
+    assessment.retried = true;
+    let doc = HandoffDocument::build(&input(&report));
+    let task = doc.warnings.iter().find(|t| t.kind == TaskKind::UnclearCriterion).unwrap();
+    assert!(task.fix.as_deref().unwrap().starts_with(UnverifiableReason::NeedsContext.remedy()));
+    assert!(task.facts.iter().any(|f| f.label == "Why unverifiable" && f.value == "needs context"));
+    assert!(task.facts.iter().any(|f| f.label == "Retried"));
+}
+
+#[test]
+fn inconclusive_test_task_uses_the_remedy_of_its_reason() {
+    let doc = HandoffDocument::build(&input(&failing_report()));
+    let task = doc.warnings.iter().find(|t| t.kind == TaskKind::InconclusiveTest).unwrap();
+    assert_eq!(task.fix.as_deref(), Some(UnverifiableReason::TestUnrepairable.remedy()));
+}
+
+#[test]
+fn passed_gate_lists_advisory_unverified_criteria_and_report_notes() {
+    let mut report = passing_report();
+    report.gate.unverified_criteria = vec!["AC-3".into()];
+    report.notes = vec!["retried the criteria assessment once".into()];
+    let doc = HandoffDocument::build(&input(&report));
+    assert_eq!(doc.verdict.unverified, vec!["AC-3"]);
+    let markdown = render_markdown(&doc);
+    assert!(markdown.contains("Not verified (advisory, did not block the gate): AC-3"));
+    assert!(markdown.contains("  - retried the criteria assessment once"));
+    assert!(render_html(&doc, &input(&report)).contains("Not verified (advisory, did not block the gate): AC-3"));
 }

@@ -4,7 +4,7 @@ use super::jira::{JiraConfig, JiraOverride, require_command};
 use super::legacy::LegacyField;
 use super::server::require_ref_token;
 use super::validation::{ValidationError, ValidationResult, require_non_empty, require_range};
-use crate::review::application::{Category, CheckSpec, Confidence, GatePolicy, Severity};
+use crate::review::application::{Category, CheckSpec, Confidence, GatePolicy, Severity, UnverifiablePolicy};
 
 const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const DEFAULT_CONCURRENCY: usize = 4;
@@ -118,6 +118,7 @@ pub struct GateConfig {
     pub fail_on_unmet_criteria: bool,
     pub fail_on_incomplete: bool,
     pub require_reproduce_for_critical: bool,
+    pub unverifiable: UnverifiablePolicy,
 }
 
 impl Default for GateConfig {
@@ -130,6 +131,7 @@ impl Default for GateConfig {
             fail_on_unmet_criteria: policy.fail_on_unmet_criteria,
             fail_on_incomplete: policy.fail_on_incomplete,
             require_reproduce_for_critical: policy.require_reproduce_for_critical,
+            unverifiable: policy.unverifiable,
         }
     }
 }
@@ -275,6 +277,7 @@ impl Config {
             fail_on_unmet_criteria: self.gate.fail_on_unmet_criteria,
             fail_on_incomplete: self.gate.fail_on_incomplete,
             require_reproduce_for_critical: self.gate.require_reproduce_for_critical,
+            unverifiable: self.gate.unverifiable,
             ..GatePolicy::default()
         }
     }
@@ -327,6 +330,10 @@ mod tests {
         assert!(GatePolicy::default().require_reproduce_for_critical);
         let config: Config = toml::from_str("[gate]\nrequire_reproduce_for_critical = false\n").unwrap();
         assert!(!config.gate_policy().require_reproduce_for_critical);
+        assert_eq!(config.gate_policy().unverifiable, UnverifiablePolicy::Strict);
+        let advisory: Config = toml::from_str("[gate]\nunverifiable = \"advisory\"\n").unwrap();
+        assert_eq!(advisory.gate_policy().unverifiable, UnverifiablePolicy::Advisory);
+        assert!(toml::from_str::<Config>("[gate]\nunverifiable = \"loose\"\n").is_err());
     }
 
     #[test]
