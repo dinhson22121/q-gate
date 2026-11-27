@@ -38,6 +38,14 @@ pub struct LoadedTickets {
     pub requirements: Requirements,
     pub context: TicketContext,
     pub notes: Vec<String>,
+    pub uncovered: Vec<UncoveredTicket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UncoveredTicket {
+    pub key: String,
+    pub title: String,
+    pub description: String,
 }
 
 type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
@@ -245,6 +253,11 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
         for ticket in ancestors.iter().chain(implemented).chain(qa_tickets) {
             merge_links(&mut design_links, ticket.design_links.iter().cloned());
         }
+        let uncovered = implemented
+            .iter()
+            .filter(|ticket| lacks_criteria(ticket, ancestors, qa_tickets))
+            .map(|ticket| self.uncovered(ticket))
+            .collect();
         let gaps = completeness_gaps(criteria.len(), &describe(&all), design_links.len(), qa_tickets.len());
         notes.extend(gaps.into_iter().map(|gap| format!("{COMPLETENESS_PREFIX}{gap}")));
         LoadedTickets {
@@ -256,8 +269,31 @@ impl<S: TicketSource + Sync> LoadTicketContext<S> {
                 notes: notes.clone(),
             },
             notes,
+            uncovered,
         }
     }
+
+    fn uncovered(&self, ticket: &Ticket) -> UncoveredTicket {
+        let description = if self.options.include_description {
+            truncate_chars(ticket.description.trim(), MAX_DESCRIPTION_CHARS)
+        } else {
+            String::new()
+        };
+        UncoveredTicket { key: ticket.key.to_string(), title: ticket.title.clone(), description }
+    }
+}
+
+fn lacks_criteria<'a>(ticket: &'a Ticket, ancestors: &'a [Ticket], qa_tickets: &'a [Ticket]) -> bool {
+    let find = |pool: &'a [Ticket], key: &TicketKey| pool.iter().find(|t| &t.key == key);
+    let mut current = Some(ticket);
+    for _ in 0..=MAX_PARENT_HOPS {
+        let Some(t) = current else { break };
+        if !t.criteria.is_empty() {
+            return false;
+        }
+        current = t.parent.as_ref().and_then(|p| find(ancestors, &p.key));
+    }
+    !ticket.links.iter().filter_map(|link| find(qa_tickets, &link.key)).any(|qa| !qa.criteria.is_empty())
 }
 
 fn stale(entry: CachedTicket, error: &TicketError, notes: &mut Vec<String>) -> Ticket {

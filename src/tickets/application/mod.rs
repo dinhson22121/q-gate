@@ -16,7 +16,7 @@ pub use jira_oauth::{
     Authorization, ConnectionStatus, JiraOauthGateway, JiraOauthService, OauthError, PendingAuthorization, load_bundle,
     save_bundle,
 };
-pub use load_ticket_context::{LoadOptions, LoadTicketContext, LoadedTickets};
+pub use load_ticket_context::{LoadOptions, LoadTicketContext, LoadedTickets, UncoveredTicket};
 pub use ports::{
     BriefCache, BriefGenerator, BriefRequest, CacheError, CachedTicket, CriteriaCache, CriteriaInferrer, TicketCache,
     TicketError, TicketSource,
