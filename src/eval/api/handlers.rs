@@ -88,6 +88,7 @@ pub(super) async fn get_run(
 
 pub(super) async fn status(State(state): State<EvalApiState>) -> Result<Json<StatusBody>, ApiError> {
     let current = state.current.current().await;
-    let view = blocking(move || state.status.execute(current)).await?;
+    let repo_models = state.repo_models.list().await;
+    let view = blocking(move || state.status.execute(current, &repo_models)).await?;
     Ok(Json(view.into()))
 }

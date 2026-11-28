@@ -36,6 +36,7 @@ pub struct LoadedCase {
     pub case: GoldenCase,
     pub base_dir: PathBuf,
     pub patch: String,
+    pub content_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +88,7 @@ pub trait EvalStore: Send + Sync {
     fn get(&self, id: i64) -> Result<Option<EvalRun>, EvalError>;
     fn latest(&self) -> Result<Option<EvalRun>, EvalError>;
     fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError>;
+    fn latest_for(&self, provenance: &RunProvenance) -> Result<Option<EvalRun>, EvalError>;
     fn list(&self, limit: u32) -> Result<Vec<EvalRun>, EvalError>;
 }
 
@@ -144,6 +146,16 @@ pub trait ChangeExporter: Send + Sync {
         commit: &'a str,
         base_branch: &'a str,
     ) -> BoxFuture<'a, Result<ExportedChange, EvalError>>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoModel {
+    pub repo: String,
+    pub model: String,
+}
+
+pub trait RepoModels: Send + Sync {
+    fn list<'a>(&'a self) -> BoxFuture<'a, Vec<RepoModel>>;
 }
 
 pub trait CurrentProvenance: Send + Sync {

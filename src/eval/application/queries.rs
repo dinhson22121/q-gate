@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::ports::{EvalError, EvalStore};
+use super::ports::{EvalError, EvalStore, RepoModel};
 use crate::eval::domain::compare::{Comparison, DEFAULT_MAX_DROP, compare};
 use crate::eval::domain::run::EvalRun;
 use crate::history::application::RunProvenance;
@@ -68,6 +68,15 @@ pub struct StatusView {
     pub regression: bool,
     pub current_provenance: RunProvenance,
     pub matches_current: bool,
+    pub models: Vec<ModelCoverage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCoverage {
+    pub model: String,
+    pub repos: Vec<String>,
+    pub has_eval: bool,
+    pub latest_eval_id: Option<i64>,
 }
 
 pub struct EvalStatus {
@@ -79,7 +88,7 @@ impl EvalStatus {
         Self { store }
     }
 
-    pub fn execute(&self, current: RunProvenance) -> Result<StatusView, EvalError> {
+    pub fn execute(&self, current: RunProvenance, repo_models: &[RepoModel]) -> Result<StatusView, EvalError> {
         let latest = match self.store.latest()? {
             Some(run) => {
                 let regression = self
@@ -92,7 +101,35 @@ impl EvalStatus {
         };
         let matches_current = latest.as_ref().is_some_and(|entry| entry.run.provenance == current);
         let regression = latest.as_ref().is_some_and(|entry| entry.regression);
-        Ok(StatusView { latest, regression, current_provenance: current, matches_current })
+        let models = self.coverage(&current, repo_models)?;
+        Ok(StatusView { latest, regression, current_provenance: current, matches_current, models })
+    }
+
+    fn coverage(&self, current: &RunProvenance, repo_models: &[RepoModel]) -> Result<Vec<ModelCoverage>, EvalError> {
+        let mut models = vec![ModelCoverage {
+            model: current.model.clone(),
+            repos: Vec::new(),
+            has_eval: false,
+            latest_eval_id: None,
+        }];
+        for entry in repo_models {
+            match models.iter_mut().find(|m| m.model == entry.model) {
+                Some(existing) => existing.repos.push(entry.repo.clone()),
+                None => models.push(ModelCoverage {
+                    model: entry.model.clone(),
+                    repos: vec![entry.repo.clone()],
+                    has_eval: false,
+                    latest_eval_id: None,
+                }),
+            }
+        }
+        for coverage in &mut models {
+            let provenance = RunProvenance { model: coverage.model.clone(), ..current.clone() };
+            let latest = self.store.latest_for(&provenance)?;
+            coverage.has_eval = latest.is_some();
+            coverage.latest_eval_id = latest.map(|run| run.id);
+        }
+        Ok(models)
     }
 }
 
@@ -145,7 +182,7 @@ mod tests {
 
     #[test]
     fn status_without_any_eval_has_nothing_to_match() {
-        let status = EvalStatus::new(store_with(&[])).execute(provenance()).unwrap();
+        let status = EvalStatus::new(store_with(&[])).execute(provenance(), &[]).unwrap();
 
         assert!(status.latest.is_none() && !status.regression && !status.matches_current);
     }
@@ -155,11 +192,61 @@ mod tests {
         let store = store_with(&[&[true, true], &[true, false]]);
         let use_case = EvalStatus::new(store);
 
-        let same = use_case.execute(provenance()).unwrap();
-        let other = use_case.execute(RunProvenance { model: "new".into(), ..provenance() }).unwrap();
+        let same = use_case.execute(provenance(), &[]).unwrap();
+        let other = use_case.execute(RunProvenance { model: "new".into(), ..provenance() }, &[]).unwrap();
 
         assert!(same.regression && same.matches_current);
         assert!(!other.matches_current);
         assert_eq!(other.current_provenance.model, "new");
+    }
+
+    fn repo_model(repo: &str, model: &str) -> RepoModel {
+        RepoModel { repo: repo.into(), model: model.into() }
+    }
+
+    #[test]
+    fn status_covers_the_default_model_and_every_repo_override() {
+        let store = store_with(&[&[true]]);
+        let other = RunProvenance { model: "opus".into(), ..provenance() };
+        store.save(&EvalRun::new(chrono::Utc::now(), other, 1, false, Vec::new())).unwrap();
+        let repos = [repo_model("a", "m"), repo_model("b", "opus"), repo_model("c", "haiku"), repo_model("d", "opus")];
+
+        let status = EvalStatus::new(store).execute(provenance(), &repos).unwrap();
+
+        let summary: Vec<(&str, Vec<&str>, bool, Option<i64>)> = status
+            .models
+            .iter()
+            .map(|m| (m.model.as_str(), m.repos.iter().map(String::as_str).collect(), m.has_eval, m.latest_eval_id))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("m", vec!["a"], true, Some(1)),
+                ("opus", vec!["b", "d"], true, Some(2)),
+                ("haiku", vec!["c"], false, None)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_model_with_a_stale_prompt_hash_has_no_eval() {
+        let store = store_with(&[&[true]]);
+
+        let status =
+            EvalStatus::new(store).execute(RunProvenance { prompt_hash: "new".into(), ..provenance() }, &[]).unwrap();
+
+        assert!(!status.models[0].has_eval);
+    }
+
+    #[test]
+    fn status_finds_an_older_eval_for_a_model_that_is_not_the_latest() {
+        let store = store_with(&[&[true]]);
+        let other = RunProvenance { model: "opus".into(), ..provenance() };
+        store.save(&EvalRun::new(chrono::Utc::now(), other, 1, false, Vec::new())).unwrap();
+
+        let status = EvalStatus::new(store).execute(provenance(), &[]).unwrap();
+
+        assert!(!status.matches_current);
+        assert_eq!(status.models[0].latest_eval_id, Some(1));
     }
 }

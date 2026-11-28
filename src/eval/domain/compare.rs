@@ -42,13 +42,21 @@ pub struct Comparison {
     pub provenance_changes: Vec<String>,
     pub only_in_current: Vec<String>,
     pub only_in_baseline: Vec<String>,
+    #[serde(default)]
+    pub changed_cases: Vec<String>,
     pub notes: Vec<String>,
 }
 
 pub fn compare(current: &EvalRun, baseline: &EvalRun, max_drop: f64) -> Comparison {
     let current_ids = case_ids(&current.results);
     let baseline_ids = case_ids(&baseline.results);
-    let common: Vec<&str> = current_ids.iter().filter(|id| baseline_ids.contains(id)).copied().collect();
+    let shared: Vec<&str> = current_ids.iter().filter(|id| baseline_ids.contains(id)).copied().collect();
+    let changed_cases: Vec<String> = shared
+        .iter()
+        .filter(|id| content_changed(id, &current.results, &baseline.results))
+        .map(ToString::to_string)
+        .collect();
+    let common: Vec<&str> = shared.iter().filter(|id| !changed_cases.iter().any(|c| c == *id)).copied().collect();
     let keep = |results: &[CaseScore]| -> Vec<CaseScore> {
         results.iter().filter(|r| common.contains(&r.case_id.as_str())).cloned().collect()
     };
@@ -85,8 +93,25 @@ pub fn compare(current: &EvalRun, baseline: &EvalRun, max_drop: f64) -> Comparis
         provenance_changes: provenance_changes(&current.provenance, &baseline.provenance),
         only_in_current: difference(&current_ids, &baseline_ids),
         only_in_baseline: difference(&baseline_ids, &current_ids),
-        notes: notes(current, baseline, common.is_empty()),
+        notes: notes(current, baseline, common.is_empty(), unverified_cases(&shared, current, baseline)),
+        changed_cases,
     }
+}
+
+fn hash_of<'a>(id: &str, results: &'a [CaseScore]) -> &'a str {
+    results.iter().find(|r| r.case_id == id).map_or("", |r| r.content_hash.as_str())
+}
+
+fn content_changed(id: &str, current: &[CaseScore], baseline: &[CaseScore]) -> bool {
+    let (now, before) = (hash_of(id, current), hash_of(id, baseline));
+    !now.is_empty() && !before.is_empty() && now != before
+}
+
+fn unverified_cases(shared: &[&str], current: &EvalRun, baseline: &EvalRun) -> usize {
+    shared
+        .iter()
+        .filter(|id| hash_of(id, &current.results).is_empty() || hash_of(id, &baseline.results).is_empty())
+        .count()
 }
 
 fn case_ids(results: &[CaseScore]) -> Vec<&str> {
@@ -169,10 +194,15 @@ fn short(hash: &str) -> &str {
     hash.get(..12).unwrap_or(hash)
 }
 
-fn notes(current: &EvalRun, baseline: &EvalRun, no_common_cases: bool) -> Vec<String> {
+fn notes(current: &EvalRun, baseline: &EvalRun, no_common_cases: bool, unverified: usize) -> Vec<String> {
     let mut notes = Vec::new();
     if no_common_cases {
         notes.push("no cases in common with the baseline; nothing could be compared".to_string());
+    }
+    if unverified > 0 {
+        notes.push(format!(
+            "{unverified} shared case(s) have no content hash in one of the runs; their content could not be verified as unchanged"
+        ));
     }
     if current.runs_per_case != baseline.runs_per_case {
         notes.push(format!(
@@ -289,6 +319,49 @@ mod tests {
         assert_eq!(comparison.only_in_current, ["new"]);
         assert_eq!(comparison.only_in_baseline, ["old"]);
         assert_eq!(comparison.current.recall, Some(1.0));
+    }
+
+    fn hashed(mut score: CaseScore, hash: &str) -> CaseScore {
+        score.content_hash = hash.into();
+        score
+    }
+
+    #[test]
+    fn a_case_whose_content_changed_is_excluded_from_deltas_and_lost_catches() {
+        let baseline =
+            run(1, vec![hashed(score("a", 0, &[true, true], 0), "h1"), hashed(score("b", 0, &[true], 0), "k")]);
+        let current =
+            run(2, vec![hashed(score("a", 0, &[false, false], 3), "h2"), hashed(score("b", 0, &[true], 0), "k")]);
+
+        let comparison = compare(&current, &baseline, DEFAULT_MAX_DROP);
+
+        assert_eq!(comparison.changed_cases, ["a"]);
+        assert!(!comparison.regressed && comparison.lost_catches.is_empty());
+        assert_eq!(comparison.current.recall, Some(1.0));
+        assert!(comparison.notes.is_empty());
+    }
+
+    #[test]
+    fn matching_hashes_compare_normally() {
+        let baseline = run(1, vec![hashed(score("a", 0, &[true], 0), "h")]);
+        let current = run(2, vec![hashed(score("a", 0, &[false], 0), "h")]);
+
+        let comparison = compare(&current, &baseline, DEFAULT_MAX_DROP);
+
+        assert!(comparison.changed_cases.is_empty());
+        assert!(comparison.regressed);
+    }
+
+    #[test]
+    fn an_unknown_hash_keeps_comparing_but_is_noted() {
+        let baseline = run(1, vec![hashed(score("a", 0, &[true], 0), "")]);
+        let current = run(2, vec![hashed(score("a", 0, &[false], 0), "h")]);
+
+        let comparison = compare(&current, &baseline, DEFAULT_MAX_DROP);
+
+        assert!(comparison.changed_cases.is_empty());
+        assert!(comparison.regressed);
+        assert!(comparison.notes.iter().any(|n| n.contains("no content hash")));
     }
 
     #[test]

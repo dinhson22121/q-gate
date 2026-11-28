@@ -182,6 +182,7 @@ mod tests {
             .unwrap(),
             base_dir: loaded_dir.path().to_path_buf(),
             patch: change.patch,
+            content_hash: String::new(),
         };
 
         let repo = crate::eval::infrastructure::GitWorkspace.materialize(&case).await.unwrap();

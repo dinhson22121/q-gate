@@ -155,6 +155,9 @@ pub fn render_comparison(c: &Comparison) -> String {
     if !c.only_in_baseline.is_empty() {
         let _ = writeln!(out, "  only in the baseline (excluded): {}", c.only_in_baseline.join(", "));
     }
+    if !c.changed_cases.is_empty() {
+        let _ = writeln!(out, "  case content changed (excluded): {}", c.changed_cases.join(", "));
+    }
     if !c.regressed {
         let _ = writeln!(out, "no regression");
         return out;
@@ -208,6 +211,18 @@ mod tests {
         let provenance =
             RunProvenance { model: "claude-x".into(), claude_cli_version: "2.0".into(), prompt_hash: "ab".repeat(32) };
         EvalRun { id, ..EvalRun::new(chrono::Utc::now(), provenance, runs_per_case, false, runs) }
+    }
+
+    #[test]
+    fn a_comparison_lists_cases_whose_content_changed() {
+        let mut changed = score("alpha", 0, &[true], 0);
+        changed.content_hash = "other".into();
+        let baseline = run(1, vec![score("alpha", 0, &[true], 0)], 1);
+        let current = run(2, vec![changed], 1);
+
+        let text = render_comparison(&compare(&current, &baseline, 0.05));
+
+        assert!(text.contains("case content changed (excluded): alpha"), "{text}");
     }
 
     #[test]

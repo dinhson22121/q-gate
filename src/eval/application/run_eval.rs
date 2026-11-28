@@ -140,7 +140,7 @@ fn score_report(loaded: &LoadedCase, report: &ReviewReport, measure: RunMeasure)
             .collect(),
         _ => Vec::new(),
     };
-    score_case(&loaded.case, &findings, &statuses, measure)
+    CaseScore { content_hash: loaded.content_hash.clone(), ..score_case(&loaded.case, &findings, &statuses, measure) }
 }
 
 #[cfg(test)]

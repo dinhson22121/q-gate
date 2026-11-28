@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::eval::application::{RunDetail, RunEntry, StatusView};
+use crate::eval::application::{ModelCoverage, RunDetail, RunEntry, StatusView};
 use crate::eval::domain::compare::Comparison;
 use crate::eval::domain::run::{AggregateMetrics, EvalRun};
 use crate::eval::domain::scoring::CaseScore;
@@ -104,7 +104,27 @@ pub struct StatusBody {
     pub regression: bool,
     pub current_provenance: RunProvenance,
     pub matches_current: bool,
+    pub models: Vec<ModelItem>,
     pub note: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelItem {
+    pub model: String,
+    pub repos: Vec<String>,
+    pub has_eval: bool,
+    pub latest_eval_id: Option<i64>,
+}
+
+impl From<ModelCoverage> for ModelItem {
+    fn from(coverage: ModelCoverage) -> Self {
+        Self {
+            model: coverage.model,
+            repos: coverage.repos,
+            has_eval: coverage.has_eval,
+            latest_eval_id: coverage.latest_eval_id,
+        }
+    }
 }
 
 impl From<StatusView> for StatusBody {
@@ -119,6 +139,7 @@ impl From<StatusView> for StatusBody {
             regression: status.regression,
             current_provenance: status.current_provenance,
             matches_current: status.matches_current,
+            models: status.models.into_iter().map(ModelItem::from).collect(),
             note,
         }
     }
