@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -12,7 +12,7 @@ use crate::testing::domain::classify::RawRun;
 
 use futures::future::BoxFuture;
 
-use super::ports::{ScenarioSnapshot, ScenarioSnapshots, TestRunner, ToolLoop};
+use super::ports::{RaceDetectorProbe, ScenarioSnapshot, ScenarioSnapshots, TestRunner, ToolLoop};
 
 #[derive(Default)]
 pub struct ScriptedLoop {
@@ -149,4 +149,22 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+pub struct FakeRaceProbe {
+    pub answer: bool,
+    pub probes: Mutex<u32>,
+}
+
+impl FakeRaceProbe {
+    pub fn answering(answer: bool) -> Arc<Self> {
+        Arc::new(Self { answer, probes: Mutex::default() })
+    }
+}
+
+impl RaceDetectorProbe for FakeRaceProbe {
+    fn available<'a>(&'a self, _cwd: &'a Path) -> BoxFuture<'a, bool> {
+        *self.probes.lock().unwrap() += 1;
+        Box::pin(async move { self.answer })
+    }
 }

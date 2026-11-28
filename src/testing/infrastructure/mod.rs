@@ -1,6 +1,7 @@
 pub mod cli_loop;
 pub mod mcp_bridge;
 pub mod process;
+pub mod race_probe;
 pub mod workspace;
 
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use crate::testing::application::ports::ScenarioSnapshots;
 
 pub use cli_loop::CliToolLoop;
 pub use process::ExecTestRunner;
+pub use race_probe::ExecRaceDetectorProbe;
 pub use workspace::SnapshotWorkspace;
 
 pub type MeteredCliLoop = MeteredToolLoop<CliToolLoop>;
@@ -24,6 +26,7 @@ impl ScenarioTestAgent<MeteredCliLoop, ExecTestRunner, SnapshotWorkspace> {
         backend: Arc<dyn ExecBackend>,
         snapshots: Arc<dyn ScenarioSnapshots>,
     ) -> Self {
-        Self::with_ports(driver, ExecTestRunner::new(backend), snapshots, config)
+        let probe = ExecRaceDetectorProbe::new(ExecTestRunner::new(backend.clone()));
+        Self::with_ports(driver, ExecTestRunner::new(backend), snapshots, config).with_race_probe(Arc::new(probe))
     }
 }

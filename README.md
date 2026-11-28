@@ -208,6 +208,9 @@ How it works:
 **C compiler:** the image has no `gcc`. Go builds fine without it (cgo is disabled automatically), but Rust crates
 and native Node/Python extensions need one. Add it at build time with the override file:
 `QGATE_APT_PACKAGES: build-essential` (see below), then `docker compose up -d --build`.
+The Go race detector (`-race`) also needs cgo and a C compiler: qgate's test agent probes for it once and, when
+it is missing, runs Go scenario tests without `-race` and notes that plain data races that do not crash are not
+detected. For a smaller image than `build-essential`, use `QGATE_APT_PACKAGES: gcc libc6-dev`.
 
 **Pre-installed toolchains (CI / offline):** copy `docker-compose.override.example.yml` to
 `docker-compose.override.yml` and set the build arg `QGATE_PREINSTALL: go,java`. The same scripts run during
