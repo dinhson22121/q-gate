@@ -1,0 +1,10 @@
+id = "ts-xss-innerhtml-comment"
+description = "User comment text is interpolated into innerHTML, allowing stored XSS."
+language = "typescript"
+
+[[expected]]
+file = "src/comments.ts"
+line = 7
+line_tolerance = 3
+category = "security"
+min_severity = "major"

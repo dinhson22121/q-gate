@@ -1,0 +1,10 @@
+id = "py-reset-token-weak-random"
+description = "Password reset tokens are generated with the random module (Mersenne Twister) instead of secrets."
+language = "python"
+
+[[expected]]
+file = "app/reset.py"
+line = 7
+line_tolerance = 3
+category = "security"
+min_severity = "major"

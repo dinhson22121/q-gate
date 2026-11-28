@@ -1,0 +1,16 @@
+diff --git a/app/paging.py b/app/paging.py
+index 4a4a250..5324d97 100644
+--- a/app/paging.py
++++ b/app/paging.py
+@@ -1,2 +1,11 @@
++PAGE_SIZE = 20
++
++
+ def total_pages(count, page_size):
+     return (count + page_size - 1) // page_size
++
++
++def paginate(items, page):
++    start = (page - 1) * PAGE_SIZE
++    end = start + PAGE_SIZE
++    return items[start : end + 1]

@@ -79,7 +79,12 @@ mod tests {
     const PATCH: &str = "diff --git a/a.txt b/a.txt\nindex 3b18e51..cc628cc 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n hello world\n+second line\n";
 
     fn loaded(base: &Path, patch: &str) -> LoadedCase {
-        LoadedCase { case: parse_case(CASE).unwrap(), base_dir: base.to_path_buf(), patch: patch.into() }
+        LoadedCase {
+            case: parse_case(CASE).unwrap(),
+            base_dir: base.to_path_buf(),
+            patch: patch.into(),
+            content_hash: String::new(),
+        }
     }
 
     fn base_tree() -> tempfile::TempDir {

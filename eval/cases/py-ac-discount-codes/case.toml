@@ -1,0 +1,19 @@
+id = "py-ac-discount-codes"
+description = "SHOP-12 discount codes: expiry dates are stored but never checked, so an expired code still discounts."
+language = "python"
+
+[ticket]
+key = "SHOP-12"
+title = "Apply discount codes at checkout"
+
+[[ac]]
+text = "A valid, unexpired discount code reduces the order total by its percentage"
+expect = "met"
+
+[[ac]]
+text = "An unknown discount code is rejected with an error"
+expect = "met"
+
+[[ac]]
+text = "An expired discount code is rejected with an error"
+expect = "not_met"

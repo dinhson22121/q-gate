@@ -153,6 +153,17 @@ impl EvalStore for SqliteEvalStore {
         Ok(self.runs_where("ORDER BY id DESC LIMIT 1", [])?.into_iter().next())
     }
 
+    fn latest_for(&self, provenance: &RunProvenance) -> Result<Option<EvalRun>, EvalError> {
+        let runs = self.runs_where(
+            "WHERE json_extract(provenance, '$.model') = ?1
+               AND json_extract(provenance, '$.claude_cli_version') = ?2
+               AND json_extract(provenance, '$.prompt_hash') = ?3
+             ORDER BY id DESC LIMIT 1",
+            params![provenance.model, provenance.claude_cli_version, provenance.prompt_hash],
+        )?;
+        Ok(runs.into_iter().next())
+    }
+
     fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
         Ok(self.runs_where("WHERE id < ?1 ORDER BY id DESC LIMIT 1", [id])?.into_iter().next())
     }
@@ -211,6 +222,32 @@ mod tests {
 
         assert_eq!(loaded, EvalRun { id, ..run });
         assert_eq!(loaded.provenance, provenance());
+    }
+
+    #[test]
+    fn latest_for_matches_the_whole_provenance_not_just_the_newest_run() {
+        let (_dir, store) = store();
+        let first = store.save(&sample_run(&[true])).unwrap();
+        let other = RunProvenance { model: "opus".into(), ..provenance() };
+        store.save(&EvalRun::new(chrono::Utc::now(), other.clone(), 1, false, Vec::new())).unwrap();
+
+        let for_default = store.latest_for(&provenance()).unwrap().unwrap();
+        let for_other = store.latest_for(&other).unwrap().unwrap();
+        let stale = RunProvenance { prompt_hash: "x".into(), ..provenance() };
+
+        assert_eq!(for_default.id, first);
+        assert_eq!(for_other.provenance.model, "opus");
+        assert!(store.latest_for(&stale).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stored_result_without_a_content_hash_still_loads_as_unknown() {
+        let mut value = serde_json::to_value(score("a", 0, &[true], 0)).unwrap();
+        value.as_object_mut().unwrap().remove("content_hash");
+
+        let loaded: CaseScore = serde_json::from_value(value).unwrap();
+
+        assert!(loaded.content_hash.is_empty());
     }
 
     #[test]

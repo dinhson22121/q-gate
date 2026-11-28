@@ -6,8 +6,8 @@ use serde_json::Value;
 use tokio::net::TcpListener;
 
 use super::*;
-use crate::eval::application::EvalError;
 use crate::eval::application::test_support::{MemoryStore, provenance, sample_run};
+use crate::eval::application::{EvalError, RepoModel};
 use crate::history::application::RunProvenance;
 
 struct FixedProvenance(RunProvenance);
@@ -18,8 +18,20 @@ impl CurrentProvenance for FixedProvenance {
     }
 }
 
+struct FixedRepoModels(Vec<RepoModel>);
+
+impl RepoModels for FixedRepoModels {
+    fn list<'a>(&'a self) -> BoxFuture<'a, Vec<RepoModel>> {
+        Box::pin(async { self.0.clone() })
+    }
+}
+
 async fn serve(store: Arc<MemoryStore>, current: RunProvenance) -> String {
-    let state = EvalApiState::new(store, Arc::new(FixedProvenance(current)));
+    serve_with(store, current, Vec::new()).await
+}
+
+async fn serve_with(store: Arc<MemoryStore>, current: RunProvenance, repo_models: Vec<RepoModel>) -> String {
+    let state = EvalApiState::new(store, Arc::new(FixedProvenance(current)), Arc::new(FixedRepoModels(repo_models)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
@@ -116,6 +128,27 @@ async fn status_says_whether_the_latest_eval_matches_the_current_setup() {
 }
 
 #[tokio::test]
+async fn status_lists_every_model_in_use_and_whether_it_has_an_eval() {
+    let repo_models = vec![
+        RepoModel { repo: "api".into(), model: "m".into() },
+        RepoModel { repo: "web".into(), model: "opus".into() },
+    ];
+    let base = serve_with(two_runs(), provenance(), repo_models).await;
+
+    let (_, body) = json(&base, "/api/eval/status").await;
+
+    let models = body["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0]["model"], "m");
+    assert_eq!(models[0]["repos"][0], "api");
+    assert_eq!(models[0]["has_eval"], true);
+    assert_eq!(models[0]["latest_eval_id"], 2);
+    assert_eq!(models[1]["model"], "opus");
+    assert_eq!(models[1]["has_eval"], false);
+    assert!(models[1]["latest_eval_id"].is_null());
+}
+
+#[tokio::test]
 async fn storage_failures_do_not_leak_details() {
     struct Broken;
     impl crate::eval::application::EvalStore for Broken {
@@ -128,6 +161,9 @@ async fn storage_failures_do_not_leak_details() {
         fn latest(&self) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
             Err(EvalError::Storage("secret path".into()))
         }
+        fn latest_for(&self, _: &RunProvenance) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
+            Err(EvalError::Storage("secret path".into()))
+        }
         fn previous_to(&self, _: i64) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
             Err(EvalError::Storage("secret path".into()))
         }
@@ -135,7 +171,11 @@ async fn storage_failures_do_not_leak_details() {
             Err(EvalError::Storage("secret path".into()))
         }
     }
-    let state = EvalApiState::new(Arc::new(Broken), Arc::new(FixedProvenance(provenance())));
+    let state = EvalApiState::new(
+        Arc::new(Broken),
+        Arc::new(FixedProvenance(provenance())),
+        Arc::new(FixedRepoModels(Vec::new())),
+    );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, router(state)).await });

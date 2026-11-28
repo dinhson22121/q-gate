@@ -1,0 +1,10 @@
+id = "go-path-traversal-download"
+description = "A download handler joins a raw query parameter onto the reports directory, so ../ sequences read arbitrary files."
+language = "go"
+
+[[expected]]
+file = "main.go"
+line = 18
+line_tolerance = 3
+category = "security"
+min_severity = "major"

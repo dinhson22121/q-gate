@@ -1,0 +1,22 @@
+diff --git a/main.go b/main.go
+index 9522a3b..21b709c 100644
+--- a/main.go
++++ b/main.go
+@@ -28,7 +28,17 @@ func listOrders(w http.ResponseWriter, r *http.Request) {
+ 	json.NewEncoder(w).Encode(mine)
+ }
+ 
++func getOrder(w http.ResponseWriter, r *http.Request) {
++	order, ok := orders[r.URL.Query().Get("id")]
++	if !ok {
++		http.Error(w, "not found", http.StatusNotFound)
++		return
++	}
++	json.NewEncoder(w).Encode(order)
++}
++
+ func main() {
+ 	http.HandleFunc("/orders", listOrders)
++	http.HandleFunc("/order", getOrder)
+ 	log.Fatal(http.ListenAndServe(":8080", nil))
+ }

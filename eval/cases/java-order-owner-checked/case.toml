@@ -1,0 +1,10 @@
+id = "java-order-owner-checked"
+description = "getOrder compares the order owner with the current user and answers not-found otherwise, which must not be flagged."
+language = "java"
+
+[[forbidden]]
+file = "src/main/java/com/shop/OrderService.java"
+line = 22
+line_tolerance = 3
+category = "security"
+min_severity = "major"

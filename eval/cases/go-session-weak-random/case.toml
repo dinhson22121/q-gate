@@ -1,0 +1,10 @@
+id = "go-session-weak-random"
+description = "Session ids are built from math/rand, which is predictable, instead of crypto/rand."
+language = "go"
+
+[[expected]]
+file = "main.go"
+line = 15
+line_tolerance = 3
+category = "security"
+min_severity = "major"

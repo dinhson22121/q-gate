@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::get;
 
-use crate::eval::application::{CurrentProvenance, EvalStatus, EvalStore, GetEvalRun, ListEvalRuns};
+use crate::eval::application::{CurrentProvenance, EvalStatus, EvalStore, GetEvalRun, ListEvalRuns, RepoModels};
 
 #[derive(Clone)]
 pub struct EvalApiState {
@@ -14,15 +14,21 @@ pub struct EvalApiState {
     get: Arc<GetEvalRun>,
     status: Arc<EvalStatus>,
     current: Arc<dyn CurrentProvenance>,
+    repo_models: Arc<dyn RepoModels>,
 }
 
 impl EvalApiState {
-    pub fn new(store: Arc<dyn EvalStore>, current: Arc<dyn CurrentProvenance>) -> Self {
+    pub fn new(
+        store: Arc<dyn EvalStore>,
+        current: Arc<dyn CurrentProvenance>,
+        repo_models: Arc<dyn RepoModels>,
+    ) -> Self {
         Self {
             list: Arc::new(ListEvalRuns::new(store.clone())),
             get: Arc::new(GetEvalRun::new(store.clone())),
             status: Arc::new(EvalStatus::new(store)),
             current,
+            repo_models,
         }
     }
 }

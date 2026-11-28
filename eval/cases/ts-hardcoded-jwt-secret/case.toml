@@ -1,0 +1,10 @@
+id = "ts-hardcoded-jwt-secret"
+description = "The JWT signing secret is a string literal committed to the source."
+language = "typescript"
+
+[[expected]]
+file = "src/auth.ts"
+line = 7
+line_tolerance = 3
+category = "security"
+min_severity = "major"

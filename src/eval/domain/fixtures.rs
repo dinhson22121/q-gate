@@ -34,6 +34,7 @@ pub fn score(case: &str, repetition: u32, caught: &[bool], fp: usize) -> CaseSco
     CaseScore {
         case_id: case.into(),
         repetition,
+        content_hash: format!("hash-{case}"),
         expected: caught
             .iter()
             .enumerate()

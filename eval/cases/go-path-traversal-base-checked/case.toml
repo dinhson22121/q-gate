@@ -1,0 +1,10 @@
+id = "go-path-traversal-base-checked"
+description = "The download handler reduces the name with filepath.Base and rejects '.', '..' and '/', so it cannot leave the reports directory and must not be flagged."
+language = "go"
+
+[[forbidden]]
+file = "main.go"
+line = 22
+line_tolerance = 3
+category = "security"
+min_severity = "major"

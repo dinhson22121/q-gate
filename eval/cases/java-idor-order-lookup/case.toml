@@ -1,0 +1,10 @@
+id = "java-idor-order-lookup"
+description = "getOrder receives the current user id but never compares it with the order owner, so any user can read any order."
+language = "java"
+
+[[expected]]
+file = "src/main/java/com/shop/OrderService.java"
+line = 19
+line_tolerance = 3
+category = "security"
+min_severity = "major"

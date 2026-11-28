@@ -52,6 +52,8 @@ pub struct CriterionOutcome {
 pub struct CaseScore {
     pub case_id: String,
     pub repetition: u32,
+    #[serde(default)]
+    pub content_hash: String,
     pub expected: Vec<ExpectedOutcome>,
     pub forbidden_hits: Vec<ObservedFinding>,
     pub unlabeled: Vec<ObservedFinding>,
@@ -117,6 +119,7 @@ pub fn score_case(
     CaseScore {
         case_id: case.id.clone(),
         repetition: measure.repetition,
+        content_hash: String::new(),
         expected,
         forbidden_hits,
         unlabeled,

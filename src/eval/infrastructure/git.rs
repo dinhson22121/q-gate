@@ -30,9 +30,28 @@ const ISOLATION_ENV: &[(&str, &str)] = &[
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
 ];
 
+pub(super) fn safe_directory_args(repo: &Path) -> Vec<String> {
+    let canonical = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    vec!["-c".to_string(), format!("safe.directory={}", canonical.display())]
+}
+
 pub(super) async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, EvalError> {
+    run_git(cwd, &[], args).await
+}
+
+pub(super) async fn user_repo_bytes(repo: &Path, args: &[&str]) -> Result<Vec<u8>, EvalError> {
+    run_git(repo, &safe_directory_args(repo), args).await
+}
+
+pub(super) async fn user_repo_text(repo: &Path, args: &[&str]) -> Result<String, EvalError> {
+    let bytes = user_repo_bytes(repo, args).await?;
+    Ok(String::from_utf8_lossy(&bytes).trim().to_string())
+}
+
+async fn run_git(cwd: &Path, extra_config: &[String], args: &[&str]) -> Result<Vec<u8>, EvalError> {
     let output = Command::new(GIT)
         .args(IDENTITY_ARGS)
+        .args(extra_config)
         .args(args)
         .envs(ISOLATION_ENV.iter().copied())
         .current_dir(cwd)

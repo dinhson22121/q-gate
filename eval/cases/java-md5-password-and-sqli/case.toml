@@ -1,0 +1,17 @@
+id = "java-md5-password-and-sqli"
+description = "Passwords are hashed with unsalted MD5 and the user lookup concatenates the email into a SQL statement."
+language = "java"
+
+[[expected]]
+file = "src/main/java/com/shop/UserRepository.java"
+line = 20
+line_tolerance = 3
+category = "security"
+min_severity = "major"
+
+[[expected]]
+file = "src/main/java/com/shop/UserRepository.java"
+line = 26
+line_tolerance = 3
+category = "security"
+min_severity = "major"

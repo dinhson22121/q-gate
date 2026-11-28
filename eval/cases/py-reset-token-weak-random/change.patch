@@ -1,0 +1,16 @@
+diff --git a/app/reset.py b/app/reset.py
+index c9b1a9b..5b807ec 100644
+--- a/app/reset.py
++++ b/app/reset.py
+@@ -1,2 +1,11 @@
++import random
++import string
++
++
++def make_reset_token():
++    alphabet = string.ascii_letters + string.digits
++    return "".join(random.choice(alphabet) for _ in range(24))
++
++
+ def reset_url(token):
+     return f"https://app.example.com/reset?token={token}"

@@ -7,7 +7,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use super::agents::{redteam_service, rulebook_service};
-use super::eval::runner::ContextProvenance;
+use super::eval::runner::{ContextProvenance, RegisteredRepoModels};
 use super::login::{dashboard_secret, login_url};
 use super::pipeline::{AppContext, ReviewPipeline, ReviewRequest, load_review_config};
 use super::policy::policy_service;
@@ -99,7 +99,11 @@ pub async fn serve(context: Arc<AppContext>) -> Result<()> {
     ))
     .merge(redteam_router(RedteamApiState::new(redteam, hosts.clone(), token.clone())))
     .merge(feedback_router(FeedbackApiState::new(feedback, criteria, history.clone(), hosts.clone(), token.clone())))
-    .merge(eval_router(EvalApiState::new(eval_store, Arc::new(ContextProvenance::new(context.clone())))))
+    .merge(eval_router(EvalApiState::new(
+        eval_store,
+        Arc::new(ContextProvenance::new(context.clone())),
+        Arc::new(RegisteredRepoModels::new(Arc::new(repo_source(&context)))),
+    )))
     .merge(policy_router(PolicyApiState::new(policy, hosts, token)));
     let dashboard_stop = stop_tx.clone();
     let dashboard_shutdown = stopped(stop_rx.clone());

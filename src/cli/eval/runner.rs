@@ -5,7 +5,7 @@ use futures::future::BoxFuture;
 
 use crate::cli::agents::{apply_agent_policy, build_agents, effort_name};
 use crate::cli::pipeline::{AppContext, HISTORY_DB_FILE};
-use crate::eval::application::{CurrentProvenance, EvalError, ReviewJob, ReviewRunner};
+use crate::eval::application::{CurrentProvenance, EvalError, RepoModel, RepoModels, ReviewJob, ReviewRunner};
 use crate::history::application::RunProvenance;
 use crate::review::application::{AgentRun, NoProgress, ReviewChanges, ReviewReport, ReviewSettings};
 use crate::review::infrastructure::callers::CallgraphCallers;
@@ -14,6 +14,8 @@ use crate::review::infrastructure::claude::{ClaudeAuditor, ClaudeReviewer};
 use crate::review::infrastructure::local_git::{DiffTarget, LocalGit};
 use crate::review::infrastructure::snapshot::{GitScenarioSnapshots, export_commit};
 use crate::settings::application::Config;
+use crate::settings::infrastructure::config_file::load_config;
+use crate::watch::application::ports::RepoSource;
 
 pub struct CliReviewRunner {
     context: Arc<AppContext>,
@@ -47,6 +49,33 @@ impl ContextProvenance {
 impl CurrentProvenance for ContextProvenance {
     fn current<'a>(&'a self) -> BoxFuture<'a, RunProvenance> {
         Box::pin(async move { self.context.provenance(&Config::default().llm.model).await })
+    }
+}
+
+pub struct RegisteredRepoModels<S> {
+    repos: Arc<S>,
+}
+
+impl<S> RegisteredRepoModels<S> {
+    pub fn new(repos: Arc<S>) -> Self {
+        Self { repos }
+    }
+}
+
+impl<S: RepoSource> RepoModels for RegisteredRepoModels<S> {
+    fn list<'a>(&'a self) -> BoxFuture<'a, Vec<RepoModel>> {
+        Box::pin(async move {
+            let Ok(repos) = self.repos.list().await else { return Vec::new() };
+            let mut models = Vec::new();
+            for repo in repos {
+                let root = repo.path.clone();
+                let loaded = tokio::task::spawn_blocking(move || load_config(&root)).await;
+                if let Ok(Ok(config)) = loaded {
+                    models.push(RepoModel { repo: repo.name, model: config.llm.model });
+                }
+            }
+            models
+        })
     }
 }
 

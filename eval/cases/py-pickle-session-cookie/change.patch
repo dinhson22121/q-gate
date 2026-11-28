@@ -1,0 +1,18 @@
+diff --git a/app/session.py b/app/session.py
+index f7a8a32..b1a6cc2 100644
+--- a/app/session.py
++++ b/app/session.py
+@@ -1,5 +1,13 @@
++import base64
++import pickle
++
+ SESSION_COOKIE = "session"
+ 
+ 
+ def cookie_value(request):
+     return request.cookies.get(SESSION_COOKIE, "")
++
++
++def load_session(request):
++    raw = base64.b64decode(cookie_value(request))
++    return pickle.loads(raw)

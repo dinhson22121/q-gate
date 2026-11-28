@@ -1,0 +1,23 @@
+diff --git a/app/preview.py b/app/preview.py
+index ea1d9b9..45afd66 100644
+--- a/app/preview.py
++++ b/app/preview.py
+@@ -1,2 +1,18 @@
++import requests
++
++FEEDS = {
++    "news": "https://feeds.example.com/news.xml",
++    "releases": "https://feeds.example.com/releases.xml",
++}
++
++
+ def render_preview(status, body):
+     return {"status": status, "body": body[:2000]}
++
++
++def fetch_preview(request):
++    url = FEEDS.get(request.args.get("feed"))
++    if url is None:
++        return {"status": 404, "body": "unknown feed"}
++    response = requests.get(url, timeout=5, allow_redirects=False)
++    return render_preview(response.status_code, response.text)

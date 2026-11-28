@@ -409,3 +409,36 @@ fn model_and_effort_flags_are_validated() {
     assert!(parse(&["--model", "claude-opus-5-5[1m]"]).is_err());
     assert!(parse(&["--effort", "extreme"]).is_err());
 }
+
+struct FixedRepos(Vec<crate::watch::domain::repo::WatchedRepo>);
+
+impl crate::watch::application::ports::RepoSource for FixedRepos {
+    async fn list(
+        &self,
+    ) -> Result<Vec<crate::watch::domain::repo::WatchedRepo>, crate::watch::application::ports::WatchError> {
+        Ok(self.0.clone())
+    }
+}
+
+#[tokio::test]
+async fn registered_repos_report_their_effective_model() {
+    use crate::cli::eval::runner::RegisteredRepoModels;
+    use crate::eval::application::RepoModels;
+    use crate::watch::domain::repo::WatchedRepo;
+    let dir = tempfile::tempdir().unwrap();
+    let (custom, plain, broken) = (dir.path().join("custom"), dir.path().join("plain"), dir.path().join("broken"));
+    for path in [&custom, &plain, &broken] {
+        std::fs::create_dir(path).unwrap();
+    }
+    std::fs::write(custom.join(".qgate.toml"), "[llm]\nmodel = \"claude-opus-5-5\"\n").unwrap();
+    std::fs::write(broken.join(".qgate.toml"), "not toml [").unwrap();
+    let repos = FixedRepos([custom, plain, broken].into_iter().map(WatchedRepo::from_path).collect());
+
+    let models = RegisteredRepoModels::new(Arc::new(repos)).list().await;
+
+    let names: Vec<(&str, &str)> = models.iter().map(|m| (m.repo.as_str(), m.model.as_str())).collect();
+    assert_eq!(
+        names,
+        [("custom", "claude-opus-5-5"), ("plain", crate::settings::application::Config::default().llm.model.as_str())]
+    );
+}

@@ -1,0 +1,20 @@
+diff --git a/src/auth.ts b/src/auth.ts
+index a9247aa..ca402e7 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -1,7 +1,15 @@
++import jwt from "jsonwebtoken";
++
+ export interface Claims {
+   sub: string;
+ }
+ 
++const JWT_SECRET = "prod-9f3a1c7e5b2d4a8c9e0f1a2b3c4d5e6f";
++
+ export function isExpired(expiresAt: number, now: number): boolean {
+   return now >= expiresAt;
+ }
++
++export function signToken(userId: string): string {
++  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: "1h" });
++}

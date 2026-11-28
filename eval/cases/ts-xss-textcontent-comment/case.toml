@@ -1,0 +1,10 @@
+id = "ts-xss-textcontent-comment"
+description = "The comment is built from text nodes and textContent, so markup in user input is never parsed and must not be flagged."
+language = "typescript"
+
+[[forbidden]]
+file = "src/comments.ts"
+line = 9
+line_tolerance = 3
+category = "security"
+min_severity = "major"

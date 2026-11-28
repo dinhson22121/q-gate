@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use crate::eval::application::{CaseRepository, EvalError, LoadedCase, NewCase};
 use crate::eval::domain::case::{is_safe_relative_path, parse_case, render_case, validate_case_id};
 
@@ -25,6 +27,46 @@ impl FsCaseRepository {
 
 fn storage(context: &str, path: &Path, error: impl std::fmt::Display) -> EvalError {
     EvalError::Storage(format!("{context} {}: {error}", path.display()))
+}
+
+const IGNORED_FILES: [&str; 2] = [".DS_Store", "Thumbs.db"];
+const IGNORED_SUFFIXES: [&str; 3] = ["~", ".swp", ".swo"];
+
+fn is_editor_or_os_junk(name: &str) -> bool {
+    IGNORED_FILES.contains(&name) || IGNORED_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+}
+
+fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> Result<(), EvalError> {
+    for entry in fs::read_dir(dir).map_err(|e| storage("cannot read", dir, e))? {
+        let entry = entry.map_err(|e| storage("cannot read", dir, e))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_editor_or_os_junk(&name) {
+            continue;
+        }
+        let relative = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        let file_type = entry.file_type().map_err(|e| storage("cannot stat", &entry.path(), e))?;
+        if file_type.is_dir() {
+            collect_files(&entry.path(), &relative, out)?;
+        } else {
+            out.push((relative, entry.path()));
+        }
+    }
+    Ok(())
+}
+
+pub fn hash_case_dir(dir: &Path) -> Result<String, EvalError> {
+    let mut files = Vec::new();
+    collect_files(dir, "", &mut files)?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for (relative, path) in &files {
+        let bytes = fs::read(path).map_err(|e| storage("cannot read", path, e))?;
+        hasher.update((relative.len() as u64).to_le_bytes());
+        hasher.update(relative.as_bytes());
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 impl CaseRepository for FsCaseRepository {
@@ -65,7 +107,8 @@ impl CaseRepository for FsCaseRepository {
         }
         let patch_file = dir.join(PATCH_FILE);
         let patch = fs::read_to_string(&patch_file).map_err(|e| storage("cannot read", &patch_file, e))?;
-        Ok(LoadedCase { case, base_dir, patch })
+        let content_hash = hash_case_dir(&dir)?;
+        Ok(LoadedCase { case, base_dir, patch, content_hash })
     }
 
     fn write(&self, new: &NewCase) -> Result<(), EvalError> {
@@ -136,6 +179,62 @@ mod tests {
         assert_eq!(loaded.patch, "diff --git a/a.go b/a.go\n");
         assert_eq!(fs::read(loaded.base_dir.join("sub/b.go")).unwrap(), b"package b\n");
         assert_eq!(repo.ids().unwrap(), ["my-case"]);
+    }
+
+    #[test]
+    fn the_content_hash_is_stable_and_changes_with_any_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = FsCaseRepository::new(dir.path());
+        repo.write(&new_case("hashed")).unwrap();
+        let first = repo.load("hashed").unwrap().content_hash;
+        let again = repo.load("hashed").unwrap().content_hash;
+        fs::write(dir.path().join("hashed").join(BASE_DIR).join("a.go"), "package changed\n").unwrap();
+        let base_changed = repo.load("hashed").unwrap().content_hash;
+        fs::write(dir.path().join("hashed").join(PATCH_FILE), "other\n").unwrap();
+        let patch_changed = repo.load("hashed").unwrap().content_hash;
+        fs::write(
+            dir.path().join("hashed").join(CASE_FILE),
+            "id = \"hashed\"\nlanguage = \"rust\"\n[[expected]]\nfile = \"a.go\"\nline = 2\ncategory = \"security\"\n",
+        )
+        .unwrap();
+        let case_changed = repo.load("hashed").unwrap().content_hash;
+
+        assert_eq!(first.len(), 64);
+        assert_eq!(first, again);
+        let all = [&first, &base_changed, &patch_changed, &case_changed];
+        assert!(all.iter().enumerate().all(|(i, a)| all.iter().skip(i + 1).all(|b| a != b)));
+    }
+
+    #[test]
+    fn identical_content_in_different_places_hashes_equal_and_paths_matter() {
+        let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        for dir in [&one, &two] {
+            fs::create_dir_all(dir.path().join("x")).unwrap();
+            fs::write(dir.path().join("x/f.txt"), "same").unwrap();
+        }
+        let equal = hash_case_dir(one.path()).unwrap() == hash_case_dir(two.path()).unwrap();
+        fs::rename(two.path().join("x/f.txt"), two.path().join("x/g.txt")).unwrap();
+
+        assert!(equal);
+        assert_ne!(hash_case_dir(one.path()).unwrap(), hash_case_dir(two.path()).unwrap());
+    }
+
+    #[test]
+    fn os_and_editor_junk_does_not_change_the_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("base")).unwrap();
+        fs::write(dir.path().join("base/main.go"), "package main\n").unwrap();
+        let clean = hash_case_dir(dir.path()).unwrap();
+        for junk in [".DS_Store", "base/Thumbs.db", "base/main.go~", "base/.main.go.swp"] {
+            fs::write(dir.path().join(junk), "noise").unwrap();
+        }
+        fs::write(dir.path().join("base/.gitignore"), "target\n").unwrap();
+
+        let with_junk_and_dotfile = hash_case_dir(dir.path()).unwrap();
+        fs::remove_file(dir.path().join("base/.gitignore")).unwrap();
+
+        assert_ne!(clean, with_junk_and_dotfile);
+        assert_eq!(clean, hash_case_dir(dir.path()).unwrap());
     }
 
     #[test]

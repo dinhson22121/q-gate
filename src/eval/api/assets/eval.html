@@ -257,6 +257,12 @@ tr.selected td { background: var(--selected); }
     if (!status.matches_current) {
       nodes.push(el("p", { class: "banner warn" }, (status.note || "no eval for the current model/prompt") + ". Run `qgate eval` to measure the current setup."));
     }
+    const uncovered = list(status.models).filter((m) => !m.has_eval);
+    if (uncovered.length) {
+      nodes.push(el("p", { class: "banner warn" }, "No eval for the current CLI version and prompt with: " +
+        uncovered.map((m) => m.model + (list(m.repos).length ? " (" + list(m.repos).join(", ") + ")" : "")).join("; ") +
+        ". Run `qgate eval` with each model to measure it."));
+    }
     nodes.push(el("div", { class: "stats" },
       stat("F1", pctWith(s.f1, s.f1_stddev)), stat("Precision", pct(s.precision)),
       stat("Recall", pct(s.recall)), stat("AC accuracy", pct(s.ac_accuracy))));
@@ -358,6 +364,7 @@ tr.selected td { background: var(--selected); }
     nodes.push(group("Lost catch", list(cmp.lost_catches).map((l) => l.case_id + ": " + l.label), "bad"));
     nodes.push(group("Lost criterion", list(cmp.lost_criteria).map((l) => l.case_id + " AC " + l.index + ": " + l.text), "bad"));
     nodes.push(group("Changed", list(cmp.provenance_changes).map(String), "warn"));
+    nodes.push(group("Content changed (excluded)", list(cmp.changed_cases).map(String), "warn"));
     nodes.push(group("Only in this run", list(cmp.only_in_current).map(String), "info"));
     nodes.push(group("Only in baseline", list(cmp.only_in_baseline).map(String), "info"));
     nodes.push(group("Note", list(cmp.notes).map(String), "neutral"));

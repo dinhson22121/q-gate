@@ -82,7 +82,12 @@ impl CaseRepository for FakeCases {
 
     fn load(&self, id: &str) -> Result<LoadedCase, EvalError> {
         let text = self.cases.get(id).ok_or_else(|| EvalError::NotFound(id.into()))?;
-        Ok(LoadedCase { case: parse_case(text)?, base_dir: PathBuf::from("/base"), patch: String::new() })
+        Ok(LoadedCase {
+            case: parse_case(text)?,
+            base_dir: PathBuf::from("/base"),
+            patch: String::new(),
+            content_hash: format!("hash-of-{id}"),
+        })
     }
 
     fn write(&self, case: &NewCase) -> Result<(), EvalError> {
@@ -161,6 +166,10 @@ impl EvalStore for MemoryStore {
 
     fn latest(&self) -> Result<Option<EvalRun>, EvalError> {
         Ok(self.runs.lock().unwrap().last().cloned())
+    }
+
+    fn latest_for(&self, provenance: &RunProvenance) -> Result<Option<EvalRun>, EvalError> {
+        Ok(self.runs.lock().unwrap().iter().rev().find(|r| &r.provenance == provenance).cloned())
     }
 
     fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
