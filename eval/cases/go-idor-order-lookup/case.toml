@@ -4,7 +4,7 @@ language = "go"
 
 [[expected]]
 file = "main.go"
-line = 37
+line = 34
 line_tolerance = 3
 category = "security"
 min_severity = "major"
