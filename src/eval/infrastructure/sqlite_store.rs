@@ -12,7 +12,8 @@ use crate::history::application::RunProvenance;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE eval_runs (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         created_at    TEXT    NOT NULL,
@@ -30,9 +31,11 @@ const MIGRATIONS: &[&str] = &["
         result     TEXT    NOT NULL,
         PRIMARY KEY (run_id, case_id, repetition)
     );
-"];
+",
+    "ALTER TABLE eval_runs ADD COLUMN partial INTEGER NOT NULL DEFAULT 0;",
+];
 
-const RUN_COLUMNS: &str = "id, created_at, provenance, runs_per_case, with_tests, metrics";
+const RUN_COLUMNS: &str = "id, created_at, provenance, runs_per_case, with_tests, metrics, partial";
 
 fn storage(err: impl std::fmt::Display) -> EvalError {
     EvalError::Storage(err.to_string())
@@ -78,6 +81,7 @@ struct Header {
     runs_per_case: u32,
     with_tests: bool,
     metrics: String,
+    partial: bool,
 }
 
 fn read_header(row: &Row<'_>) -> rusqlite::Result<Header> {
@@ -88,6 +92,7 @@ fn read_header(row: &Row<'_>) -> rusqlite::Result<Header> {
         runs_per_case: row.get(3)?,
         with_tests: row.get::<_, i64>(4)? != 0,
         metrics: row.get(5)?,
+        partial: row.get::<_, i64>(6)? != 0,
     })
 }
 
@@ -107,6 +112,7 @@ fn attach_results(conn: &Connection, header: Header) -> Result<EvalRun, EvalErro
         provenance: serde_json::from_str::<RunProvenance>(&header.provenance).map_err(storage)?,
         runs_per_case: header.runs_per_case,
         with_tests: header.with_tests,
+        partial: header.partial,
         metrics: serde_json::from_str::<AggregateMetrics>(&header.metrics).map_err(storage)?,
         results,
     })
@@ -119,8 +125,8 @@ impl EvalStore for SqliteEvalStore {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(storage)?;
         tx.execute(
-            "INSERT INTO eval_runs (created_at, provenance, runs_per_case, case_count, with_tests, metrics, cost_usd)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO eval_runs (created_at, provenance, runs_per_case, case_count, with_tests, metrics, cost_usd, partial)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 run.created_at.to_rfc3339(),
                 provenance,
@@ -128,7 +134,8 @@ impl EvalStore for SqliteEvalStore {
                 run.metrics.case_count,
                 run.with_tests,
                 metrics,
-                run.metrics.cost_usd
+                run.metrics.cost_usd,
+                run.partial
             ],
         )
         .map_err(storage)?;
@@ -164,8 +171,12 @@ impl EvalStore for SqliteEvalStore {
         Ok(runs.into_iter().next())
     }
 
-    fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
-        Ok(self.runs_where("WHERE id < ?1 ORDER BY id DESC LIMIT 1", [id])?.into_iter().next())
+    fn latest_full(&self) -> Result<Option<EvalRun>, EvalError> {
+        Ok(self.runs_where("WHERE partial = 0 ORDER BY id DESC LIMIT 1", [])?.into_iter().next())
+    }
+
+    fn previous_full_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
+        Ok(self.runs_where("WHERE id < ?1 AND partial = 0 ORDER BY id DESC LIMIT 1", [id])?.into_iter().next())
     }
 
     fn list(&self, limit: u32) -> Result<Vec<EvalRun>, EvalError> {
@@ -256,11 +267,59 @@ mod tests {
         let ids: Vec<i64> = (0..3).map(|_| store.save(&sample_run(&[true])).unwrap()).collect();
 
         assert_eq!(store.latest().unwrap().unwrap().id, ids[2]);
-        assert_eq!(store.previous_to(ids[2]).unwrap().unwrap().id, ids[1]);
-        assert!(store.previous_to(ids[0]).unwrap().is_none());
+        assert_eq!(store.previous_full_to(ids[2]).unwrap().unwrap().id, ids[1]);
+        assert!(store.previous_full_to(ids[0]).unwrap().is_none());
         let listed: Vec<i64> = store.list(2).unwrap().iter().map(|r| r.id).collect();
         assert_eq!(listed, [ids[2], ids[1]]);
         assert!(store.get(999).unwrap().is_none());
+    }
+
+    #[test]
+    fn full_lookups_skip_partial_runs_and_the_flag_round_trips() {
+        let (_dir, store) = store();
+        let first = store.save(&sample_run(&[true])).unwrap();
+        let partial = store.save(&sample_run(&[true]).with_partial(true)).unwrap();
+        let last = store.save(&sample_run(&[true])).unwrap();
+
+        assert_eq!(store.latest_full().unwrap().unwrap().id, last);
+        assert_eq!(store.previous_full_to(last).unwrap().unwrap().id, first);
+        assert_eq!(store.previous_full_to(partial).unwrap().unwrap().id, first);
+        assert!(store.get(partial).unwrap().unwrap().partial);
+        assert!(!store.get(first).unwrap().unwrap().partial);
+    }
+
+    #[test]
+    fn only_partial_runs_leave_no_full_run() {
+        let (_dir, store) = store();
+        store.save(&sample_run(&[true]).with_partial(true)).unwrap();
+
+        assert!(store.latest_full().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_database_from_before_the_partial_column_upgrades_with_runs_as_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qgate.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch("CREATE TABLE eval_schema_version (version INTEGER NOT NULL PRIMARY KEY); INSERT INTO eval_schema_version VALUES (1);").unwrap();
+        let run = sample_run(&[true]);
+        conn.execute(
+            "INSERT INTO eval_runs (created_at, provenance, runs_per_case, case_count, with_tests, metrics, cost_usd)
+             VALUES (?1, ?2, 1, 1, 0, ?3, 0.0)",
+            params![
+                run.created_at.to_rfc3339(),
+                serde_json::to_string(&run.provenance).unwrap(),
+                serde_json::to_string(&run.metrics).unwrap()
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = SqliteEvalStore::open(&path).unwrap();
+
+        assert!(!store.get(1).unwrap().unwrap().partial);
+        assert_eq!(store.latest_full().unwrap().unwrap().id, 1);
     }
 
     #[test]

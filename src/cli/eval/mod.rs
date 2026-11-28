@@ -76,6 +76,10 @@ fn default_cases_dir(local_exists: bool) -> PathBuf {
     PathBuf::from(if local_exists { DEFAULT_CASES_DIR } else { IMAGE_CASES_DIR })
 }
 
+fn is_custom_cases(explicit: Option<&Path>) -> bool {
+    explicit.is_some_and(|dir| dir != Path::new(DEFAULT_CASES_DIR) && dir != Path::new(IMAGE_CASES_DIR))
+}
+
 fn resolve_cases_dir(explicit: Option<PathBuf>) -> PathBuf {
     explicit.unwrap_or_else(|| default_cases_dir(Path::new(DEFAULT_CASES_DIR).is_dir()))
 }
@@ -107,14 +111,15 @@ async fn run(context: Arc<AppContext>, args: EvalRunArgs) -> Result<ExitCode> {
     )))
     .ensure_available()
     .await?;
+    let custom_cases = is_custom_cases(args.cases.as_deref());
     let use_case = RunEval::new(
-        Arc::new(FsCaseRepository::new(resolve_cases_dir(args.cases))),
+        Arc::new(FsCaseRepository::new(resolve_cases_dir(args.cases.clone()))),
         Arc::new(GitWorkspace),
         Arc::new(CliReviewRunner::new(context.clone(), config.clone())),
         store,
         Arc::new(chrono::Utc::now),
     );
-    let options = EvalOptions { only: args.only, runs: args.runs, with_tests: args.with_tests };
+    let options = EvalOptions { only: args.only, runs: args.runs, with_tests: args.with_tests, custom_cases };
     let provenance = context.provenance(&config.llm.model).await;
     let run = use_case.execute(&options, provenance, &StderrProgress).await?;
     let comparison = baseline.map(|baseline| comparer.execute(&run, &baseline, args.max_drop)).transpose()?;

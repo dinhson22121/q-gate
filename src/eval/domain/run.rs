@@ -16,6 +16,8 @@ pub struct EvalRun {
     pub provenance: RunProvenance,
     pub runs_per_case: u32,
     pub with_tests: bool,
+    #[serde(default)]
+    pub partial: bool,
     pub metrics: AggregateMetrics,
     pub results: Vec<CaseScore>,
 }
@@ -29,7 +31,12 @@ impl EvalRun {
         results: Vec<CaseScore>,
     ) -> Self {
         let metrics = aggregate(&results, runs_per_case);
-        Self { id: 0, created_at, provenance, runs_per_case, with_tests, metrics, results }
+        Self { id: 0, created_at, provenance, runs_per_case, with_tests, partial: false, metrics, results }
+    }
+
+    pub fn with_partial(mut self, partial: bool) -> Self {
+        self.partial = partial;
+        self
     }
 }
 
@@ -346,6 +353,28 @@ mod tests {
         let run = EvalRun::new(chrono::Utc::now(), provenance, 1, false, vec![score("a", 0, &[true], 0)]);
 
         assert_eq!(run.id, 0);
+        assert!(!run.partial);
         assert_eq!(run.metrics.headline().recall, Some(1.0));
+    }
+
+    #[test]
+    fn with_partial_marks_the_run_as_partial() {
+        let provenance = RunProvenance { model: "m".into(), claude_cli_version: "1".into(), prompt_hash: "h".into() };
+
+        let run = EvalRun::new(chrono::Utc::now(), provenance, 1, false, Vec::new()).with_partial(true);
+
+        assert!(run.partial);
+    }
+
+    #[test]
+    fn a_stored_run_without_the_partial_flag_loads_as_full() {
+        let provenance = RunProvenance { model: "m".into(), claude_cli_version: "1".into(), prompt_hash: "h".into() };
+        let run = EvalRun::new(chrono::Utc::now(), provenance, 1, false, Vec::new());
+        let mut value = serde_json::to_value(&run).unwrap();
+        value.as_object_mut().unwrap().remove("partial");
+
+        let loaded: EvalRun = serde_json::from_value(value).unwrap();
+
+        assert!(!loaded.partial);
     }
 }

@@ -293,7 +293,7 @@ tr.selected td { background: var(--selected); }
       el("td", { class: "num" }, pct(s.precision)), el("td", { class: "num" }, pct(s.recall)),
       el("td", { class: "num" }, pctWith(s.f1, s.f1_stddev)), el("td", { class: "num" }, pct(s.ac_accuracy)),
       el("td", { class: "num" }, usd(run.cost_usd)),
-      el("td", {}, run.regression ? chip("regression", "bad") : null));
+      el("td", {}, run.partial ? chip("partial", "info") : null, run.regression ? chip("regression", "bad") : null));
   }
 
   function renderRuns(runs, selectedId) {
@@ -379,6 +379,7 @@ tr.selected td { background: var(--selected); }
       el("div", { class: "meta" }, el("span", {}, fmtTime(run.created_at)), provenanceLine(run.provenance),
         el("span", { class: "muted" }, run.case_count + " cases \u00d7 " + run.runs_per_case + " run(s)" + (run.with_tests ? " \u00b7 with tests" : "")),
         el("span", { class: "muted" }, usd(m.cost_usd) + " \u00b7 " + seconds(m.duration_ms)),
+        run.partial ? chip("partial", "info") : null,
         run.regression ? chip("regression", "bad") : null),
       el("h3", {}, "Comparison"), comparisonBlock(run.comparison),
       el("h3", {}, "By category"), categoryTable(m.by_category),

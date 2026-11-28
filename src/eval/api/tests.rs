@@ -128,6 +128,23 @@ async fn status_says_whether_the_latest_eval_matches_the_current_setup() {
 }
 
 #[tokio::test]
+async fn partial_runs_are_flagged_and_do_not_replace_the_latest_status_run() {
+    let store = two_runs();
+    store.save(&sample_run(&[true]).with_partial(true)).unwrap();
+    let base = serve(store, provenance()).await;
+
+    let (_, status) = json(&base, "/api/eval/status").await;
+    let (_, runs) = json(&base, "/api/eval/runs").await;
+    let (_, detail) = json(&base, "/api/eval/runs/3").await;
+
+    assert_eq!(status["latest"]["id"], 2);
+    assert_eq!(status["latest"]["partial"], false);
+    assert_eq!(runs["runs"][0]["partial"], true);
+    assert_eq!(runs["runs"][1]["partial"], false);
+    assert_eq!(detail["previous_id"], 2);
+}
+
+#[tokio::test]
 async fn status_lists_every_model_in_use_and_whether_it_has_an_eval() {
     let repo_models = vec![
         RepoModel { repo: "api".into(), model: "m".into() },
@@ -164,7 +181,10 @@ async fn storage_failures_do_not_leak_details() {
         fn latest_for(&self, _: &RunProvenance) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
             Err(EvalError::Storage("secret path".into()))
         }
-        fn previous_to(&self, _: i64) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
+        fn latest_full(&self) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
+            Err(EvalError::Storage("secret path".into()))
+        }
+        fn previous_full_to(&self, _: i64) -> Result<Option<crate::eval::domain::run::EvalRun>, EvalError> {
             Err(EvalError::Storage("secret path".into()))
         }
         fn list(&self, _: u32) -> Result<Vec<crate::eval::domain::run::EvalRun>, EvalError> {

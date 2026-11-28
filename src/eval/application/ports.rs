@@ -87,7 +87,8 @@ pub trait EvalStore: Send + Sync {
     fn save(&self, run: &EvalRun) -> Result<i64, EvalError>;
     fn get(&self, id: i64) -> Result<Option<EvalRun>, EvalError>;
     fn latest(&self) -> Result<Option<EvalRun>, EvalError>;
-    fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError>;
+    fn latest_full(&self) -> Result<Option<EvalRun>, EvalError>;
+    fn previous_full_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError>;
     fn latest_for(&self, provenance: &RunProvenance) -> Result<Option<EvalRun>, EvalError>;
     fn list(&self, limit: u32) -> Result<Vec<EvalRun>, EvalError>;
 }

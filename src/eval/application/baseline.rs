@@ -40,8 +40,8 @@ impl CompareToBaseline {
         match reference {
             BaselineRef::Latest => self
                 .store
-                .latest()?
-                .ok_or_else(|| EvalError::NotFound("no stored eval run to use as a baseline".into())),
+                .latest_full()?
+                .ok_or_else(|| EvalError::NotFound("no stored full eval run to use as a baseline".into())),
             BaselineRef::Id(id) => {
                 self.store.get(id)?.ok_or_else(|| EvalError::NotFound(format!("eval run {id} does not exist")))
             }
@@ -81,6 +81,25 @@ mod tests {
         assert_eq!(use_case.resolve(BaselineRef::Latest).unwrap().id, second);
         assert_eq!(use_case.resolve(BaselineRef::Id(first)).unwrap().id, first);
         assert!(matches!(use_case.resolve(BaselineRef::Id(99)), Err(EvalError::NotFound(_))));
+    }
+
+    #[test]
+    fn latest_skips_partial_runs_but_an_explicit_id_may_pick_one() {
+        let store = Arc::new(MemoryStore::default());
+        let use_case = CompareToBaseline::new(store.clone());
+        let full = store.save(&sample_run(&[true])).unwrap();
+        let partial = store.save(&sample_run(&[false]).with_partial(true)).unwrap();
+
+        assert_eq!(use_case.resolve(BaselineRef::Latest).unwrap().id, full);
+        assert_eq!(use_case.resolve(BaselineRef::Id(partial)).unwrap().id, partial);
+    }
+
+    #[test]
+    fn latest_without_any_full_run_is_not_found() {
+        let store = Arc::new(MemoryStore::default());
+        store.save(&sample_run(&[true]).with_partial(true)).unwrap();
+
+        assert!(matches!(CompareToBaseline::new(store).resolve(BaselineRef::Latest), Err(EvalError::NotFound(_))));
     }
 
     #[test]
