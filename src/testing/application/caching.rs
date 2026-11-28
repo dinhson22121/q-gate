@@ -11,7 +11,7 @@ use crate::testing::domain::dependencies::has_local_dependency;
 use crate::testing::domain::verdict::criterion_texts;
 
 const KIND: &str = "test_scenario";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const MANIFESTS: [&str; 13] = [
     "Cargo.toml",
     "go.mod",
@@ -82,6 +82,7 @@ impl CachingTestAgent {
         let mut key = self.tags.apply(ContentKey::new(KIND, SCHEMA_VERSION));
         key = key.with_input("scenario", scenario_digest(input, scenario));
         key = key.with_input("changed", digest(paths.iter().copied()));
+        key = key.with_input("env", self.inner.environment(input).await);
         for dir in &covered {
             let id = self.ids.tree_id(input.commit, dir).await.ok()?;
             key = key.with_input(format!("tree:{dir}"), id.unwrap_or_else(|| "absent".into()));

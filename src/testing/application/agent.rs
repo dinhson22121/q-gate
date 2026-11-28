@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,9 +61,25 @@ impl<L: ToolLoop, R: TestRunner, W: Workspace> ScenarioTestAgent<L, R, W> {
     }
 
     async fn race_detector_usable(&self, workspace: &W, targets: &[TestTarget]) -> Option<bool> {
-        let probe = self.race_probe.as_ref()?;
         let cwd = workspace.root().join(&targets.first()?.module_dir);
-        Some(*self.race_detector.get_or_init(|| probe.available(&cwd)).await)
+        self.probe_race_detector(&cwd).await
+    }
+
+    async fn probe_race_detector(&self, cwd: &Path) -> Option<bool> {
+        let probe = self.race_probe.as_ref()?;
+        Some(*self.race_detector.get_or_init(|| probe.available(cwd)).await)
+    }
+
+    pub async fn environment_fingerprint(&self, input: &AgentInput<'_>) -> String {
+        let changed: Vec<String> = input.files.iter().map(|f| f.path.clone()).collect();
+        let is_go =
+            select_language(&changed, &self.settings.languages).is_ok_and(|choice| choice.language == TestLanguage::Go);
+        let Some(cwd) = input.snapshot_root.filter(|_| is_go) else { return String::new() };
+        match self.probe_race_detector(cwd).await {
+            Some(true) => "go-race:on".to_string(),
+            Some(false) => "go-race:off".to_string(),
+            None => String::new(),
+        }
     }
 
     pub async fn run_scenario(&self, input: &AgentInput<'_>, scenario: &TestScenario) -> TestResult {
@@ -166,6 +183,10 @@ impl<L: ToolLoop, R: TestRunner, W: Workspace> ScenarioTestAgent<L, R, W> {
 impl<L: ToolLoop, R: TestRunner, W: Workspace + 'static> TestAgent for ScenarioTestAgent<L, R, W> {
     fn run<'a>(&'a self, input: &'a AgentInput<'a>, scenario: &'a TestScenario) -> BoxFuture<'a, TestResult> {
         Box::pin(self.run_scenario(input, scenario))
+    }
+
+    fn environment<'a>(&'a self, input: &'a AgentInput<'a>) -> BoxFuture<'a, String> {
+        Box::pin(self.environment_fingerprint(input))
     }
 }
 

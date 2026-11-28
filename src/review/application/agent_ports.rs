@@ -29,6 +29,10 @@ pub trait TicketAnalyst: Send + Sync {
 
 pub trait TestAgent: Send + Sync {
     fn run<'a>(&'a self, input: &'a AgentInput<'a>, scenario: &'a TestScenario) -> BoxFuture<'a, TestResult>;
+
+    fn environment<'a>(&'a self, _input: &'a AgentInput<'a>) -> BoxFuture<'a, String> {
+        Box::pin(async { String::new() })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
