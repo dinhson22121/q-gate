@@ -1,0 +1,53 @@
+id = "go-purchase-atomic-safe"
+description = "KAN-8 variant where ItemStore.Purchase checks and decrements stock inside one critical section, so concurrent purchases cannot oversell and nothing must be flagged."
+language = "go"
+
+[ticket]
+key = "KAN-8"
+title = "Add POST /items/purchase endpoint"
+description = "Shoppers buy items through the API. POST /items accepts an optional non-negative stock (default 0). POST /items/purchase takes a JSON body with id and quantity and decrements the item's stock by quantity, returning the updated item with 200. A quantity of zero or less is rejected with 400, an unknown id returns 404, and a quantity larger than the available stock returns 409 and leaves the stock unchanged. Stock must never go negative and the shop must never sell more than it has, even when many purchases arrive at the same time."
+
+[[ac]]
+text = "POST /items with an optional non-negative stock -> the item is created with that stock, defaulting to 0 when omitted"
+expect = "met"
+
+[[ac]]
+text = "POST /items/purchase with a valid id and quantity -> the stock is decremented by quantity and the updated item is returned with 200"
+expect = "met"
+
+[[ac]]
+text = "POST /items/purchase with a quantity of zero or less -> 400"
+expect = "met"
+
+[[ac]]
+text = "POST /items/purchase with an unknown id -> 404"
+expect = "met"
+
+[[ac]]
+text = "POST /items/purchase with a quantity larger than the available stock -> 409 and the stock is unchanged"
+expect = "met"
+
+[[ac]]
+text = "Concurrent purchases of the same item -> stock never goes negative and the shop never sells more units than it had"
+expect = "met"
+
+[[forbidden]]
+file = "items.go"
+line = 50
+line_tolerance = 8
+category = "concurrency"
+min_severity = "major"
+
+[[forbidden]]
+file = "items.go"
+line = 133
+line_tolerance = 3
+category = "concurrency"
+min_severity = "major"
+
+[[forbidden]]
+file = "items.go"
+line = 130
+line_tolerance = 10
+category = "security"
+min_severity = "major"

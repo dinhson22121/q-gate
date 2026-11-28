@@ -385,7 +385,7 @@ min_severity = "major"         # optional: only findings at least this severe co
 ```
 
 A case needs at least one `[[expected]]`, `[[forbidden]]` or `[[ac]]` with an `expect`. Unknown keys are rejected.
-Paths must be relative and stay inside the tree. `eval/cases/` ships 28 cases (Go, Java, Python, TypeScript); a test
+Paths must be relative and stay inside the tree. `eval/cases/` ships 32 cases (Go, Java, Python, TypeScript); a test
 applies every `change.patch` to its `base/` so a broken case fails the build.
 
 ### Metrics

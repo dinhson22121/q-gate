@@ -1,0 +1,231 @@
+diff --git a/items.go b/items.go
+index bee95d0..0b4fc06 100644
+--- a/items.go
++++ b/items.go
+@@ -14,6 +14,7 @@ type Item struct {
+ 	ID    int64   `json:"id"`
+ 	Name  string  `json:"name"`
+ 	Price float64 `json:"price"`
++	Stock int     `json:"stock"`
+ }
+ 
+ type ItemStore struct {
+@@ -26,18 +27,39 @@ func NewItemStore() *ItemStore {
+ 	return &ItemStore{items: map[int64]Item{}}
+ }
+ 
+-func (s *ItemStore) Add(name string, price float64) Item {
++func (s *ItemStore) Add(name string, price float64, stock int) Item {
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
+ 	s.nextID++
+-	item := Item{ID: s.nextID, Name: name, Price: price}
++	item := Item{ID: s.nextID, Name: name, Price: price, Stock: stock}
+ 	s.items[item.ID] = item
+ 	return item
+ }
+ 
++var (
++	errItemNotFound      = errors.New("item not found")
++	errInsufficientStock = errors.New("not enough stock")
++)
++
++func (s *ItemStore) Purchase(id int64, quantity int) (Item, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	item, ok := s.items[id]
++	if !ok {
++		return Item{}, errItemNotFound
++	}
++	if item.Stock < quantity {
++		return Item{}, errInsufficientStock
++	}
++	item.Stock -= quantity
++	s.items[id] = item
++	return item, nil
++}
++
+ type newItemRequest struct {
+ 	Name  string  `json:"name"`
+ 	Price float64 `json:"price"`
++	Stock int     `json:"stock"`
+ }
+ 
+ func (r newItemRequest) validate() error {
+@@ -47,6 +69,9 @@ func (r newItemRequest) validate() error {
+ 	if r.Price <= 0 {
+ 		return errors.New("price must be greater than zero")
+ 	}
++	if r.Stock < 0 {
++		return errors.New("stock must not be negative")
++	}
+ 	return nil
+ }
+ 
+@@ -78,6 +103,41 @@ func addItemHandler(store *ItemStore) http.HandlerFunc {
+ 			writeError(w, http.StatusBadRequest, err.Error())
+ 			return
+ 		}
+-		writeJSON(w, http.StatusCreated, store.Add(strings.TrimSpace(req.Name), req.Price))
++		writeJSON(w, http.StatusCreated, store.Add(strings.TrimSpace(req.Name), req.Price, req.Stock))
++	}
++}
++
++type purchaseRequest struct {
++	ID       int64 `json:"id"`
++	Quantity int   `json:"quantity"`
++}
++
++func purchaseHandler(store *ItemStore) http.HandlerFunc {
++	return func(w http.ResponseWriter, r *http.Request) {
++		if r.Method != http.MethodPost {
++			w.Header().Set("Allow", http.MethodPost)
++			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
++			return
++		}
++		var req purchaseRequest
++		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxItemBodyBytes))
++		decoder.DisallowUnknownFields()
++		if err := decoder.Decode(&req); err != nil {
++			writeError(w, http.StatusBadRequest, "invalid JSON body")
++			return
++		}
++		if req.Quantity <= 0 {
++			writeError(w, http.StatusBadRequest, "quantity must be greater than zero")
++			return
++		}
++		item, err := store.Purchase(req.ID, req.Quantity)
++		switch {
++		case errors.Is(err, errItemNotFound):
++			writeError(w, http.StatusNotFound, err.Error())
++		case errors.Is(err, errInsufficientStock):
++			writeError(w, http.StatusConflict, err.Error())
++		default:
++			writeJSON(w, http.StatusOK, item)
++		}
+ 	}
+ }
+diff --git a/items_test.go b/items_test.go
+index 274328d..9cb9ede 100644
+--- a/items_test.go
++++ b/items_test.go
+@@ -26,7 +26,7 @@ func TestAddItemCreatesItemWithGeneratedID(t *testing.T) {
+ 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if got != (Item{ID: 1, Name: "Mug", Price: 9.5}) {
++	if got != (Item{ID: 1, Name: "Mug", Price: 9.5, Stock: 0}) {
+ 		t.Fatalf("got %+v", got)
+ 	}
+ 	if stored := store.items[1]; stored != got {
+diff --git a/main.go b/main.go
+index 52b03b3..ae3276e 100644
+--- a/main.go
++++ b/main.go
+@@ -167,6 +167,8 @@ func main() {
+ 	http.HandleFunc("/logout", logoutHandler)
+ 	http.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) { userHandler(nil, w, r) })
+ 	http.HandleFunc("/file", fileHandler(dataDir))
+-	http.HandleFunc("/items", addItemHandler(NewItemStore()))
++	items := NewItemStore()
++	http.HandleFunc("/items", addItemHandler(items))
++	http.HandleFunc("/items/purchase", purchaseHandler(items))
+ 	_ = http.ListenAndServe(":8080", nil)
+ }
+diff --git a/purchase_test.go b/purchase_test.go
+new file mode 100644
+index 0000000..c3b64e1
+--- /dev/null
++++ b/purchase_test.go
+@@ -0,0 +1,91 @@
++package main
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync"
++	"testing"
++)
++
++func purchase(store *ItemStore, body string) *httptest.ResponseRecorder {
++	rec := httptest.NewRecorder()
++	req := httptest.NewRequest(http.MethodPost, "/items/purchase", strings.NewReader(body))
++	purchaseHandler(store)(rec, req)
++	return rec
++}
++
++func TestPurchaseDecrementsStock(t *testing.T) {
++	store := NewItemStore()
++	store.Add("Mug", 9.5, 5)
++
++	rec := purchase(store, `{"id":1,"quantity":2}`)
++
++	if rec.Code != http.StatusOK {
++		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
++	}
++	var got Item
++	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
++		t.Fatal(err)
++	}
++	if got.Stock != 3 {
++		t.Fatalf("stock = %d, want 3", got.Stock)
++	}
++}
++
++func TestPurchaseRejectsBadRequests(t *testing.T) {
++	cases := map[string]struct {
++		body string
++		want int
++	}{
++		"zero quantity": {`{"id":1,"quantity":0}`, http.StatusBadRequest},
++		"unknown item":  {`{"id":99,"quantity":1}`, http.StatusNotFound},
++		"not enough":    {`{"id":1,"quantity":6}`, http.StatusConflict},
++		"bad json":      {`{`, http.StatusBadRequest},
++	}
++	for name, tc := range cases {
++		t.Run(name, func(t *testing.T) {
++			store := NewItemStore()
++			store.Add("Mug", 9.5, 5)
++
++			rec := purchase(store, tc.body)
++
++			if rec.Code != tc.want {
++				t.Fatalf("got %d, want %d", rec.Code, tc.want)
++			}
++			if stock := store.items[1].Stock; stock != 5 {
++				t.Fatalf("stock changed to %d", stock)
++			}
++		})
++	}
++}
++
++func TestConcurrentPurchasesNeverOversell(t *testing.T) {
++	const stock, buyers = 10, 50
++	store := NewItemStore()
++	store.Add("Mug", 9.5, stock)
++
++	var wg sync.WaitGroup
++	var mu sync.Mutex
++	succeeded := 0
++	for range buyers {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			if purchase(store, `{"id":1,"quantity":1}`).Code == http.StatusOK {
++				mu.Lock()
++				succeeded++
++				mu.Unlock()
++			}
++		}()
++	}
++	wg.Wait()
++
++	if succeeded != stock {
++		t.Fatalf("%d purchases succeeded, want %d", succeeded, stock)
++	}
++	if got := store.items[1].Stock; got != 0 {
++		t.Fatalf("stock = %d, want 0", got)
++	}
++}
