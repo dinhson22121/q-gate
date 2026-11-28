@@ -29,10 +29,20 @@ fn storage(context: &str, path: &Path, error: impl std::fmt::Display) -> EvalErr
     EvalError::Storage(format!("{context} {}: {error}", path.display()))
 }
 
+const IGNORED_FILES: [&str; 2] = [".DS_Store", "Thumbs.db"];
+const IGNORED_SUFFIXES: [&str; 3] = ["~", ".swp", ".swo"];
+
+fn is_editor_or_os_junk(name: &str) -> bool {
+    IGNORED_FILES.contains(&name) || IGNORED_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+}
+
 fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> Result<(), EvalError> {
     for entry in fs::read_dir(dir).map_err(|e| storage("cannot read", dir, e))? {
         let entry = entry.map_err(|e| storage("cannot read", dir, e))?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        if is_editor_or_os_junk(&name) {
+            continue;
+        }
         let relative = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
         let file_type = entry.file_type().map_err(|e| storage("cannot stat", &entry.path(), e))?;
         if file_type.is_dir() {
@@ -207,6 +217,24 @@ mod tests {
 
         assert!(equal);
         assert_ne!(hash_case_dir(one.path()).unwrap(), hash_case_dir(two.path()).unwrap());
+    }
+
+    #[test]
+    fn os_and_editor_junk_does_not_change_the_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("base")).unwrap();
+        fs::write(dir.path().join("base/main.go"), "package main\n").unwrap();
+        let clean = hash_case_dir(dir.path()).unwrap();
+        for junk in [".DS_Store", "base/Thumbs.db", "base/main.go~", "base/.main.go.swp"] {
+            fs::write(dir.path().join(junk), "noise").unwrap();
+        }
+        fs::write(dir.path().join("base/.gitignore"), "target\n").unwrap();
+
+        let with_junk_and_dotfile = hash_case_dir(dir.path()).unwrap();
+        fs::remove_file(dir.path().join("base/.gitignore")).unwrap();
+
+        assert_ne!(clean, with_junk_and_dotfile);
+        assert_eq!(clean, hash_case_dir(dir.path()).unwrap());
     }
 
     #[test]
