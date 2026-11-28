@@ -16,11 +16,12 @@ pub struct EvalOptions {
     pub only: Vec<String>,
     pub runs: u32,
     pub with_tests: bool,
+    pub custom_cases: bool,
 }
 
 impl Default for EvalOptions {
     fn default() -> Self {
-        Self { only: Vec::new(), runs: 1, with_tests: false }
+        Self { only: Vec::new(), runs: 1, with_tests: false, custom_cases: false }
     }
 }
 
@@ -85,7 +86,9 @@ impl RunEval {
                 results.push(score);
             }
         }
-        let mut run = EvalRun::new((self.clock)(), provenance, options.runs, options.with_tests, results);
+        let partial = options.custom_cases || !options.only.is_empty();
+        let mut run =
+            EvalRun::new((self.clock)(), provenance, options.runs, options.with_tests, results).with_partial(partial);
         run.id = self.store.save(&run)?;
         Ok(run)
     }
@@ -286,6 +289,21 @@ mod tests {
 
         assert_eq!(run.results[0].case_id, "b-case");
         assert!(matches!(&error, EvalError::NotFound(m) if m.contains("zzz") && m.contains("a-case")));
+    }
+
+    #[tokio::test]
+    async fn a_run_is_partial_when_filtered_or_on_custom_cases_and_full_otherwise() {
+        let fixture = Fixture::new(&[("a-case", SECURITY_AT_12)], vec![Ok(catching()), Ok(catching()), Ok(catching())]);
+        let fixture = &fixture;
+        let execute = |options: EvalOptions| async move {
+            fixture.use_case().execute(&options, provenance(), &NoEvalProgress).await.unwrap().partial
+        };
+
+        let full = execute(EvalOptions::default()).await;
+        let only = execute(EvalOptions { only: vec!["a-case".into()], ..EvalOptions::default() }).await;
+        let custom = execute(EvalOptions { custom_cases: true, ..EvalOptions::default() }).await;
+
+        assert_eq!((full, only, custom), (false, true, true));
     }
 
     #[tokio::test]

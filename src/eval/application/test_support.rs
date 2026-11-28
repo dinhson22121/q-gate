@@ -172,8 +172,12 @@ impl EvalStore for MemoryStore {
         Ok(self.runs.lock().unwrap().iter().rev().find(|r| &r.provenance == provenance).cloned())
     }
 
-    fn previous_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
-        Ok(self.runs.lock().unwrap().iter().rev().find(|r| r.id < id).cloned())
+    fn latest_full(&self) -> Result<Option<EvalRun>, EvalError> {
+        Ok(self.runs.lock().unwrap().iter().rev().find(|r| !r.partial).cloned())
+    }
+
+    fn previous_full_to(&self, id: i64) -> Result<Option<EvalRun>, EvalError> {
+        Ok(self.runs.lock().unwrap().iter().rev().find(|r| r.id < id && !r.partial).cloned())
     }
 
     fn list(&self, limit: u32) -> Result<Vec<EvalRun>, EvalError> {

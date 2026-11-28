@@ -193,13 +193,13 @@ pub fn render_list(runs: &[EvalRun]) -> String {
         return "No eval runs yet. Run `qgate eval`.\n".into();
     }
     let mut out = format!(
-        "{:>4}  {:<17} {:<24} {:>5} {:>6} {:>6} {:>8}  {}\n",
-        "ID", "WHEN", "MODEL", "CASES", "F1", "AC", "COST", "PROMPT"
+        "{:>4}  {:<17} {:<24} {:>5} {:>6} {:>6} {:>8}  {:<13} {}\n",
+        "ID", "WHEN", "MODEL", "CASES", "F1", "AC", "COST", "PROMPT", "SCOPE"
     );
     for run in runs {
         let _ = writeln!(
             out,
-            "{:>4}  {:<17} {:<24} {:>5} {:>6} {:>6} {:>8}  {}",
+            "{:>4}  {:<17} {:<24} {:>5} {:>6} {:>6} {:>8}  {:<13} {}",
             run.id,
             run.created_at.format("%Y-%m-%d %H:%M"),
             run.provenance.model,
@@ -208,6 +208,7 @@ pub fn render_list(runs: &[EvalRun]) -> String {
             pct(run.metrics.ac_accuracy.mean),
             format!("${:.2}", run.metrics.cost_usd),
             run.provenance.prompt_hash.get(..12).unwrap_or(&run.provenance.prompt_hash),
+            if run.partial { "partial" } else { "full" },
         );
     }
     out
@@ -345,5 +346,15 @@ mod tests {
 
         assert_eq!(text.lines().count(), 3);
         assert!(text.lines().nth(1).unwrap().trim_start().starts_with('2'));
+    }
+
+    #[test]
+    fn the_list_marks_partial_runs() {
+        let partial = run(2, vec![score("a", 0, &[true], 0)], 1).with_partial(true);
+
+        let text = render_list(&[partial, run(1, vec![score("a", 0, &[true], 0)], 1)]);
+
+        assert!(text.lines().nth(1).unwrap().ends_with("partial"));
+        assert!(text.lines().nth(2).unwrap().ends_with("full"));
     }
 }

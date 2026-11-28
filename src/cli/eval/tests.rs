@@ -182,6 +182,14 @@ async fn the_runner_reports_review_failures_as_errors() {
     assert!(matches!(error, EvalError::Runner(_)));
 }
 
+#[test]
+fn only_a_cases_dir_other_than_the_shipped_ones_is_custom() {
+    assert!(!is_custom_cases(None));
+    assert!(!is_custom_cases(Some(Path::new(DEFAULT_CASES_DIR))));
+    assert!(!is_custom_cases(Some(Path::new(IMAGE_CASES_DIR))));
+    assert!(is_custom_cases(Some(Path::new("/tmp/debug-cases"))));
+}
+
 #[tokio::test]
 async fn an_eval_run_is_scored_stored_and_listed() {
     let work = tempfile::tempdir().unwrap();
@@ -208,7 +216,7 @@ async fn a_worse_run_than_the_baseline_exits_with_the_regression_code() {
     write_case(&cases);
     let first = run(context(work.path(), true), run_args(&cases)).await.unwrap();
     assert_eq!(first, ExitCode::from(EXIT_EVAL_OK));
-    let args = EvalRunArgs { baseline: Some("latest".parse().unwrap()), ..run_args(&cases) };
+    let args = EvalRunArgs { baseline: Some("1".parse().unwrap()), ..run_args(&cases) };
 
     let same =
         run(context(work.path(), true), EvalRunArgs { baseline: args.baseline, ..run_args(&cases) }).await.unwrap();

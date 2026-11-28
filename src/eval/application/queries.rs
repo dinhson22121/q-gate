@@ -24,17 +24,18 @@ impl ListEvalRuns {
 
     pub fn execute(&self, limit: u32) -> Result<Vec<RunEntry>, EvalError> {
         let limit = limit.clamp(1, MAX_LISTED_RUNS) as usize;
-        let mut runs = self.store.list(limit as u32 + 1)?;
-        let entries = (0..runs.len().min(limit))
-            .map(|index| RunEntry {
-                regression: runs
-                    .get(index + 1)
-                    .is_some_and(|previous| compare(&runs[index], previous, DEFAULT_MAX_DROP).regressed),
-                run: runs[index].clone(),
+        let runs = self.store.list(limit as u32 + 1)?;
+        (0..runs.len().min(limit))
+            .map(|index| {
+                let run = &runs[index];
+                let previous = match runs[index + 1..].iter().find(|candidate| !candidate.partial) {
+                    Some(found) => Some(found.clone()),
+                    None => self.store.previous_full_to(runs[runs.len() - 1].id)?,
+                };
+                let regression = previous.is_some_and(|previous| compare(run, &previous, DEFAULT_MAX_DROP).regressed);
+                Ok(RunEntry { run: run.clone(), regression })
             })
-            .collect();
-        runs.clear();
-        Ok(entries)
+            .collect()
     }
 }
 
@@ -56,7 +57,7 @@ impl GetEvalRun {
 
     pub fn execute(&self, id: i64) -> Result<Option<RunDetail>, EvalError> {
         let Some(run) = self.store.get(id)? else { return Ok(None) };
-        let previous = self.store.previous_to(id)?;
+        let previous = self.store.previous_full_to(id)?;
         let comparison = previous.as_ref().map(|previous| compare(&run, previous, DEFAULT_MAX_DROP));
         Ok(Some(RunDetail { previous_id: previous.map(|p| p.id), comparison, run }))
     }
@@ -89,11 +90,11 @@ impl EvalStatus {
     }
 
     pub fn execute(&self, current: RunProvenance, repo_models: &[RepoModel]) -> Result<StatusView, EvalError> {
-        let latest = match self.store.latest()? {
+        let latest = match self.store.latest_full()? {
             Some(run) => {
                 let regression = self
                     .store
-                    .previous_to(run.id)?
+                    .previous_full_to(run.id)?
                     .is_some_and(|previous| compare(&run, &previous, DEFAULT_MAX_DROP).regressed);
                 Some(RunEntry { run, regression })
             }
@@ -157,6 +158,31 @@ mod tests {
     }
 
     #[test]
+    fn list_compares_against_the_previous_full_run_and_not_a_partial_one() {
+        let store = store_with(&[&[true, true]]);
+        store.save(&sample_run(&[false]).with_partial(true)).unwrap();
+        store.save(&sample_run(&[true, false])).unwrap();
+        store.save(&sample_run(&[true, true]).with_partial(true)).unwrap();
+
+        let entries = ListEvalRuns::new(store).execute(10).unwrap();
+
+        let flags: Vec<(i64, bool)> = entries.iter().map(|e| (e.run.id, e.regression)).collect();
+        assert_eq!(flags, [(4, false), (3, true), (2, true), (1, false)]);
+    }
+
+    #[test]
+    fn list_looks_past_the_page_for_the_previous_full_run() {
+        let store = store_with(&[&[true, true]]);
+        store.save(&sample_run(&[false]).with_partial(true)).unwrap();
+        store.save(&sample_run(&[true, false])).unwrap();
+
+        let entries = ListEvalRuns::new(store).execute(1).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].regression);
+    }
+
+    #[test]
     fn list_respects_the_limit_but_still_compares_the_last_entry() {
         let store = store_with(&[&[true, true], &[true, false]]);
 
@@ -178,6 +204,32 @@ mod tests {
         assert!(detail.comparison.unwrap().regressed);
         assert!(first.comparison.is_none() && first.previous_id.is_none());
         assert!(use_case.execute(9).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_compares_to_the_previous_full_run_skipping_partial_ones() {
+        let store = store_with(&[&[true, true]]);
+        store.save(&sample_run(&[false]).with_partial(true)).unwrap();
+        store.save(&sample_run(&[true, true])).unwrap();
+        let use_case = GetEvalRun::new(store);
+
+        let full = use_case.execute(3).unwrap().unwrap();
+        let partial = use_case.execute(2).unwrap().unwrap();
+
+        assert_eq!(full.previous_id, Some(1));
+        assert_eq!(partial.previous_id, Some(1));
+        assert!(partial.comparison.unwrap().regressed);
+    }
+
+    #[test]
+    fn status_reports_the_latest_full_run_ignoring_newer_partial_runs() {
+        let store = store_with(&[&[true, true], &[true, true]]);
+        store.save(&sample_run(&[false]).with_partial(true)).unwrap();
+
+        let status = EvalStatus::new(store).execute(provenance(), &[]).unwrap();
+
+        assert_eq!(status.latest.unwrap().run.id, 2);
+        assert!(!status.regression);
     }
 
     #[test]
