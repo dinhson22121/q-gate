@@ -1,0 +1,35 @@
+id = "go-kan9-view-counter-map-race"
+description = "KAN-9 view counter increments a shared map with no mutex, a data race under concurrent requests; it must be reported and AC-5 is not met."
+language = "go"
+
+[ticket]
+key = "KAN-9"
+title = "Add GET /items/view with view counter"
+description = "Shop admins want to see how popular an item is. GET /items/view?id= returns the item together with its view count and 200. Every successful call increments the count by one, and the returned views includes the current call. An unknown id returns 404 and an invalid id returns 400, and neither is counted as a view. Methods other than GET are not allowed (405). View counts must stay correct when many requests arrive at the same time."
+
+[[ac]]
+text = "GET /items/view?id= for an existing item -> the item and its views are returned with 200"
+expect = "met"
+
+[[ac]]
+text = "Each successful GET /items/view for an item -> its view count increases by one and the returned views includes the current call"
+expect = "met"
+
+[[ac]]
+text = "GET /items/view with an unknown or invalid id -> 404 or 400, and no view is counted"
+expect = "met"
+
+[[ac]]
+text = "Request to /items/view with a method other than GET -> 405 (Method Not Allowed)"
+expect = "met"
+
+[[ac]]
+text = "Concurrent views of the same item -> the view count is correct and no view is lost"
+expect = "not_met"
+
+[[expected]]
+file = "views.go"
+line = 17
+line_tolerance = 3
+category = "concurrency"
+min_severity = "major"

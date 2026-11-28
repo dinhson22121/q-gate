@@ -1,0 +1,130 @@
+diff --git a/main.go b/main.go
+index 52b03b3..71544cb 100644
+--- a/main.go
++++ b/main.go
+@@ -167,6 +167,8 @@ func main() {
+ 	http.HandleFunc("/logout", logoutHandler)
+ 	http.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) { userHandler(nil, w, r) })
+ 	http.HandleFunc("/file", fileHandler(dataDir))
+-	http.HandleFunc("/items", addItemHandler(NewItemStore()))
++	items := NewItemStore()
++	http.HandleFunc("/items", addItemHandler(items))
++	http.HandleFunc("/items/view", viewItemHandler(items, NewViewCounter()))
+ 	_ = http.ListenAndServe(":8080", nil)
+ }
+diff --git a/views.go b/views.go
+new file mode 100644
+index 0000000..5d838d9
+--- /dev/null
++++ b/views.go
+@@ -0,0 +1,47 @@
++package main
++
++import (
++	"net/http"
++	"strconv"
++)
++
++type ViewCounter struct {
++	counts map[int64]int
++}
++
++func NewViewCounter() *ViewCounter {
++	return &ViewCounter{counts: map[int64]int{}}
++}
++
++func (c *ViewCounter) Hit(id int64) int {
++	c.counts[id]++
++	return c.counts[id]
++}
++
++type itemView struct {
++	Item
++	Views int `json:"views"`
++}
++
++func viewItemHandler(store *ItemStore, views *ViewCounter) http.HandlerFunc {
++	return func(w http.ResponseWriter, r *http.Request) {
++		if r.Method != http.MethodGet {
++			w.Header().Set("Allow", http.MethodGet)
++			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
++			return
++		}
++		id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
++		if err != nil {
++			writeError(w, http.StatusBadRequest, "invalid id")
++			return
++		}
++		store.mu.Lock()
++		item, ok := store.items[id]
++		store.mu.Unlock()
++		if !ok {
++			writeError(w, http.StatusNotFound, "item not found")
++			return
++		}
++		writeJSON(w, http.StatusOK, itemView{Item: item, Views: views.Hit(id)})
++	}
++}
+diff --git a/views_test.go b/views_test.go
+new file mode 100644
+index 0000000..d383ec1
+--- /dev/null
++++ b/views_test.go
+@@ -0,0 +1,57 @@
++package main
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++func viewItem(store *ItemStore, views *ViewCounter, method, query string) *httptest.ResponseRecorder {
++	rec := httptest.NewRecorder()
++	viewItemHandler(store, views)(rec, httptest.NewRequest(method, "/items/view?"+query, nil))
++	return rec
++}
++
++func TestViewItemCountsEachView(t *testing.T) {
++	store, views := NewItemStore(), NewViewCounter()
++	store.Add("Mug", 9.5)
++
++	viewItem(store, views, http.MethodGet, "id=1")
++	rec := viewItem(store, views, http.MethodGet, "id=1")
++
++	if rec.Code != http.StatusOK {
++		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
++	}
++	var got itemView
++	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
++		t.Fatal(err)
++	}
++	if got.Views != 2 || got.Name != "Mug" {
++		t.Fatalf("got %+v", got)
++	}
++}
++
++func TestViewItemRejectsBadRequests(t *testing.T) {
++	cases := map[string]struct {
++		method, query string
++		want          int
++	}{
++		"unknown id": {http.MethodGet, "id=9", http.StatusNotFound},
++		"bad id":     {http.MethodGet, "id=abc", http.StatusBadRequest},
++		"post":       {http.MethodPost, "id=1", http.StatusMethodNotAllowed},
++	}
++	for name, tc := range cases {
++		t.Run(name, func(t *testing.T) {
++			store, views := NewItemStore(), NewViewCounter()
++			store.Add("Mug", 9.5)
++
++			if rec := viewItem(store, views, tc.method, tc.query); rec.Code != tc.want {
++				t.Fatalf("got %d, want %d", rec.Code, tc.want)
++			}
++			if views.counts[1] != 0 {
++				t.Fatalf("counted a view on a rejected request")
++			}
++		})
++	}
++}

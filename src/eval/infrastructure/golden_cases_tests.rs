@@ -3,17 +3,21 @@ use std::path::PathBuf;
 use super::{FsCaseRepository, GitWorkspace};
 use crate::eval::application::{CaseRepository, CaseWorkspace};
 
-const SHIPPED_CASES: [&str; 28] = [
+const SHIPPED_CASES: [&str; 32] = [
     "go-idor-order-lookup",
     "go-kan4-login",
     "go-kan5-sqli-fixed",
     "go-kan6-traversal-fixed",
     "go-kan7-items",
     "go-kan7-items-missing-validation",
+    "go-kan8-purchase-oversell",
+    "go-kan9-view-counter-map-race",
     "go-path-traversal-base-checked",
     "go-path-traversal-download",
+    "go-purchase-atomic-safe",
     "go-session-weak-random",
     "go-shop4-injection-traversal",
+    "go-view-counter-mutex-safe",
     "java-idor-order-lookup",
     "java-md5-password-and-sqli",
     "java-order-owner-checked",
