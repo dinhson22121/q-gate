@@ -1,0 +1,10 @@
+id = "py-ssrf-url-parameter"
+description = "A preview endpoint fetches any URL supplied by the caller, allowing requests to internal services and cloud metadata."
+language = "python"
+
+[[expected]]
+file = "app/preview.py"
+line = 10
+line_tolerance = 3
+category = "security"
+min_severity = "major"

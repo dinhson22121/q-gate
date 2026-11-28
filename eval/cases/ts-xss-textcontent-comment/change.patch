@@ -1,0 +1,16 @@
+diff --git a/src/comments.ts b/src/comments.ts
+index 7861698..56dbbfd 100644
+--- a/src/comments.ts
++++ b/src/comments.ts
+@@ -1,3 +1,11 @@
+ export function formatAuthor(name: string): string {
+   return name.trim() || "anonymous";
+ }
++
++export function renderComment(container: HTMLElement, author: string, text: string): void {
++  const item = document.createElement("li");
++  const label = document.createElement("strong");
++  label.textContent = formatAuthor(author);
++  item.append(label, document.createTextNode(`: ${text}`));
++  container.appendChild(item);
++}

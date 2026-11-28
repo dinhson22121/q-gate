@@ -1,0 +1,19 @@
+id = "ts-ac-product-pagination"
+description = "API-31 pagination: the page size is taken from the caller with no upper bound."
+language = "typescript"
+
+[ticket]
+key = "API-31"
+title = "Paginate the product list"
+
+[[ac]]
+text = "The default page size is 20 items"
+expect = "met"
+
+[[ac]]
+text = "The response includes the total number of products"
+expect = "met"
+
+[[ac]]
+text = "A requested page size above 100 is capped at 100"
+expect = "not_met"

@@ -3,17 +3,35 @@ use std::path::PathBuf;
 use super::{FsCaseRepository, GitWorkspace};
 use crate::eval::application::{CaseRepository, CaseWorkspace};
 
-const SHIPPED_CASES: [&str; 10] = [
+const SHIPPED_CASES: [&str; 28] = [
+    "go-idor-order-lookup",
     "go-kan4-login",
     "go-kan5-sqli-fixed",
     "go-kan6-traversal-fixed",
     "go-kan7-items",
     "go-kan7-items-missing-validation",
+    "go-path-traversal-base-checked",
+    "go-path-traversal-download",
+    "go-session-weak-random",
     "go-shop4-injection-traversal",
+    "java-idor-order-lookup",
+    "java-md5-password-and-sqli",
+    "java-order-owner-checked",
+    "java-pbkdf2-password-hash",
+    "py-ac-discount-codes",
+    "py-pagination-off-by-one",
+    "py-pickle-session-cookie",
+    "py-reset-token-weak-random",
     "py-sqli-fstring",
     "py-sqli-parameterized",
+    "py-ssrf-fixed-feed-keys",
+    "py-ssrf-url-parameter",
+    "ts-ac-product-pagination",
     "ts-command-injection",
     "ts-execfile-safe",
+    "ts-hardcoded-jwt-secret",
+    "ts-xss-innerhtml-comment",
+    "ts-xss-textcontent-comment",
 ];
 
 fn cases_dir() -> PathBuf {
@@ -71,5 +89,5 @@ fn the_golden_set_mixes_vulnerable_safe_and_criteria_cases() {
     assert!(cases.iter().any(|c| !c.forbidden.is_empty()));
     assert!(cases.iter().any(|c| c.labelled_criteria() > 0));
     let languages: std::collections::BTreeSet<_> = cases.iter().map(|c| c.language.as_str()).collect();
-    assert_eq!(languages.into_iter().collect::<Vec<_>>(), ["go", "python", "typescript"]);
+    assert_eq!(languages.into_iter().collect::<Vec<_>>(), ["go", "java", "python", "typescript"]);
 }

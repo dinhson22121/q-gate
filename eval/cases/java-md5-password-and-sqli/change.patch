@@ -1,0 +1,33 @@
+diff --git a/src/main/java/com/shop/UserRepository.java b/src/main/java/com/shop/UserRepository.java
+index 4301070..2e43641 100644
+--- a/src/main/java/com/shop/UserRepository.java
++++ b/src/main/java/com/shop/UserRepository.java
+@@ -1,6 +1,13 @@
+ package com.shop;
+ 
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
+ import java.sql.Connection;
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Statement;
++import java.util.HexFormat;
+ 
+ public class UserRepository {
+     private final Connection connection;
+@@ -8,4 +15,14 @@ public class UserRepository {
+     public UserRepository(Connection connection) {
+         this.connection = connection;
+     }
++
++    public String hashPassword(String password) throws NoSuchAlgorithmException {
++        MessageDigest digest = MessageDigest.getInstance("MD5");
++        return HexFormat.of().formatHex(digest.digest(password.getBytes(StandardCharsets.UTF_8)));
++    }
++
++    public ResultSet findByEmail(String email) throws SQLException {
++        Statement statement = connection.createStatement();
++        return statement.executeQuery("SELECT id, email FROM users WHERE email = '" + email + "'");
++    }
+ }

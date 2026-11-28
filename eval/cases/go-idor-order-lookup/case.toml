@@ -1,0 +1,10 @@
+id = "go-idor-order-lookup"
+description = "GET /order returns any order by id without checking that it belongs to the authenticated user, while the list endpoint does filter by owner."
+language = "go"
+
+[[expected]]
+file = "main.go"
+line = 37
+line_tolerance = 3
+category = "security"
+min_severity = "major"

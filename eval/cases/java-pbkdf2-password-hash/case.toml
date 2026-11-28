@@ -1,0 +1,10 @@
+id = "java-pbkdf2-password-hash"
+description = "Passwords use PBKDF2-HMAC-SHA256 with 210000 iterations, a random per-user salt and a constant-time comparison, which must not be flagged."
+language = "java"
+
+[[forbidden]]
+file = "src/main/java/com/shop/UserRepository.java"
+line = 26
+line_tolerance = 3
+category = "security"
+min_severity = "major"

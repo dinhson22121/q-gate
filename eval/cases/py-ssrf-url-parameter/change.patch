@@ -1,0 +1,16 @@
+diff --git a/app/preview.py b/app/preview.py
+index ea1d9b9..ef92786 100644
+--- a/app/preview.py
++++ b/app/preview.py
+@@ -1,2 +1,11 @@
++import requests
++
++
+ def render_preview(status, body):
+     return {"status": status, "body": body[:2000]}
++
++
++def fetch_preview(request):
++    url = request.args.get("url")
++    response = requests.get(url, timeout=5)
++    return render_preview(response.status_code, response.text)

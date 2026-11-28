@@ -1,0 +1,10 @@
+id = "py-pickle-session-cookie"
+description = "The session cookie is base64-decoded and passed to pickle.loads, which executes attacker-controlled code."
+language = "python"
+
+[[expected]]
+file = "app/session.py"
+line = 13
+line_tolerance = 3
+category = "security"
+min_severity = "major"

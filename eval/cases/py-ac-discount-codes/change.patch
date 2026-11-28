@@ -1,0 +1,23 @@
+diff --git a/app/pricing.py b/app/pricing.py
+index 539b843..3ce7eb1 100644
+--- a/app/pricing.py
++++ b/app/pricing.py
+@@ -1,2 +1,18 @@
++from datetime import date
++
++CODES = {
++    "SAVE10": {"percent": 10, "expires": date(2030, 1, 1)},
++    "OLD20": {"percent": 20, "expires": date(2020, 1, 1)},
++}
++
++
+ def line_total(price, quantity):
+     return round(price * quantity, 2)
++
++
++def apply_discount(total, code, today=None):
++    today = today or date.today()
++    entry = CODES.get(code)
++    if entry is None:
++        raise ValueError("unknown discount code")
++    return round(total * (100 - entry["percent"]) / 100, 2)

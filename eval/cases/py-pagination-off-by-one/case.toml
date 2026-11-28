@@ -1,0 +1,10 @@
+id = "py-pagination-off-by-one"
+description = "The slice end is one past the page boundary, so every page returns PAGE_SIZE + 1 items and repeats the first item of the next page."
+language = "python"
+
+[[expected]]
+file = "app/paging.py"
+line = 11
+line_tolerance = 3
+category = "correctness"
+min_severity = "major"

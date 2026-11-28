@@ -1,0 +1,22 @@
+diff --git a/src/products.ts b/src/products.ts
+index bd5a5d7..8cef5e6 100644
+--- a/src/products.ts
++++ b/src/products.ts
+@@ -2,3 +2,17 @@ export interface Product {
+   id: number;
+   name: string;
+ }
++
++export interface Page<T> {
++  items: T[];
++  total: number;
++  page: number;
++  pageSize: number;
++}
++
++const DEFAULT_PAGE_SIZE = 20;
++
++export function paginate<T>(all: T[], page = 1, pageSize = DEFAULT_PAGE_SIZE): Page<T> {
++  const start = (page - 1) * pageSize;
++  return { items: all.slice(start, start + pageSize), total: all.length, page, pageSize };
++}

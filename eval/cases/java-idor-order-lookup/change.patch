@@ -1,0 +1,22 @@
+diff --git a/src/main/java/com/shop/OrderService.java b/src/main/java/com/shop/OrderService.java
+index 0e21710..a19ce4a 100644
+--- a/src/main/java/com/shop/OrderService.java
++++ b/src/main/java/com/shop/OrderService.java
+@@ -1,6 +1,7 @@
+ package com.shop;
+ 
+ import java.util.List;
++import java.util.NoSuchElementException;
+ 
+ public class OrderService {
+     private final OrderRepository repository;
+@@ -12,4 +13,9 @@ public class OrderService {
+     public List<Order> listMine(long currentUserId) {
+         return repository.findByOwner(currentUserId);
+     }
++
++    public Order getOrder(long orderId, long currentUserId) {
++        Order order = repository.findById(orderId).orElseThrow(NoSuchElementException::new);
++        return order;
++    }
+ }

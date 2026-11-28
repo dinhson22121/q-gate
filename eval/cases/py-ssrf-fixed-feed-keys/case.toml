@@ -1,0 +1,10 @@
+id = "py-ssrf-fixed-feed-keys"
+description = "The caller only selects a feed by key from a fixed server-side table and redirects are disabled, so the fetched host is never attacker-controlled and must not be flagged."
+language = "python"
+
+[[forbidden]]
+file = "app/preview.py"
+line = 17
+line_tolerance = 3
+category = "security"
+min_severity = "major"

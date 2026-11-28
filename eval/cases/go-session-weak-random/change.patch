@@ -1,0 +1,33 @@
+diff --git a/main.go b/main.go
+index 46f393d..cf825dc 100644
+--- a/main.go
++++ b/main.go
+@@ -1,12 +1,28 @@
+ package main
+ 
+ import (
++	"encoding/hex"
+ 	"log"
++	"math/rand"
+ 	"net/http"
+ )
+ 
+ var sessions = map[string]string{}
+ 
++func newSessionID() string {
++	b := make([]byte, 16)
++	for i := range b {
++		b[i] = byte(rand.Intn(256))
++	}
++	return hex.EncodeToString(b)
++}
++
++func startSession(w http.ResponseWriter, email string) {
++	id := newSessionID()
++	sessions[id] = email
++	http.SetCookie(w, &http.Cookie{Name: "session", Value: id, HttpOnly: true, Secure: true})
++}
++
+ func main() {
+ 	log.Fatal(http.ListenAndServe(":8080", nil))
+ }
