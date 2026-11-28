@@ -3,6 +3,7 @@ use std::fmt::Write;
 use crate::eval::domain::compare::Comparison;
 use crate::eval::domain::run::{CaseSummary, EvalRun};
 use crate::eval::domain::stats::Stat;
+use crate::eval::domain::test_outcome::TestsOutcome;
 
 const CASE_WIDTH: usize = 34;
 
@@ -98,6 +99,7 @@ pub fn render_run(run: &EvalRun, comparison: Option<&Comparison>) -> String {
         }
     }
     render_false_positives(&mut out, run);
+    render_tests(&mut out, run);
     let _ = writeln!(
         out,
         "\ncost ${:.2} (this consumed Claude subscription quota) · {:.1}s of review time",
@@ -108,6 +110,17 @@ pub fn render_run(run: &EvalRun, comparison: Option<&Comparison>) -> String {
         out.push_str(&render_comparison(comparison));
     }
     out
+}
+
+fn render_tests(out: &mut String, run: &EvalRun) {
+    if !run.with_tests {
+        return;
+    }
+    let _ = writeln!(out, "\ntest agent");
+    for result in &run.results {
+        let summary = result.tests.as_ref().map_or_else(|| "no outcome recorded".to_string(), TestsOutcome::summary);
+        let _ = writeln!(out, "  {} run {}: {summary}", result.case_id, result.repetition + 1);
+    }
 }
 
 fn render_false_positives(out: &mut String, run: &EvalRun) {
@@ -240,6 +253,25 @@ mod tests {
         assert!(text.contains("by category") && text.contains("security"));
         assert!(text.contains("consumed Claude subscription quota"));
         assert!(!text.contains("REGRESSION"));
+    }
+
+    #[test]
+    fn tests_section_lists_ran_and_skipped_cases() {
+        use crate::eval::domain::test_outcome::TestsOutcome;
+        let mut ran = score("alpha", 0, &[true], 0);
+        ran.tests = Some(TestsOutcome { ran: true, scenarios: 2, passed: 2, cost_usd: 0.3, ..TestsOutcome::default() });
+        let mut skipped = score("beta", 0, &[true], 0);
+        skipped.tests = Some(TestsOutcome { notes: vec!["no go module".into()], ..TestsOutcome::default() });
+        let old = score("gamma", 0, &[true], 0);
+        let mut current = run(1, vec![ran, skipped, old], 1);
+        current.with_tests = true;
+
+        let text = render_run(&current, None);
+
+        assert!(text.contains("alpha run 1: ran 2 scenario(s): 2 passed, 0 failed, 0 inconclusive"), "{text}");
+        assert!(text.contains("beta run 1: skipped: no go module"), "{text}");
+        assert!(text.contains("gamma run 1: no outcome recorded"), "{text}");
+        assert!(!render_run(&run(2, vec![score("a", 0, &[true], 0)], 1), None).contains("test agent"));
     }
 
     #[test]

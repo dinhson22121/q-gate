@@ -50,5 +50,6 @@ pub fn score(case: &str, repetition: u32, caught: &[bool], fp: usize) -> CaseSco
         criteria: Vec::new(),
         duration_ms: 100,
         cost_usd: 0.5,
+        tests: None,
     }
 }

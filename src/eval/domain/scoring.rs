@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::case::{ExpectedFinding, ExpectedStatus, ForbiddenFinding, GoldenCase};
 use super::stats::{Counts, CriterionCounts};
+use super::test_outcome::TestsOutcome;
 use crate::review::application::{Category, CriterionStatus, Severity};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +61,8 @@ pub struct CaseScore {
     pub criteria: Vec<CriterionOutcome>,
     pub duration_ms: u64,
     pub cost_usd: f64,
+    #[serde(default)]
+    pub tests: Option<TestsOutcome>,
 }
 
 impl CaseScore {
@@ -126,6 +129,7 @@ pub fn score_case(
         criteria: score_criteria(case, statuses),
         duration_ms: measure.duration_ms,
         cost_usd: measure.cost_usd,
+        tests: None,
     }
 }
 
