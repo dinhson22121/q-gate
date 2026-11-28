@@ -10,7 +10,7 @@ use crate::review::domain::change_set::FileChange;
 use crate::review::domain::change_set::fixtures::{added, file};
 use crate::sandbox::infrastructure::LocalBackend;
 use crate::testing::application::fakes::{
-    CopySnapshots, FakeRunner, GO_ASSERTION_OUTPUT, GO_BUILD_OUTPUT, ScriptedLoop, failed_run,
+    CopySnapshots, FakeRaceProbe, FakeRunner, GO_ASSERTION_OUTPUT, GO_BUILD_OUTPUT, ScriptedLoop, failed_run,
 };
 use crate::testing::domain::classify::RawRun;
 use crate::testing::infrastructure::{ExecTestRunner, SnapshotWorkspace};
@@ -274,4 +274,65 @@ async fn unreachable_runner_makes_the_scenario_inconclusive_with_the_reason() {
     let result = run_fake(ScriptedLoop::new(happy_script("failed_assertion")), runner, Some(dir.path())).await;
     assert_eq!(result.verdict, TestVerdict::Inconclusive);
     assert!(result.note.contains("could not be started: qgate runner unavailable"), "{}", result.note);
+}
+
+const GO_MAP_CRASH_OUTPUT: &str =
+    "fatal error: concurrent map writes\n\ngoroutine 20 [running]:\nFAIL\texample.com/m/calc\t0.01s";
+
+async fn run_with_probe(probe: Arc<FakeRaceProbe>, runner: FakeRunner, dir: &Path) -> TestResult {
+    let agent = FakeAgent::with_ports(
+        Arc::new(ScriptedLoop::new(happy_script("failed_assertion"))),
+        runner,
+        snapshots(Some(dir)),
+        settings(TestLanguage::ALL.to_vec()),
+    )
+    .with_race_probe(probe);
+    let (files, requirements) = (changes(), requirements());
+    agent.run_scenario(&input(&files, &requirements, Some(dir)), &scenario()).await
+}
+
+#[tokio::test]
+async fn go_runtime_crash_is_a_failed_test_with_race_note() {
+    let dir = go_module();
+    let runner = FakeRunner::with(vec![failed_run(GO_MAP_CRASH_OUTPUT)]);
+    let result = run_fake(ScriptedLoop::new(happy_script("failed_assertion")), runner, Some(dir.path())).await;
+    assert_eq!(result.verdict, TestVerdict::FailedAssertion, "{}", result.note);
+    assert!(result.note.contains("data race"), "{}", result.note);
+}
+
+#[tokio::test]
+async fn race_detector_flag_is_added_when_the_probe_says_yes() {
+    let dir = go_module();
+    let probe = FakeRaceProbe::answering(true);
+    let runner = FakeRunner::with(vec![failed_run(GO_ASSERTION_OUTPUT)]);
+    let result = run_with_probe(probe.clone(), runner, dir.path()).await;
+    assert_eq!(result.evidence.unwrap().command, ["go", "test", "-race", "./calc", "-run", "^TestQgateS1", "-count=1"]);
+    assert_eq!(*probe.probes.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn missing_race_detector_runs_as_before_and_says_so() {
+    let dir = go_module();
+    let runner = FakeRunner::with(vec![failed_run(GO_ASSERTION_OUTPUT)]);
+    let result = run_with_probe(FakeRaceProbe::answering(false), runner, dir.path()).await;
+    assert_eq!(result.evidence.unwrap().command, ["go", "test", "./calc", "-run", "^TestQgateS1", "-count=1"]);
+    assert!(result.note.contains("race detector is unavailable"), "{}", result.note);
+}
+
+#[tokio::test]
+async fn race_probe_result_is_cached_across_scenarios() {
+    let dir = go_module();
+    let probe = FakeRaceProbe::answering(true);
+    let agent = FakeAgent::with_ports(
+        Arc::new(ScriptedLoop::new(happy_script("failed_assertion"))),
+        FakeRunner::default(),
+        snapshots(Some(dir.path())),
+        settings(TestLanguage::ALL.to_vec()),
+    )
+    .with_race_probe(probe.clone());
+    let (files, requirements) = (changes(), requirements());
+    for _ in 0..2 {
+        agent.run_scenario(&input(&files, &requirements, Some(dir.path())), &scenario()).await;
+    }
+    assert_eq!(*probe.probes.lock().unwrap(), 1);
 }

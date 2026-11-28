@@ -1,4 +1,5 @@
 use super::language::TestLanguage;
+use super::race::is_go_runtime_race;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RawRun {
@@ -62,7 +63,9 @@ pub fn classify(language: TestLanguage, run: &RawRun) -> RunClass {
 
 fn has_assertion_failure(language: TestLanguage, output: &str) -> bool {
     match language {
-        TestLanguage::Go => output.contains("--- FAIL") && output.lines().any(is_go_test_log_line),
+        TestLanguage::Go => {
+            is_go_runtime_race(output) || (output.contains("--- FAIL") && output.lines().any(is_go_test_log_line))
+        }
         TestLanguage::Java => {
             ["AssertionFailedError", "expected:<", "java.lang.AssertionError"].iter().any(|m| output.contains(m))
         }
@@ -135,6 +138,17 @@ mod tests {
         assert_eq!(classify(TestLanguage::Rust, &failed(RUST_COMPILE)), RunClass::NeedsRepair);
         let killed = RawRun { exit_code: None, output: "killed".into(), ..RawRun::default() };
         assert_eq!(classify(TestLanguage::Go, &killed), RunClass::NeedsRepair);
+    }
+
+    #[test]
+    fn go_runtime_races_are_failures_but_build_errors_still_need_repair() {
+        let crash = "fatal error: concurrent map writes\n\ngoroutine 7 [running]:\nFAIL\tshop/views\t0.02s";
+        let race = "WARNING: DATA RACE\n--- FAIL: TestQgateS6 (0.00s)\n    testing.go:1465: race detected during execution of test";
+        assert_eq!(classify(TestLanguage::Go, &failed(crash)), RunClass::FailedAssertion);
+        assert_eq!(classify(TestLanguage::Go, &failed(race)), RunClass::FailedAssertion);
+        assert_eq!(classify(TestLanguage::Rust, &failed(crash)), RunClass::NeedsRepair);
+        let build = format!("{GO_BUILD}\n{crash}");
+        assert_eq!(classify(TestLanguage::Go, &failed(&build)), RunClass::NeedsRepair);
     }
 
     #[test]

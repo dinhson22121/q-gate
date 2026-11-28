@@ -24,6 +24,10 @@ pub trait TestRunner: Send + Sync {
     fn run(&self, cwd: &Path, command: &[String], timeout: Duration) -> impl Future<Output = RawRun> + Send;
 }
 
+pub trait RaceDetectorProbe: Send + Sync {
+    fn available<'a>(&'a self, cwd: &'a Path) -> BoxFuture<'a, bool>;
+}
+
 pub struct ScenarioSnapshot {
     path: PathBuf,
     _guard: Box<dyn Any + Send + Sync>,
