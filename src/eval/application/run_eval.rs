@@ -5,6 +5,7 @@ use super::ports::{CaseRepository, CaseWorkspace, Clock, EvalError, EvalStore, L
 use crate::eval::domain::case::criterion_id;
 use crate::eval::domain::run::EvalRun;
 use crate::eval::domain::scoring::{CaseScore, ObservedFinding, RunMeasure, score_case};
+use crate::eval::domain::test_outcome::TestsOutcome;
 use crate::history::application::RunProvenance;
 use crate::review::application::{CriterionStatus, ReviewReport, TicketContext};
 
@@ -79,7 +80,7 @@ impl RunEval {
                     duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                     cost_usd: report.estimated_cost_usd.unwrap_or(0.0),
                 };
-                let score = score_report(loaded, &report, measure);
+                let score = score_report(loaded, &report, measure, options.with_tests);
                 progress.scored(&score, results.len() + 1, total);
                 results.push(score);
             }
@@ -118,7 +119,7 @@ fn review_job(loaded: &LoadedCase, root: &std::path::Path, base: &str, head: &st
     }
 }
 
-fn score_report(loaded: &LoadedCase, report: &ReviewReport, measure: RunMeasure) -> CaseScore {
+fn score_report(loaded: &LoadedCase, report: &ReviewReport, measure: RunMeasure, with_tests: bool) -> CaseScore {
     let findings: Vec<ObservedFinding> = report
         .findings
         .iter()
@@ -140,7 +141,11 @@ fn score_report(loaded: &LoadedCase, report: &ReviewReport, measure: RunMeasure)
             .collect(),
         _ => Vec::new(),
     };
-    CaseScore { content_hash: loaded.content_hash.clone(), ..score_case(&loaded.case, &findings, &statuses, measure) }
+    CaseScore {
+        content_hash: loaded.content_hash.clone(),
+        tests: with_tests.then(|| TestsOutcome::from_report(report.agents.as_ref())),
+        ..score_case(&loaded.case, &findings, &statuses, measure)
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +205,41 @@ mod tests {
         assert!((run.metrics.cost_usd - 0.5).abs() < 1e-9);
         assert_eq!(fixture.store.get(1).unwrap().unwrap(), run);
         assert_eq!(fixture.workspace.materialized(), 1, "one workspace per case, shared by its repetitions");
+    }
+
+    #[tokio::test]
+    async fn with_tests_records_the_test_agent_outcome_per_result() {
+        let mut ran = catching();
+        ran.agents = Some(crate::review::application::AgentReport {
+            tests: vec![crate::review::application::TestResult {
+                scenario_id: "S1".into(),
+                language: "go".into(),
+                verdict: crate::review::application::TestVerdict::Passed,
+                evidence: None,
+                note: String::new(),
+                reason: None,
+            }],
+            cost_usd: Some(0.2),
+            ..crate::review::application::AgentReport::default()
+        });
+        let fixture = Fixture::new(&[("a-case", SECURITY_AT_12)], vec![Ok(ran), Ok(catching())]);
+        let options = EvalOptions { with_tests: true, runs: 2, ..EvalOptions::default() };
+
+        let run = fixture.use_case().execute(&options, provenance(), &NoEvalProgress).await.unwrap();
+
+        let first = run.results[0].tests.as_ref().unwrap();
+        assert!(first.ran && first.passed == 1 && (first.cost_usd - 0.2).abs() < 1e-9);
+        let second = run.results[1].tests.as_ref().unwrap();
+        assert!(!second.ran && second.notes == ["no agent report was produced"]);
+    }
+
+    #[tokio::test]
+    async fn without_tests_no_outcome_is_recorded() {
+        let fixture = Fixture::new(&[("a-case", SECURITY_AT_12)], vec![Ok(catching())]);
+
+        let run = fixture.use_case().execute(&EvalOptions::default(), provenance(), &NoEvalProgress).await.unwrap();
+
+        assert!(run.results[0].tests.is_none());
     }
 
     #[tokio::test]

@@ -66,6 +66,9 @@ impl EvalProgress for StderrProgress {
             score.cost_usd,
             score.duration_ms as f64 / 1000.0
         );
+        if let Some(tests) = &score.tests {
+            eprintln!("qgate eval: [{done}/{total}] {} tests {}", score.case_id, tests.summary());
+        }
     }
 }
 

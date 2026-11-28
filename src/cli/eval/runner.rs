@@ -108,7 +108,8 @@ async fn review(context: &Arc<AppContext>, config: &Config, job: &ReviewJob) -> 
     let mut tests_only = server.clone();
     tests_only.agents.enabled = true;
     tests_only.agents.tests.enabled = true;
-    tests_only.agents.ticket_analyst.enabled = false;
+    tests_only.agents.ticket_analyst.enabled = true;
+    tests_only.agents.ticket_analyst.use_description = false;
     tests_only.agents.architecture.enabled = false;
     tests_only.figma.enabled = false;
     let agent_model = context.structured_model(&server.agents.model, effort_name(&server))?;
