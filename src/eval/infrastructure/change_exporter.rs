@@ -2,7 +2,7 @@ use std::path::Path;
 
 use futures::future::BoxFuture;
 
-use super::git::{git_bytes, git_text, is_safe_rev};
+use super::git::{is_safe_rev, user_repo_bytes as git_bytes, user_repo_text as git_text};
 use crate::eval::application::{BaseFile, ChangeExporter, EvalError, ExportedChange};
 use crate::eval::domain::case::is_safe_relative_path;
 
@@ -34,7 +34,7 @@ async fn export(repo: &Path, commit: &str, base_branch: &str) -> Result<Exported
     }
     let head = git_text(repo, &["rev-parse", "--verify", &format!("{commit}^{{commit}}")])
         .await
-        .map_err(|_| import_error(format!("commit {commit} is not in {}", repo.display())))?;
+        .map_err(|e| import_error(format!("commit {commit} is not in {}: {}", repo.display(), reason(&e))))?;
     let base = merge_base(repo, &head, base_branch).await?;
     let base_files = read_tree(repo, &base).await?;
     let patch = git_bytes(
@@ -47,6 +47,13 @@ async fn export(repo: &Path, commit: &str, base_branch: &str) -> Result<Exported
     }
     let patch = String::from_utf8(patch).map_err(|_| import_error("the change is not valid UTF-8 text"))?;
     Ok(ExportedChange { base_files, patch })
+}
+
+fn reason(error: &EvalError) -> String {
+    match error {
+        EvalError::Workspace(message) => message.clone(),
+        other => other.to_string(),
+    }
 }
 
 async fn merge_base(repo: &Path, head: &str, base_branch: &str) -> Result<String, EvalError> {
@@ -123,6 +130,27 @@ mod tests {
         git(root, &["commit", "-q", "-m", "feature two"]).await;
         let head = git(root, &["rev-parse", "HEAD"]).await;
         (dir, base, head)
+    }
+
+    #[tokio::test]
+    async fn a_missing_commit_reports_the_git_reason() {
+        let (dir, _, _) = repo_with_feature_branch().await;
+
+        let error = GitChangeExporter.export(dir.path(), &"0".repeat(40), "main").await.unwrap_err();
+
+        let EvalError::Import(message) = error else { panic!("{error}") };
+        assert!(message.contains("is not in") && message.contains("git rev-parse"), "{message}");
+    }
+
+    #[test]
+    fn the_user_repo_is_trusted_by_its_canonical_path() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let args = crate::eval::infrastructure::git::safe_directory_args(dir.path());
+
+        assert_eq!(args[0], "-c");
+        let expected = dir.path().canonicalize().unwrap();
+        assert_eq!(args[1], format!("safe.directory={}", expected.display()));
     }
 
     #[tokio::test]
