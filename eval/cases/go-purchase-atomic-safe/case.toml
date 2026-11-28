@@ -44,10 +44,3 @@ line = 133
 line_tolerance = 3
 category = "concurrency"
 min_severity = "major"
-
-[[forbidden]]
-file = "items.go"
-line = 130
-line_tolerance = 10
-category = "security"
-min_severity = "major"
