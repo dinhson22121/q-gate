@@ -336,3 +336,30 @@ async fn race_probe_result_is_cached_across_scenarios() {
     }
     assert_eq!(*probe.probes.lock().unwrap(), 1);
 }
+
+async fn fingerprint(probe: Option<Arc<FakeRaceProbe>>, files: &[FileChange], dir: Option<&Path>) -> String {
+    let mut agent = FakeAgent::with_ports(
+        Arc::new(ScriptedLoop::new(happy_script("failed_assertion"))),
+        FakeRunner::default(),
+        snapshots(dir),
+        settings(TestLanguage::ALL.to_vec()),
+    );
+    if let Some(probe) = probe {
+        agent = agent.with_race_probe(probe);
+    }
+    let requirements = requirements();
+    agent.environment(&input(files, &requirements, dir)).await
+}
+
+#[tokio::test]
+async fn environment_fingerprint_reflects_the_race_detector_decision() {
+    let dir = go_module();
+    let go = changes();
+    let dir = Some(dir.path());
+    assert_eq!(fingerprint(Some(FakeRaceProbe::answering(true)), &go, dir).await, "go-race:on");
+    assert_eq!(fingerprint(Some(FakeRaceProbe::answering(false)), &go, dir).await, "go-race:off");
+    assert_eq!(fingerprint(None, &go, dir).await, "");
+    assert_eq!(fingerprint(Some(FakeRaceProbe::answering(true)), &go, None).await, "");
+    let python = vec![file("app/main.py", 1, vec![added(1, "x = 1")], Some("x = 1\n"))];
+    assert_eq!(fingerprint(Some(FakeRaceProbe::answering(true)), &python, dir).await, "");
+}

@@ -59,12 +59,17 @@ impl ContentIds for FakeIds {
 struct CannedAgent {
     result: TestResult,
     calls: Mutex<u32>,
+    environment: Mutex<String>,
 }
 
 impl TestAgent for CannedAgent {
     fn run<'a>(&'a self, _input: &'a AgentInput<'a>, _scenario: &'a TestScenario) -> BoxFuture<'a, TestResult> {
         *self.calls.lock().unwrap() += 1;
         Box::pin(async move { self.result.clone() })
+    }
+
+    fn environment<'a>(&'a self, _input: &'a AgentInput<'a>) -> BoxFuture<'a, String> {
+        Box::pin(async move { self.environment.lock().unwrap().clone() })
     }
 }
 
@@ -126,7 +131,7 @@ struct Harness {
 }
 
 fn harness(res: TestResult, ids: Arc<FakeIds>, tags: CacheTags, no_cache: bool, cache: Arc<MemoryCache>) -> Harness {
-    let inner = Arc::new(CannedAgent { result: res, calls: Mutex::new(0) });
+    let inner = Arc::new(CannedAgent { result: res, calls: Mutex::new(0), environment: Mutex::default() });
     let agent = CachingTestAgent::new(inner.clone(), cache.clone(), ids, tags, no_cache);
     Harness { agent, inner, cache }
 }
@@ -310,4 +315,27 @@ async fn root_module_with_local_replace_is_still_cached_because_the_whole_tree_i
     run(&h, &files, "aaa").await;
     run(&h, &files, "aaa").await;
     assert_eq!(calls(&h), 1);
+}
+
+#[tokio::test]
+async fn execution_environment_is_part_of_the_key() {
+    let cache: Arc<MemoryCache> = Arc::default();
+    let files = files();
+    let with_env = |env: &str| {
+        let h = harness(result(TestVerdict::Passed, "svc/calc/calc.go"), ids(), tags(), false, cache.clone());
+        *h.inner.environment.lock().unwrap() = env.to_string();
+        h
+    };
+    let no_race = with_env("go-race:off");
+    run(&no_race, &files, "aaa").await;
+    assert_eq!(calls(&no_race), 1);
+
+    let race = with_env("go-race:on");
+    let res = run(&race, &files, "aaa").await;
+    assert_eq!(calls(&race), 1, "a different environment must miss");
+    assert!(!res.note.starts_with("reused"));
+
+    let again = with_env("go-race:on");
+    assert!(run(&again, &files, "aaa").await.note.starts_with("reused"));
+    assert_eq!(calls(&again), 0);
 }
